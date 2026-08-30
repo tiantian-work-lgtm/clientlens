@@ -23,7 +23,6 @@ import {
   Link2,
   ListChecks,
   LockKeyhole,
-  MoreHorizontal,
   Pencil,
   Plus,
   RefreshCw,
@@ -331,7 +330,6 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
                   {renaming === task.id ? (
                     <input autoFocus value={draftName} onChange={(e) => setDraftName(e.target.value)} onClick={(e) => e.stopPropagation()} onBlur={() => rename(task)} onKeyDown={(e) => e.key === "Enter" && rename(task)} />
                   ) : <strong>{task.name}</strong>}
-                  <MoreHorizontal size={16} className="task-more" />
                 </div>
                 <div className="task-meta"><span>{meta.label}</span><span>·</span><span>{task.updatedAt}</span></div>
                 <div className="task-bottom">
@@ -377,7 +375,6 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
 
           <ReportCard icon={FileText} title="对话总结" tone="violet">
             <p className="summary-text">{activeTask.report.summary}</p>
-            <button className="text-link">查看分析依据 <ChevronRight size={14} /></button>
           </ReportCard>
 
           <div className="split-cards">
@@ -456,7 +453,7 @@ function AnalysisFailed({ task, onRetry }: { task: CustomerTask; onRetry: () => 
 }
 
 function ReportCard({ icon: Icon, title, tone, featured, children }: React.PropsWithChildren<{ icon: typeof Sparkles; title: string; tone: string; featured?: boolean }>) {
-  return <article className={`report-card ${featured ? "featured" : ""}`}><header><span className={`card-icon ${tone}`}><Icon size={17} /></span><h3>{title}</h3><button aria-label="更多"><MoreHorizontal size={18} /></button></header><div className="card-body">{children}</div></article>;
+  return <article className={`report-card ${featured ? "featured" : ""}`}><header><span className={`card-icon ${tone}`}><Icon size={17} /></span><h3>{title}</h3></header><div className="card-body">{children}</div></article>;
 }
 
 const confirmationState: Record<ConfirmationStatus, { label: string; className: string }> = {
@@ -847,7 +844,7 @@ function KnowledgeView({ kind }: { kind: "scripts" | "products" }) {
     </div>
     <div className="table-card">
       <div className="table-toolbar"><label className="search-box"><Search size={16} /><input placeholder={scripts ? "搜索话术、场景或标签" : "搜索产品或分类"} /></label><button className="filter-button">全部分类 <ChevronDown size={14} /></button><button className="filter-button">全部状态 <ChevronDown size={14} /></button><button className="secondary-button"><Upload size={16} />批量导入</button></div>
-      {scripts ? <table><thead><tr><th>话术名称</th><th>销售阶段</th><th>关联产品</th><th>语言</th><th>状态</th><th>使用次数</th><th /></tr></thead><tbody>{scriptRows.map((row) => <tr key={row.title}><td><div className="name-cell"><span className="doc-icon"><FileText size={16} /></span><strong>{row.title}</strong></div></td><td><span className="table-tag">{row.stage}</span></td><td>{row.product}</td><td>{row.language}</td><td><span className={`publish-state ${row.status}`}>{row.status}</span></td><td>{row.used}</td><td><MoreHorizontal size={17} /></td></tr>)}</tbody></table> : <table><thead><tr><th>产品名称</th><th>分类</th><th>关联文件</th><th>关联话术</th><th>资料完整度</th><th>最后更新</th><th /></tr></thead><tbody>{productRows.map((row) => <tr key={row.name}><td><div className="name-cell"><span className="product-icon"><FlaskConical size={16} /></span><strong>{row.name}</strong></div></td><td><span className="table-tag">{row.category}</span></td><td>{row.docs} 个</td><td>{row.scripts} 条</td><td><div className="completion"><i><b style={{ width: `${row.completeness}%` }} /></i><span>{row.completeness}%</span></div></td><td>{row.updated}</td><td><MoreHorizontal size={17} /></td></tr>)}</tbody></table>}
+      {scripts ? <table><thead><tr><th>话术名称</th><th>销售阶段</th><th>关联产品</th><th>语言</th><th>状态</th><th>使用次数</th></tr></thead><tbody>{scriptRows.map((row) => <tr key={row.title}><td><div className="name-cell"><span className="doc-icon"><FileText size={16} /></span><strong>{row.title}</strong></div></td><td><span className="table-tag">{row.stage}</span></td><td>{row.product}</td><td>{row.language}</td><td><span className={`publish-state ${row.status}`}>{row.status}</span></td><td>{row.used}</td></tr>)}</tbody></table> : <table><thead><tr><th>产品名称</th><th>分类</th><th>关联文件</th><th>关联话术</th><th>资料完整度</th><th>最后更新</th></tr></thead><tbody>{productRows.map((row) => <tr key={row.name}><td><div className="name-cell"><span className="product-icon"><FlaskConical size={16} /></span><strong>{row.name}</strong></div></td><td><span className="table-tag">{row.category}</span></td><td>{row.docs} 个</td><td>{row.scripts} 条</td><td><div className="completion"><i><b style={{ width: `${row.completeness}%` }} /></i><span>{row.completeness}%</span></div></td><td>{row.updated}</td></tr>)}</tbody></table>}
     </div>
   </section>;
 }

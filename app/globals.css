@@ -76,7 +76,6 @@ button { color: inherit; }
 .task-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .task-row strong { font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
 .task-row input { flex: 1; min-width: 0; border: 1px solid #bcb5ff; border-radius: 5px; padding: 3px 5px; font-size: 11px; outline: none; }
-.task-more { color: #a9acb7; flex: none; }
 .source-icon { width: 25px; height: 25px; border-radius: 7px; display: grid; place-items: center; flex: none; }
 .source-icon.blue { color: #4177d2; background: #e9f1ff; }.source-icon.green { color: #278d62; background: #e8f7ef; }.source-icon.amber { color: #b57a20; background: #fff3da; }
 .task-meta, .task-bottom { display: flex; align-items: center; gap: 5px; color: var(--muted-2); font-size: 9.5px; margin-left: 33px; margin-top: 5px; }
@@ -107,11 +106,10 @@ button { color: inherit; }
 .report-card { background: white; border: 1px solid var(--line); border-radius: 13px; margin-bottom: 12px; box-shadow: 0 4px 13px rgba(28,31,45,.025); overflow: hidden; }
 .report-card.featured { border-color: #dcd6ff; box-shadow: 0 7px 22px rgba(92,76,196,.08); }
 .report-card > header { height: 48px; display: flex; align-items: center; padding: 0 16px; border-bottom: 1px solid #f0f1f5; gap: 9px; }
-.report-card > header h3 { font-size: 12.5px; margin: 0; flex: 1; }.report-card > header button { border: 0; background: transparent; color: #a2a5b1; cursor: pointer; }
+.report-card > header h3 { font-size: 12.5px; margin: 0; flex: 1; }
 .card-icon { width: 27px; height: 27px; border-radius: 8px; display: grid; place-items: center; }.card-icon.violet { color: #6353dc; background: #efedff; }.card-icon.blue { color: #3475df; background: #eaf2ff; }.card-icon.cyan { color: #2c8fac; background: #e9f8fb; }.card-icon.orange { color: #d67835; background: #fff1e5; }.card-icon.green { color: #2b9d68; background: #e9f7ef; }.card-icon.amber { color: #bd8321; background: #fff4dc; }
 .card-body { padding: 15px 17px 16px; }
 .summary-text { margin: 0; font-size: 11.5px; line-height: 1.85; color: #4f5360; }
-.text-link { border: 0; background: transparent; color: var(--violet); display: flex; align-items: center; padding: 10px 0 0; font-size: 10px; cursor: pointer; }
 .split-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }.split-cards .report-card { margin: 0 0 12px; }
 .tag-cloud { display: flex; flex-wrap: wrap; gap: 6px; }.tag-cloud span, .customer-tags span { padding: 5px 8px; border-radius: 6px; background: #f2f4f8; color: #626674; font-size: 9px; }
 .mini-metrics { margin-top: 14px; display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }.mini-metrics small, .mini-metrics strong { display: block; font-size: 9px; }.mini-metrics small { color: var(--muted-2); }.mini-metrics strong { margin: 3px 0 6px; font-size: 10.5px; }
