@@ -61,6 +61,8 @@ export interface CustomerTask {
   name: string;
   source: SourceType;
   status: TaskStatus;
+  analysisStep?: "importing" | "analyzing";
+  analysisError?: string;
   updatedAt: string;
   customer: {
     name: string;

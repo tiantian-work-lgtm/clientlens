@@ -229,6 +229,7 @@ export default function Home() {
       {showNewTask && (
         <NewTaskModal
           onClose={() => setShowNewTask(false)}
+          onUpdate={updateTask}
           onCreate={(task) => {
             setTasks((items) => [task, ...items]);
             setActiveTaskId(task.id);
@@ -252,6 +253,7 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
   const [draftName, setDraftName] = useState("");
   const [showRaw, setShowRaw] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
+  const isAnalyzing = analyzing || activeTask.status === "analyzing";
   const filtered = tasks.filter((task) => task.name.toLowerCase().includes(taskSearch.toLowerCase()));
 
   const rename = (task: CustomerTask) => {
@@ -262,7 +264,7 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
 
   const reanalyze = async () => {
     setAnalyzing(true);
-    onUpdate({ ...activeTask, status: "analyzing" });
+    onUpdate({ ...activeTask, status: "analyzing", analysisStep: "analyzing", analysisError: undefined });
     try {
       const response = await fetch("/api/analyze", {
         method: "POST",
@@ -271,9 +273,10 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
       });
       const data = await response.json();
       const provider = data.provider === "deepseek" ? "deepseek" : "openai";
-      onUpdate({ ...activeTask, provider, model: provider === "openai" ? "GPT" : "DeepSeek", report: data.report ? normalizeTask({ ...activeTask, report: data.report }).report : activeTask.report, status: "ready", updatedAt: "刚刚" });
-    } catch {
-      onUpdate({ ...activeTask, status: "failed" });
+      if (!response.ok) throw new Error(data.error || "AI 分析失败");
+      onUpdate({ ...activeTask, provider, model: provider === "openai" ? "GPT" : "DeepSeek", report: data.report ? normalizeTask({ ...activeTask, report: data.report }).report : activeTask.report, status: "ready", analysisStep: undefined, analysisError: undefined, updatedAt: "刚刚" });
+    } catch (error) {
+      onUpdate({ ...activeTask, status: "failed", analysisStep: undefined, analysisError: error instanceof Error ? error.message : "AI 分析失败" });
     } finally {
       setAnalyzing(false);
     }
@@ -322,7 +325,7 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
           <div className="toolbar-actions">
             <button className="secondary-button" onClick={() => setShowRaw(true)}><FileText size={16} />原始聊天</button>
             <button className="secondary-button"><Upload size={16} />导出</button>
-            <button className="primary-button" onClick={reanalyze} disabled={analyzing}><RefreshCw size={16} className={analyzing ? "spin" : ""} />{analyzing ? "分析中…" : "重新分析"}</button>
+            <button className="primary-button" onClick={reanalyze} disabled={isAnalyzing}><RefreshCw size={16} className={isAnalyzing ? "spin" : ""} />{isAnalyzing ? "分析中…" : "重新分析"}</button>
           </div>
         </div>
 
@@ -330,7 +333,11 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
           <div className="stale-banner"><CircleAlert size={17} /><div><strong>发现新的聊天消息</strong><span>当前报告基于旧记录，建议同步并重新分析。</span></div><button onClick={reanalyze}>立即更新</button></div>
         )}
 
-        <div className="report-content">
+        {activeTask.status === "analyzing" ? (
+          <AnalysisLoading task={activeTask} />
+        ) : activeTask.status === "failed" ? (
+          <AnalysisFailed task={activeTask} onRetry={reanalyze} />
+        ) : <div className="report-content">
           <div className="report-intro">
             <div className="ai-orb"><Sparkles size={22} /></div>
             <div><span>AI ANALYSIS</span><h2>{activeTask.customer.name} 的对话洞察</h2><p>基于 {activeTask.rawConversation.split("\n").length} 条对话 · {activeTask.model} · 置信度 {Math.round(activeTask.report.confidence * 100)}%</p></div>
@@ -378,12 +385,41 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
             <div className="action-list">{activeTask.report.nextActions.map((item, i) => <div key={item}><span>{i + 1}</span><p>{item}</p></div>)}</div>
             <div className="reply-box"><div><Bot size={16} /><strong>建议回复</strong><button onClick={() => navigator.clipboard.writeText(activeTask.report.suggestedReply)}><Copy size={14} />复制原文</button></div><p>{activeTask.report.suggestedReply}</p><div className="reply-translation"><span>中文核对</span><p>{activeTask.report.suggestedReplyTranslation}</p></div></div>
           </ReportCard>
-        </div>
+        </div>}
       </section>
 
-      <CustomerPanel task={activeTask} onUpdate={onUpdate} onAnalyze={reanalyze} analyzing={analyzing} />
+      <CustomerPanel task={activeTask} onUpdate={onUpdate} onAnalyze={reanalyze} analyzing={isAnalyzing} />
 
       {showRaw && <RawDrawer task={activeTask} onClose={() => setShowRaw(false)} />}
+    </div>
+  );
+}
+
+function AnalysisLoading({ task }: { task: CustomerTask }) {
+  const importing = task.analysisStep === "importing";
+  return (
+    <div className="analysis-state-card loading">
+      <div className="analysis-loader"><Sparkles size={25} /><i /><i /><i /></div>
+      <span className="eyebrow">AI ANALYSIS</span>
+      <h2>{importing ? "正在同步客户聊天记录" : "正在生成客户分析报告"}</h2>
+      <p>{importing ? "正在从 SaleSmartly 获取并整理该客户的历史消息…" : "AI 正在识别客户画像、销售阶段、异议和下一步建议…"}</p>
+      <div className="analysis-steps">
+        <span className={importing ? "active" : "done"}><Check size={13} />读取聊天记录</span>
+        <span className={!importing ? "active" : ""}><Sparkles size={13} />AI 结构化分析</span>
+        <span><FileText size={13} />生成分析报告</span>
+      </div>
+    </div>
+  );
+}
+
+function AnalysisFailed({ task, onRetry }: { task: CustomerTask; onRetry: () => void }) {
+  return (
+    <div className="analysis-state-card failed">
+      <span className="state-icon"><CircleAlert size={27} /></span>
+      <span className="eyebrow">ANALYSIS FAILED</span>
+      <h2>本次分析未完成</h2>
+      <p>{task.analysisError || "AI 服务暂时不可用，请稍后重试。"}</p>
+      <button className="primary-button" onClick={onRetry}><RefreshCw size={15} />重新分析</button>
     </div>
   );
 }
@@ -551,7 +587,7 @@ interface SaleSmartlyCustomerOption {
   lastMessageAt: string;
 }
 
-function NewTaskModal({ onClose, onCreate }: { onClose: () => void; onCreate: (task: CustomerTask) => void }) {
+function NewTaskModal({ onClose, onCreate, onUpdate }: { onClose: () => void; onCreate: (task: CustomerTask) => void; onUpdate: (task: CustomerTask) => void }) {
   const [step, setStep] = useState<ImportStep>("source");
   const [conversation, setConversation] = useState("");
   const [fileName, setFileName] = useState("");
@@ -593,50 +629,79 @@ function NewTaskModal({ onClose, onCreate }: { onClose: () => void; onCreate: (t
   const create = async () => {
     setCreating(true);
     setSourceError("");
-    try {
     const source = step === "source" ? "text" : step;
     const selectedCustomer = customers.find((item) => item.id === selectedCustomerId);
-    if (source === "salesmartly" && !selectedCustomer) throw new Error("请先选择一个 SaleSmartly 客户");
-    let importedConversation = conversation;
-    let importedMessageCount = 0;
-    if (source === "salesmartly" && selectedCustomer) {
-      const response = await fetch(`/api/salesmartly/messages?chatUserId=${encodeURIComponent(selectedCustomer.id)}`, { cache: "no-store" });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "读取聊天记录失败");
-      importedConversation = data.conversation || "";
-      importedMessageCount = data.messageCount || 0;
-      if (!importedConversation.trim()) {
-        const rawCount = Number(data.rawMessageCount ?? 0);
-        const total = Number(data.total ?? 0);
-        if (rawCount === 0) {
-          throw new Error(`SaleSmartly 消息接口返回 0 条记录（total: ${total}）。请确认该客户在当前 Project ID 下确实存在聊天内容。`);
-        }
-        throw new Error(
-          `SaleSmartly 返回 ${rawCount} 条记录，但均为系统通知或已撤回消息（系统 ${Number(data.systemMessageCount ?? 0)} 条，撤回 ${Number(data.withdrawnMessageCount ?? 0)} 条）。`,
-        );
-      }
+    if (source === "salesmartly" && !selectedCustomer) {
+      setSourceError("请先选择一个 SaleSmartly 客户");
+      setCreating(false);
+      return;
     }
-    if (!importedConversation.trim()) importedConversation = "Customer: Please send me more information about your product and pricing.";
-    const analysisResponse = await fetch("/api/analyze", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ conversation: importedConversation }) });
-    const analysis = await analysisResponse.json();
-    if (!analysisResponse.ok) throw new Error(analysis.error || "AI 分析失败");
     const name = source === "salesmartly" ? selectedCustomer?.name || "SaleSmartly 客户" : customerName || "新客户";
-    const provider = analysis.provider === "deepseek" ? "deepseek" : "openai";
-    onCreate(normalizeTask({
+    const task: CustomerTask = normalizeTask({
       id: `task-${Date.now()}`,
-      name: `${name} · ${source === "salesmartly" ? `${importedMessageCount} 条消息` : "新分析"}`,
+      name: `${name} · 正在分析`,
       source,
-      status: "ready",
+      status: "analyzing",
+      analysisStep: source === "salesmartly" ? "importing" : "analyzing",
       updatedAt: "刚刚",
-      customer: { name, externalId: selectedCustomer?.id, country: selectedCustomer?.country || "待识别", owner: "Tina", product: "待识别", channel: selectedCustomer?.channel || sourceMeta[source].label, lastMessageAt: selectedCustomer?.lastMessageAt || new Date().toLocaleString("zh-CN") },
-      rawConversation: importedConversation,
-      report: analysis.report || { ...demoReport, stage: "初次询盘与客户背调", parallelStages: ["信任建立"], confidence: 0.74 },
+      customer: {
+        name,
+        externalId: selectedCustomer?.id,
+        country: selectedCustomer?.country || "待识别",
+        owner: "Tina",
+        product: "待识别",
+        channel: selectedCustomer?.channel || sourceMeta[source].label,
+        lastMessageAt: selectedCustomer?.lastMessageAt || new Date().toLocaleString("zh-CN"),
+      },
+      rawConversation: conversation,
+      report: { ...demoReport, confidence: 0 },
       progress: defaultProgress.map((item) => ({ ...item, state: "todo", locked: false })),
-      provider,
-      model: provider === "openai" ? "GPT" : "DeepSeek",
-    }));
+      provider: "deepseek",
+      model: "AI",
+    });
+    // 立即创建并选中任务；耗时的同步和分析继续在后台完成。
+    onCreate(task);
+    let workingTask = task;
+    try {
+      let importedConversation = conversation;
+      let importedMessageCount = 0;
+      if (source === "salesmartly" && selectedCustomer) {
+        const response = await fetch(`/api/salesmartly/messages?chatUserId=${encodeURIComponent(selectedCustomer.id)}`, { cache: "no-store" });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "读取聊天记录失败");
+        importedConversation = data.conversation || "";
+        importedMessageCount = data.messageCount || 0;
+        if (!importedConversation.trim()) {
+          const rawCount = Number(data.rawMessageCount ?? 0);
+          const total = Number(data.total ?? 0);
+          if (rawCount === 0) {
+            throw new Error(`SaleSmartly 消息接口返回 0 条记录（total: ${total}）。请确认该客户在当前 Project ID 下确实存在聊天内容。`);
+          }
+          throw new Error(
+            `SaleSmartly 返回 ${rawCount} 条记录，但均为系统通知或已撤回消息（系统 ${Number(data.systemMessageCount ?? 0)} 条，撤回 ${Number(data.withdrawnMessageCount ?? 0)} 条）。`,
+          );
+        }
+        workingTask = { ...workingTask, rawConversation: importedConversation, name: `${name} · ${importedMessageCount} 条消息`, analysisStep: "analyzing" };
+        onUpdate(workingTask);
+      }
+      if (!importedConversation.trim()) importedConversation = "Customer: Please send me more information about your product and pricing.";
+      const analysisResponse = await fetch("/api/analyze", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ conversation: importedConversation }) });
+      const analysis = await analysisResponse.json();
+      if (!analysisResponse.ok) throw new Error(analysis.error || "AI 分析失败");
+      const provider = analysis.provider === "deepseek" ? "deepseek" : "openai";
+      onUpdate(normalizeTask({
+        ...workingTask,
+        name: source === "salesmartly" ? `${name} · ${importedMessageCount} 条消息` : `${name} · 新分析`,
+        status: "ready",
+        analysisStep: undefined,
+        analysisError: undefined,
+        rawConversation: importedConversation,
+        report: analysis.report || demoReport,
+        provider,
+        model: provider === "openai" ? "GPT" : "DeepSeek",
+      }));
     } catch (error) {
-      setSourceError(error instanceof Error ? error.message : "创建分析任务失败");
+      onUpdate({ ...workingTask, status: "failed", analysisStep: undefined, analysisError: error instanceof Error ? error.message : "创建分析任务失败" });
     } finally { setCreating(false); }
   };
 
