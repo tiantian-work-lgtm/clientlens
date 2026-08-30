@@ -1058,6 +1058,30 @@ export async function analyzeWithProvider(provider: Provider, conversation: stri
 
 type HesitationModelResult = Omit<HesitationAnalysis, "analyzedAt">;
 
+const hesitationJsonExample: HesitationModelResult = {
+  readNoReplyStatus: "无法判断",
+  readNoReplyReason: "根据真实聊天说明是否存在已读未回或末条销售消息未获回复",
+  readNoReplyEvidenceMessageId: "",
+  readNoReplyEvidenceQuote: "",
+  overallCustomerPerspective: "站在客户视角总结其可能如何看待整段沟通，并区分事实与推断",
+  signals: [{
+    title: "根据客户原文概括的具体犹豫点",
+    kind: "含蓄犹豫",
+    severity: "中",
+    customerPerspective: "使用限定语说明客户可能如何看待该问题",
+    evidenceMessageId: "M00001",
+    evidenceQuote: "必须替换为该编号消息中的客户逐字原文",
+    reasoning: "解释原文为什么可能阻碍当前推进",
+    confidence: 0.7,
+    followUpGoal: "说明下一次跟进要解决的具体问题",
+    followUpTiming: "根据聊天节奏给出建议时机",
+    suggestedMessage: "A natural follow-up message in the customer's language.",
+    suggestedMessageTranslation: "上一条跟进消息的自然简体中文翻译。",
+  }],
+  strategy: ["根据真实聊天中影响最大的具体问题安排第一步跟进"],
+  confidence: 0.5,
+};
+
 const hesitationInstruction = `${commonPrompt}
 这是一次用户主动触发的深度复盘，不属于首次常规分析。请按消息顺序细看完整对话，并站在客户视角识别：明确异议、延后说辞、含蓄犹豫和未回复风险。延后说辞包括“稍后看看”“研究后回复”“之后再说”等推迟决策表达；含蓄犹豫只能作为有证据的可能性推断，禁止声称读懂客户内心或把推断写成事实。
 每个 signals 项必须引用一条真实消息的 M 编号及逐字原文，解释为什么该表达可能阻碍推进，并分别给出跟进目标、建议时机、可直接发送的客户语言消息及自然简体中文翻译。没有原文依据的点必须删除，不得为追求数量而虚构。
@@ -1065,7 +1089,16 @@ readNoReplyStatus 只有输入明确包含已读标记时才能写“已确认�
 overallCustomerPerspective 要总结客户此刻可能如何看待整个沟通过程，并明确区分事实与推断。strategy 提供多点跟进顺序，优先解决高影响问题，避免连续轰炸、施压和重复发送相同内容。只输出符合字段要求的合法 JSON。`;
 
 function validateHesitationResult(result: HesitationModelResult, messages: ParsedConversationMessage[], conversation: string, final: boolean) {
-  if (!result?.readNoReplyStatus || !result.readNoReplyReason?.trim() || !result.overallCustomerPerspective?.trim() || !Array.isArray(result.signals) || !Array.isArray(result.strategy) || !result.strategy.length || !Number.isFinite(result.confidence)) throw new Error("深度犹豫分析字段不完整");
+  const missing: string[] = [];
+  if (!result?.readNoReplyStatus) missing.push("readNoReplyStatus");
+  if (!result?.readNoReplyReason?.trim()) missing.push("readNoReplyReason");
+  if (typeof result?.readNoReplyEvidenceMessageId !== "string") missing.push("readNoReplyEvidenceMessageId");
+  if (typeof result?.readNoReplyEvidenceQuote !== "string") missing.push("readNoReplyEvidenceQuote");
+  if (!result?.overallCustomerPerspective?.trim()) missing.push("overallCustomerPerspective");
+  if (!Array.isArray(result?.signals)) missing.push("signals");
+  if (!Array.isArray(result?.strategy) || !result.strategy.length) missing.push("strategy");
+  if (!Number.isFinite(result?.confidence)) missing.push("confidence");
+  if (missing.length) throw new Error(`深度犹豫分析字段不完整：缺少 ${missing.join("、")}`);
   const messageById = new Map(messages.map((message) => [message.id, message]));
   const titles = new Set<string>();
   for (const signal of result.signals) {
@@ -1092,7 +1125,12 @@ function validateHesitationResult(result: HesitationModelResult, messages: Parse
 async function requestHesitationOnce(config: RuntimeProviderConfig, provider: Provider, input: string, merge = false) {
   const instructions = `${hesitationInstruction}${merge ? "\n下面是按时间顺序排列的分段分析及对话尾部，请去重、校正跨分段误判并合并为最终结果。保留真实消息编号与原文。" : ""}`;
   if (provider === "openai") return requestOpenAIJson<HesitationModelResult>(config, hesitationSchema, "deep_hesitation_analysis", instructions, input);
-  return requestDeepSeekJson<HesitationModelResult>(config, [{ role: "system", content: instructions }, { role: "user", content: input }], 6000);
+  const schema = JSON.stringify(hesitationSchema);
+  const example = JSON.stringify(hesitationJsonExample);
+  return requestDeepSeekJson<HesitationModelResult>(config, [{
+    role: "system",
+    content: `${instructions}\n必须严格按照下面的 JSON Schema 返回根对象，字段名、嵌套层级和枚举值不可改名或遗漏。没有识别到有效 signals 时返回 []，没有可核验的未回复证据时，相关消息编号和原文返回空字符串。只输出一个可由 JSON.parse 解析的 JSON 对象，不输出 Markdown。\nJSON Schema:\n${schema}\n合法 JSON 格式示例：\n${example}\n示例只展示格式，不代表当前客户事实；必须根据本次聊天生成，禁止照抄示例判断。`,
+  }, { role: "user", content: input }], 6000);
 }
 
 export async function analyzeHesitationWithProvider(provider: Provider, conversation: string): Promise<HesitationAnalysis | null> {
@@ -1103,7 +1141,8 @@ export async function analyzeHesitationWithProvider(provider: Provider, conversa
   let lastError: unknown;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      const retryPrefix = attempt ? "上一次结果未通过原文或顺序核验。删除无法核验的推断，并严格区分事实、疑似与无法判断。\n\n" : "";
+      const previousError = lastError instanceof Error ? lastError.message : "字段、原文或消息顺序核验未通过";
+      const retryPrefix = attempt ? `上一次结果失败，具体原因：${previousError}。请严格依据 JSON Schema 修正；删除无法核验的推断，并区分事实、疑似与无法判断。\n\n` : "";
       const chunkResults: HesitationModelResult[] = [];
       for (const chunk of chunks) {
         const result = await requestHesitationOnce(config, provider, `${retryPrefix}${chunk}`);
