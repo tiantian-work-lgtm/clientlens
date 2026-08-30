@@ -486,30 +486,95 @@ function RawDrawer({ task, onClose }: { task: CustomerTask; onClose: () => void 
   return <><div className="overlay" onClick={onClose} /><aside className="drawer"><header><div><span className="eyebrow">SOURCE DATA</span><h2>原始聊天记录</h2></div><button className="icon-button" onClick={onClose}><X size={18} /></button></header><div className="drawer-meta"><span>{sourceMeta[task.source].label}</span><span>{task.customer.name}</span><span>{task.customer.lastMessageAt}</span></div><pre>{task.rawConversation}</pre></aside></>;
 }
 
+interface SaleSmartlyCustomerOption {
+  id: string;
+  name: string;
+  email: string;
+  phone: string;
+  channel: string;
+  country: string;
+  language: string;
+  lastMessageAt: string;
+}
+
 function NewTaskModal({ onClose, onCreate }: { onClose: () => void; onCreate: (task: CustomerTask) => void }) {
   const [step, setStep] = useState<ImportStep>("source");
   const [conversation, setConversation] = useState("");
   const [fileName, setFileName] = useState("");
   const [customerName, setCustomerName] = useState("新客户");
-  const [selectedCustomer, setSelectedCustomer] = useState("James Carter");
+  const [searchTerm, setSearchTerm] = useState("");
+  const [customers, setCustomers] = useState<SaleSmartlyCustomerOption[]>([]);
+  const [selectedCustomerId, setSelectedCustomerId] = useState("");
+  const [searching, setSearching] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [sourceError, setSourceError] = useState("");
+  const [customerTotal, setCustomerTotal] = useState<number | null>(null);
+  const [loadedCustomers, setLoadedCustomers] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const create = () => {
+  async function searchCustomers(term = searchTerm) {
+    setSearching(true);
+    setSourceError("");
+    try {
+      const response = await fetch(`/api/salesmartly/customers?q=${encodeURIComponent(term.trim())}`, { cache: "no-store" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "搜索客户失败");
+      const nextCustomers = (data.customers ?? []) as SaleSmartlyCustomerOption[];
+      setCustomers(nextCustomers);
+      setCustomerTotal(typeof data.total === "number" ? data.total : nextCustomers.length);
+      setSelectedCustomerId((current) => nextCustomers.some((item) => item.id === current) ? current : nextCustomers[0]?.id || "");
+      setLoadedCustomers(true);
+    } catch (error) {
+      setCustomers([]);
+      setSelectedCustomerId("");
+      setSourceError(error instanceof Error ? error.message : "搜索客户失败");
+      setLoadedCustomers(true);
+    } finally { setSearching(false); }
+  }
+
+  useEffect(() => {
+    if (step === "salesmartly" && !loadedCustomers) void searchCustomers("");
+  }, [step, loadedCustomers]);
+
+  const create = async () => {
+    setCreating(true);
+    setSourceError("");
+    try {
     const source = step === "source" ? "text" : step;
-    const name = source === "salesmartly" ? selectedCustomer : customerName || "新客户";
+    const selectedCustomer = customers.find((item) => item.id === selectedCustomerId);
+    if (source === "salesmartly" && !selectedCustomer) throw new Error("请先选择一个 SaleSmartly 客户");
+    let importedConversation = conversation;
+    let importedMessageCount = 0;
+    if (source === "salesmartly" && selectedCustomer) {
+      const response = await fetch(`/api/salesmartly/messages?chatUserId=${encodeURIComponent(selectedCustomer.id)}`, { cache: "no-store" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "读取聊天记录失败");
+      importedConversation = data.conversation || "";
+      importedMessageCount = data.messageCount || 0;
+      if (!importedConversation.trim()) throw new Error("该客户暂无可分析的聊天记录");
+    }
+    if (!importedConversation.trim()) importedConversation = "Customer: Please send me more information about your product and pricing.";
+    const analysisResponse = await fetch("/api/analyze", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ conversation: importedConversation }) });
+    const analysis = await analysisResponse.json();
+    if (!analysisResponse.ok) throw new Error(analysis.error || "AI 分析失败");
+    const name = source === "salesmartly" ? selectedCustomer?.name || "SaleSmartly 客户" : customerName || "新客户";
+    const provider = analysis.provider === "deepseek" ? "deepseek" : "openai";
     onCreate({
       id: `task-${Date.now()}`,
-      name: `${name} · 新分析`,
+      name: `${name} · ${source === "salesmartly" ? `${importedMessageCount} 条消息` : "新分析"}`,
       source,
       status: "ready",
       updatedAt: "刚刚",
-      customer: { name, country: "待识别", owner: "Tina", product: "待识别", channel: sourceMeta[source].label, lastMessageAt: new Date().toLocaleString("zh-CN") },
-      rawConversation: conversation || "Customer: Please send me more information about your product and pricing.",
-      report: { ...demoReport, stage: "初次询盘与客户背调", parallelStages: ["信任建立"], confidence: 0.74 },
+      customer: { name, externalId: selectedCustomer?.id, country: selectedCustomer?.country || "待识别", owner: "Tina", product: "待识别", channel: selectedCustomer?.channel || sourceMeta[source].label, lastMessageAt: selectedCustomer?.lastMessageAt || new Date().toLocaleString("zh-CN") },
+      rawConversation: importedConversation,
+      report: analysis.report || { ...demoReport, stage: "初次询盘与客户背调", parallelStages: ["信任建立"], confidence: 0.74 },
       progress: defaultProgress.map((item) => ({ ...item, state: "todo", locked: false })),
-      provider: "openai",
-      model: "GPT",
+      provider,
+      model: provider === "openai" ? "GPT" : "DeepSeek",
     });
+    } catch (error) {
+      setSourceError(error instanceof Error ? error.message : "创建分析任务失败");
+    } finally { setCreating(false); }
   };
 
   const readFile = async (file?: File) => {
@@ -533,13 +598,13 @@ function NewTaskModal({ onClose, onCreate }: { onClose: () => void; onCreate: (t
         })}
       </div>}
       {step === "salesmartly" && <div className="modal-body">
-        <label className="form-label">搜索 SaleSmartly 客户</label><label className="search-box large"><Search size={16} /><input placeholder="姓名、邮箱、手机号或客户 ID" /></label>
-        <div className="connection-ok"><CircleAlert size={15} />演示客户列表 · 配置 API 后读取真实客户</div>
-        <div className="customer-options">{["James Carter", "Maria Silva", "Daniel Wong"].map((name, i) => <button className={selectedCustomer === name ? "selected" : ""} key={name} onClick={() => setSelectedCustomer(name)}><div className="avatar small">{initials(name)}</div><div><strong>{name}</strong><span>{i === 0 ? "WhatsApp · 38 条消息" : i === 1 ? "Messenger · 21 条消息" : "WhatsApp · 16 条消息"}</span></div>{selectedCustomer === name && <Check size={17} />}</button>)}</div>
+        <label className="form-label">搜索 SaleSmartly 客户</label><div className="salesmartly-search"><label className="search-box large"><Search size={16} /><input value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void searchCustomers(); } }} placeholder="姓名、邮箱、手机号或客户 ID" /></label><button className="secondary-button" onClick={() => void searchCustomers()} disabled={searching}>{searching ? <RefreshCw className="spin" size={15} /> : <Search size={15} />}{searching ? "搜索中" : "搜索"}</button></div>
+        <div className={sourceError ? "connection-error" : "connection-ok"}><CircleAlert size={15} />{sourceError || (searching ? "正在连接 SaleSmartly…" : customerTotal == null ? "正在读取客户" : `已连接 SaleSmartly · 共 ${customerTotal} 位客户`)}</div>
+        <div className="customer-options">{customers.map((customer) => <button className={selectedCustomerId === customer.id ? "selected" : ""} key={customer.id} onClick={() => setSelectedCustomerId(customer.id)}><div className="avatar small">{initials(customer.name)}</div><div><strong>{customer.name}</strong><span>{customer.channel}{customer.email ? ` · ${customer.email}` : customer.phone ? ` · ${customer.phone}` : ""}</span><small>{customer.lastMessageAt}</small></div>{selectedCustomerId === customer.id && <Check size={17} />}</button>)}{loadedCustomers && !searching && !sourceError && !customers.length && <div className="empty-customers">没有找到匹配客户，请更换关键词。</div>}</div>
       </div>}
       {step === "text" && <div className="modal-body"><label className="form-label">客户名称</label><input className="text-input" value={customerName} onChange={(e) => setCustomerName(e.target.value)} placeholder="例如 James Carter" /><label className="form-label">粘贴聊天记录</label><textarea className="import-textarea" value={conversation} onChange={(e) => setConversation(e.target.value)} placeholder="Customer: Hello, I would like to know...&#10;Sales: Hi, happy to help..." /><p className="field-help">系统会自动识别客户、销售、时间和消息内容。</p></div>}
       {step === "excel" && <div className="modal-body"><label className="form-label">客户名称</label><input className="text-input" value={customerName} onChange={(e) => setCustomerName(e.target.value)} /><input ref={fileRef} hidden type="file" accept=".xlsx,.xls,.csv" onChange={(e) => readFile(e.target.files?.[0])} /><button className={`dropzone ${fileName ? "has-file" : ""}`} onClick={() => fileRef.current?.click()}><span><FileSpreadsheet size={28} /></span><strong>{fileName || "点击选择 Excel 或 CSV 文件"}</strong><p>{fileName ? `已读取 ${conversation.split("\n").filter(Boolean).length} 行数据` : "支持 .xlsx、.xls、.csv，最大 20MB"}</p></button><div className="mapping-preview"><strong>默认字段映射</strong><span>发送时间 → 自动识别</span><span>发送人 → 自动识别</span><span>消息内容 → 自动识别</span></div></div>}
-      {step !== "source" && <footer><button className="secondary-button" onClick={onClose}>取消</button><button className="primary-button" onClick={create} disabled={step === "excel" && !fileName}><Sparkles size={16} />创建并分析</button></footer>}
+      {step !== "source" && <footer><button className="secondary-button" onClick={onClose} disabled={creating}>取消</button><button className="primary-button" onClick={() => void create()} disabled={creating || (step === "excel" && !fileName) || (step === "salesmartly" && !selectedCustomerId)}>{creating ? <RefreshCw className="spin" size={16} /> : <Sparkles size={16} />}{creating ? "读取聊天并分析中…" : "创建并分析"}</button></footer>}
     </section></div>
   );
 }

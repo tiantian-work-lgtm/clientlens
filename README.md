@@ -45,4 +45,4 @@ OpenAI 和 DeepSeek 密钥由系统设置页面保存，写入数据库前使用
 
 不要使用 `NEXT_PUBLIC_` 前缀，也不要提交 `.env.local`。未配置模型密钥时，分析与翻译接口仍会返回演示结果。
 
-SaleSmartly 设置支持加密保存 API Token、Project ID，并按官方规则生成 `external-sign` 测试客户列表接口。客户选择界面仍是交互骨架；真实客户搜索、聊天记录读取与增量消息同步将在下一阶段接入。
+SaleSmartly 设置支持加密保存 API Token、Project ID，并按官方规则生成 `external-sign`。新建分析任务时可以搜索真实客户、读取指定客户最近的聊天记录并交给 AI 分析；增量消息同步和 webhook 将在后续阶段接入。

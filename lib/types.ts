@@ -64,6 +64,7 @@ export interface CustomerTask {
   updatedAt: string;
   customer: {
     name: string;
+    externalId?: string;
     country: string;
     company?: string;
     owner: string;
