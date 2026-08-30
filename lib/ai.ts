@@ -1,5 +1,5 @@
 import type { AnalysisReport, Provider } from "./types";
-import { getRuntimeProviderConfig } from "./provider-config";
+import { getRuntimeProviderConfig, type RuntimeProviderConfig } from "./provider-config";
 
 const analysisSchema = {
   type: "object",
@@ -66,6 +66,56 @@ function extractOpenAIText(payload: unknown): string {
   return data.output?.flatMap((item) => item.content ?? []).find((item) => item.type === "output_text")?.text ?? "";
 }
 
+interface DeepSeekResponse {
+  choices?: Array<{
+    finish_reason?: string;
+    message?: { content?: string | null; reasoning_content?: string | null };
+  }>;
+}
+
+function parseJsonContent<T>(content: string): T {
+  const cleaned = content.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+  return JSON.parse(cleaned) as T;
+}
+
+async function requestDeepSeekJson<T>(
+  config: RuntimeProviderConfig,
+  messages: Array<{ role: "system" | "user"; content: string }>,
+  maxTokens: number,
+): Promise<T> {
+  let lastFinishReason = "unknown";
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const retryMessages = attempt === 0 ? messages : [
+      ...messages,
+      { role: "user" as const, content: "上一次返回内容为空。请立即输出一个完整、非空、可由 JSON.parse 解析的 JSON 对象，不要输出 Markdown。" },
+    ];
+    const response = await fetch(`${config.baseUrl || "https://api.deepseek.com"}/chat/completions`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${config.apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: config.model,
+        messages: retryMessages,
+        response_format: { type: "json_object" },
+        // V4 默认启用思考模式。结构化任务关闭思考，避免 max_tokens 被 reasoning_content 用完后 content 为空。
+        thinking: { type: "disabled" },
+        temperature: 0.1,
+        max_tokens: maxTokens,
+      }),
+      signal: AbortSignal.timeout(90_000),
+    });
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => "");
+      throw new Error(`DeepSeek request failed: ${response.status}${errorText ? ` · ${errorText.slice(0, 240)}` : ""}`);
+    }
+    const data = await response.json() as DeepSeekResponse;
+    const choice = data.choices?.[0];
+    lastFinishReason = choice?.finish_reason || "unknown";
+    const content = choice?.message?.content?.trim();
+    if (content) return parseJsonContent<T>(content);
+  }
+  throw new Error(`DeepSeek 连续两次返回空内容（finish_reason: ${lastFinishReason}）。请切换 deepseek-v4-pro 或暂时改用 OpenAI。`);
+}
+
 export async function analyzeWithProvider(provider: Provider, conversation: string): Promise<AnalysisReport | null> {
   const config = await getRuntimeProviderConfig(provider);
   if (!config) return null;
@@ -86,24 +136,13 @@ export async function analyzeWithProvider(provider: Provider, conversation: stri
     return JSON.parse(text) as AnalysisReport;
   }
 
-  const response = await fetch(`${config.baseUrl || "https://api.deepseek.com"}/chat/completions`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${config.apiKey}`, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: config.model,
-      messages: [
-        { role: "system", content: `${systemPrompt}\n只输出合法 JSON，并严格使用指定字段。字段：summary, profile, stage, parallelStages, stageReason, objections, confirmations, improvements, nextActions, suggestedReply, suggestedReplyTranslation, confidence。` },
-        { role: "user", content: conversation },
-      ],
-      response_format: { type: "json_object" },
-      max_tokens: 2400,
-    }),
-  });
-  if (!response.ok) throw new Error(`DeepSeek request failed: ${response.status}`);
-  const data = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
-  const text = data.choices?.[0]?.message?.content;
-  if (!text) throw new Error("DeepSeek returned empty JSON content");
-  return JSON.parse(text) as AnalysisReport;
+  return requestDeepSeekJson<AnalysisReport>(config, [
+    {
+      role: "system",
+      content: `${systemPrompt}\n只输出合法 JSON，并严格使用指定字段。字段：summary, profile, stage, parallelStages, stageReason, objections, confirmations, improvements, nextActions, suggestedReply, suggestedReplyTranslation, confidence。JSON 示例：{"summary":"...","profile":[],"stage":"初次询盘与客户背调","parallelStages":[],"stageReason":"...","objections":[],"confirmations":[],"improvements":[],"nextActions":[],"suggestedReply":"...","suggestedReplyTranslation":"...","confidence":0.8}`,
+    },
+    { role: "user", content: conversation },
+  ], 6000);
 }
 
 export interface BilingualSuggestion {
@@ -137,15 +176,7 @@ export async function generateChecklistSuggestion(provider: Provider, conversati
     if (!response.ok) throw new Error(`OpenAI request failed: ${response.status}`);
     return JSON.parse(extractOpenAIText(await response.json())) as BilingualSuggestion;
   }
-  const response = await fetch(`${config.baseUrl || "https://api.deepseek.com"}/chat/completions`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${config.apiKey}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ model: config.model, messages: [{ role: "user", content: prompt }], response_format: { type: "json_object" } }),
-  });
-  if (!response.ok) throw new Error(`DeepSeek request failed: ${response.status}`);
-  const data = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
-  const content = data.choices?.[0]?.message?.content;
-  return content ? JSON.parse(content) as BilingualSuggestion : null;
+  return requestDeepSeekJson<BilingualSuggestion>(config, [{ role: "user", content: prompt }], 1200);
 }
 
 export async function translateWithProvider(
