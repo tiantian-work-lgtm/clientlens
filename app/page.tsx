@@ -23,6 +23,7 @@ import {
   Link2,
   ListChecks,
   LockKeyhole,
+  LogOut,
   Plus,
   RefreshCw,
   Search,
@@ -496,9 +497,22 @@ function AppLogo() {
 
 export default function Home() {
   const [view, setView] = useState<View>("analysis");
+  const [session, setSession] = useState<{ email: string | null; username: string | null; role: "admin" | "user" } | null>(null);
   const [tasks, setTasks] = useState<CustomerTask[]>(initialTasks);
   const [activeTaskId, setActiveTaskId] = useState(initialTasks[0].id);
   const [showNewTask, setShowNewTask] = useState(false);
+
+  useEffect(() => {
+    void fetch("/api/auth/session", { cache: "no-store" }).then(async (response) => {
+      if (!response.ok) return;
+      const data = await response.json();
+      setSession({ email: data.email ?? null, username: data.username ?? null, role: data.role });
+    });
+  }, []);
+
+  useEffect(() => {
+    if (session?.role === "user" && view === "settings") setView("analysis");
+  }, [session, view]);
 
   useEffect(() => {
     const stored = localStorage.getItem("clientlens-tasks");
@@ -519,13 +533,14 @@ export default function Home() {
 
   const activeTask = tasks.find((task) => task.id === activeTaskId) ?? tasks[0];
   const updateTask = (next: CustomerTask) => setTasks((items) => items.map((item) => item.id === next.id ? next : item));
+  const logout = async () => { await fetch("/api/auth/logout", { method: "POST" }); window.location.assign("/login"); };
 
   return (
     <main className="app-shell">
       <header className="topbar">
         <AppLogo />
         <nav className="main-nav" aria-label="主导航">
-          {navItems.map((item) => (
+          {navItems.filter((item) => item.id !== "settings" || session?.role === "admin").map((item) => (
             <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => setView(item.id)}>
               <item.icon size={17} />{item.label}
             </button>
@@ -533,8 +548,9 @@ export default function Home() {
         </nav>
         <div className="top-actions">
           <div className="sync-pill"><span />原型运行正常</div>
-          <button className="icon-button" aria-label="设置" onClick={() => setView("settings")}><Settings size={18} /></button>
-          <div className="avatar small">TT</div>
+          {session?.role === "admin" && <button className="icon-button" aria-label="设置" onClick={() => setView("settings")}><Settings size={18} /></button>}
+          <button className="icon-button logout-button" aria-label="退出登录" title="退出登录" onClick={logout}><LogOut size={17} /></button>
+          <div className="avatar small" title={session?.username || session?.email || "当前用户"}>{initials(session?.username || session?.email || "U")}</div>
         </div>
       </header>
 
@@ -550,7 +566,7 @@ export default function Home() {
       {view === "scripts" && <KnowledgeView kind="scripts" />}
       {view === "products" && <KnowledgeView kind="products" />}
       {view === "translate" && <TranslateView />}
-      {view === "settings" && <SettingsView />}
+      {view === "settings" && session?.role === "admin" && <SettingsView />}
 
       {showNewTask && (
         <NewTaskModal

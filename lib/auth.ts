@@ -5,8 +5,9 @@ export const SESSION_COOKIE = "clientlens_session";
 
 export interface AdminSession {
   userId: string;
-  email: string;
-  role: "admin";
+  email: string | null;
+  username: string | null;
+  role: "admin" | "user";
 }
 
 function authKey() {
@@ -16,7 +17,7 @@ function authKey() {
 }
 
 export async function createSessionToken(session: AdminSession) {
-  return new SignJWT({ email: session.email, role: session.role })
+  return new SignJWT({ email: session.email, username: session.username, role: session.role })
     .setProtectedHeader({ alg: "HS256" })
     .setSubject(session.userId)
     .setIssuedAt()
@@ -28,8 +29,11 @@ export async function readSessionToken(token?: string): Promise<AdminSession | n
   if (!token) return null;
   try {
     const { payload } = await jwtVerify(token, authKey());
-    if (!payload.sub || payload.role !== "admin" || typeof payload.email !== "string") return null;
-    return { userId: payload.sub, email: payload.email, role: "admin" };
+    if (!payload.sub || (payload.role !== "admin" && payload.role !== "user")) return null;
+    const email = typeof payload.email === "string" ? payload.email : null;
+    const username = typeof payload.username === "string" ? payload.username : null;
+    if (!email && !username) return null;
+    return { userId: payload.sub, email, username, role: payload.role };
   } catch {
     return null;
   }
@@ -42,7 +46,12 @@ export async function getSession() {
 
 export async function requireAdmin() {
   const session = await getSession();
-  if (!session) throw new Error("UNAUTHORIZED");
+  if (!session || session.role !== "admin") throw new Error("UNAUTHORIZED");
   return session;
 }
 
+export async function requireSession() {
+  const session = await getSession();
+  if (!session) throw new Error("UNAUTHORIZED");
+  return session;
+}

@@ -11,7 +11,7 @@ export async function middleware(request: NextRequest) {
   if (token) {
     try {
       const result = await jwtVerify(token, new TextEncoder().encode(process.env.AUTH_SECRET));
-      valid = result.payload.role === "admin";
+      valid = result.payload.role === "admin" || result.payload.role === "user";
     } catch { valid = false; }
   }
   if (valid) return NextResponse.next();

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/auth";
+import { requireSession } from "@/lib/auth";
 import { searchSaleSmartlyCustomers } from "@/lib/salesmartly";
 
 export const runtime = "nodejs";
@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
   try {
-    await requireAdmin();
+    await requireSession();
     const search = new URL(request.url).searchParams.get("q") || "";
     return NextResponse.json(await searchSaleSmartlyCustomers(search));
   } catch (error) {

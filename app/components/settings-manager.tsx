@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Bot, Check, CheckCircle2, CircleDashed, Clock3, Cloud, KeyRound, LockKeyhole, LogOut, RefreshCw, Save, ShieldCheck, Sparkles, Zap } from "lucide-react";
+import { Bot, Check, CheckCircle2, CircleDashed, Clock3, Cloud, KeyRound, LockKeyhole, LogOut, RefreshCw, Save, ShieldCheck, Sparkles, Trash2, UserPlus, UsersRound, Zap } from "lucide-react";
 import type { IntegrationProvider, Provider } from "@/lib/types";
 
 interface ProviderConfig {
@@ -38,6 +38,7 @@ interface Assignments {
 }
 
 interface AuditLog { id: string; action: string; target: string; created_at: string; email: string | null }
+interface ManagedUser { id: string; email: string | null; username: string | null; role: "admin" | "user"; created_at: string; updated_at: string }
 
 const defaults: Record<Provider, ProviderConfig> = {
   openai: { provider: "openai", configured: false, maskedKey: "", model: "gpt-5.6-terra", enabled: true, apiKey: "" },
@@ -58,6 +59,7 @@ export default function SettingsManager() {
   const [salesmartly, setSaleSmartly] = useState<SaleSmartlyConfig>(saleSmartlyDefault);
   const [assignments, setAssignments] = useState<Assignments>({ analysisProvider: "openai", translationProvider: "deepseek", knowledgeProvider: "openai" });
   const [logs, setLogs] = useState<AuditLog[]>([]);
+  const [users, setUsers] = useState<ManagedUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
@@ -66,7 +68,7 @@ export default function SettingsManager() {
   const load = async () => {
     setLoading(true);
     try {
-      const [settingsResponse, auditResponse] = await Promise.all([fetch("/api/settings"), fetch("/api/settings/audit")]);
+      const [settingsResponse, auditResponse, usersResponse] = await Promise.all([fetch("/api/settings"), fetch("/api/settings/audit"), fetch("/api/settings/users")]);
       const settings = await settingsResponse.json();
       if (!settingsResponse.ok) throw new Error(settings.error || "读取设置失败");
       const next = { openai: { ...defaults.openai }, deepseek: { ...defaults.deepseek } };
@@ -79,6 +81,7 @@ export default function SettingsManager() {
       setSaleSmartly(nextSaleSmartly);
       setAssignments(settings.assignments);
       if (auditResponse.ok) setLogs((await auditResponse.json()).logs ?? []);
+      if (usersResponse.ok) setUsers((await usersResponse.json()).users ?? []);
     } catch (error) {
       setNotice({ tone: "error", text: error instanceof Error ? error.message : "读取设置失败" });
     } finally { setLoading(false); }
@@ -150,6 +153,8 @@ export default function SettingsManager() {
         </div></section>
         <div className="settings-title integration-title"><h2>SaleSmartly 接入</h2><p>用于搜索客户并读取指定客户的聊天记录。API Token 会加密保存。</p></div>
         <SaleSmartlyCard config={salesmartly} testing={testing === "salesmartly"} onChange={(patch) => setSaleSmartly((current) => ({ ...current, ...patch }))} onTest={() => test("salesmartly")} />
+        <div className="settings-title user-management-title"><h2>用户管理</h2><p>现有管理员账号保持不变；普通用户使用用户名和密码登录，无法访问系统设置。</p></div>
+        <UserManagement users={users} onChanged={load} onNotice={setNotice} />
       </div>
       <aside className="security-sidebar">
         <section><header><ShieldCheck size={18} /><div><h3>数据安全</h3><p>AES-256-GCM</p></div></header><ul><li><Check size={12} />密钥仅在服务端解密</li><li><Check size={12} />浏览器不返回完整密钥</li><li><Check size={12} />安全 Cookie 管理登录</li><li><Check size={12} />数据库持久化存储</li></ul></section>
@@ -182,6 +187,65 @@ function AssignmentRow({ label, description, value, onChange }: { label: string;
   return <div><span>{label}</span><small>{description}</small><select value={value} onChange={(event) => onChange(event.target.value as Provider)}><option value="openai">OpenAI GPT</option><option value="deepseek">DeepSeek</option></select></div>;
 }
 
+function UserManagement({ users, onChanged, onNotice }: {
+  users: ManagedUser[];
+  onChanged: () => Promise<void>;
+  onNotice: (notice: { tone: "ok" | "error"; text: string } | null) => void;
+}) {
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [resetPasswords, setResetPasswords] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState("");
+
+  const request = async (url: string, init: RequestInit, success: string) => {
+    setBusy(url);
+    onNotice(null);
+    try {
+      const response = await fetch(url, init);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "操作失败");
+      onNotice({ tone: "ok", text: success });
+      await onChanged();
+      return true;
+    } catch (error) {
+      onNotice({ tone: "error", text: error instanceof Error ? error.message : "操作失败" });
+      return false;
+    } finally { setBusy(""); }
+  };
+
+  const createUser = async () => {
+    const ok = await request("/api/settings/users", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username, password }) }, `用户 ${username.trim()} 已创建。`);
+    if (ok) { setUsername(""); setPassword(""); }
+  };
+
+  const resetPassword = async (user: ManagedUser) => {
+    const nextPassword = resetPasswords[user.id] || "";
+    const ok = await request(`/api/settings/users/${encodeURIComponent(user.id)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password: nextPassword }) }, `用户 ${user.username} 的密码已更新。`);
+    if (ok) setResetPasswords((current) => ({ ...current, [user.id]: "" }));
+  };
+
+  const deleteUser = async (user: ManagedUser) => {
+    if (!window.confirm(`确定删除用户 ${user.username} 吗？`)) return;
+    await request(`/api/settings/users/${encodeURIComponent(user.id)}`, { method: "DELETE" }, `用户 ${user.username} 已删除。`);
+  };
+
+  return <section className="setting-card user-management-card">
+    <header><div className="setting-icon blue"><UsersRound size={18} /></div><div><h3>登录用户</h3><p>管理员通过原邮箱登录；这里创建的账号均为普通用户。</p></div><span className="user-count">{users.length} 个账号</span></header>
+    <div className="user-create-row">
+      <label>用户名<input value={username} onChange={(event) => setUsername(event.target.value)} placeholder="3–32 位英文、数字或 . _ -" autoComplete="off" /></label>
+      <label>初始密码<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="至少 8 位" autoComplete="new-password" /></label>
+      <button className="primary-button" onClick={createUser} disabled={busy !== "" || !username.trim() || password.length < 8}><UserPlus size={15} />添加用户</button>
+    </div>
+    <div className="user-list">
+      {users.map((user) => <article key={user.id} className={user.role === "admin" ? "admin-user" : "ordinary-user"}>
+        <div className="user-identity"><span>{(user.username || user.email || "U").slice(0, 2).toUpperCase()}</span><div><strong>{user.username || user.email}</strong><small>{user.role === "admin" ? "当前管理员 · 原密码保持不变" : `普通用户 · 创建于 ${new Date(user.created_at).toLocaleDateString("zh-CN")}`}</small></div></div>
+        <span className={`user-role ${user.role}`}>{user.role === "admin" ? "管理员" : "普通用户"}</span>
+        {user.role === "user" && <div className="user-row-actions"><input type="password" value={resetPasswords[user.id] || ""} onChange={(event) => setResetPasswords((current) => ({ ...current, [user.id]: event.target.value }))} placeholder="输入新密码" autoComplete="new-password" /><button onClick={() => resetPassword(user)} disabled={busy !== "" || (resetPasswords[user.id] || "").length < 8}>重置密码</button><button className="danger" aria-label={`删除 ${user.username}`} onClick={() => deleteUser(user)} disabled={busy !== ""}><Trash2 size={14} /></button></div>}
+      </article>)}
+    </div>
+  </section>;
+}
+
 function auditLabel(action: string) {
-  return ({ "auth.login": "管理员登录", "auth.logout": "管理员退出", "settings.update": "更新模型设置", "provider.test": "测试模型连接" } as Record<string, string>)[action] || action;
+  return ({ "auth.login": "账号登录", "auth.logout": "账号退出", "settings.update": "更新模型设置", "provider.test": "测试模型连接", "user.create": "创建普通用户", "user.password_reset": "重置用户密码", "user.delete": "删除普通用户" } as Record<string, string>)[action] || action;
 }

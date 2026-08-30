@@ -23,12 +23,17 @@ export async function ensureSchema() {
       await pool.query(`
         CREATE TABLE IF NOT EXISTS app_users (
           id TEXT PRIMARY KEY,
-          email TEXT NOT NULL UNIQUE,
+          email TEXT UNIQUE,
+          username TEXT,
           password_hash TEXT NOT NULL,
-          role TEXT NOT NULL DEFAULT 'admin',
+          role TEXT NOT NULL DEFAULT 'user',
           created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
           updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
+        ALTER TABLE app_users ADD COLUMN IF NOT EXISTS username TEXT;
+        ALTER TABLE app_users ALTER COLUMN email DROP NOT NULL;
+        ALTER TABLE app_users ALTER COLUMN role SET DEFAULT 'user';
+        CREATE UNIQUE INDEX IF NOT EXISTS app_users_username_lower_idx ON app_users (LOWER(username)) WHERE username IS NOT NULL;
         CREATE TABLE IF NOT EXISTS provider_configs (
           provider TEXT PRIMARY KEY,
           encrypted_api_key TEXT,
