@@ -1183,19 +1183,21 @@ interface SaleSmartlyCustomerOption {
   lastMessageAt: string;
 }
 
-function ImportPreviewPanel({ preview, selectedConversationKey, onConversationChange, onRoleChange }: {
+function ImportPreviewPanel({ preview, selectedConversationKey, onConversationChange, onRoleChange, batchMode = false, onBatchModeChange }: {
   preview: ImportPreview;
   selectedConversationKey: string;
   onConversationChange: (key: string) => void;
   onRoleChange: (messageId: string, sender: string, role: "customer" | "sales" | "unknown" | "system") => void;
+  batchMode?: boolean;
+  onBatchModeChange?: (value: boolean) => void;
 }) {
-  const messages = preview.messages.filter((message) => !selectedConversationKey || message.conversationKey === selectedConversationKey);
+  const messages = preview.messages.filter((message) => batchMode || !selectedConversationKey || message.conversationKey === selectedConversationKey);
   const customerCount = messages.filter((message) => message.role === "customer").length;
   const salesCount = messages.filter((message) => message.role === "sales").length;
   const unknownCount = messages.filter((message) => message.role === "unknown").length;
   return <div className="import-preview">
     <div className="import-preview-head"><div><CheckCircle2 size={18} /><div><strong>智能识别完成</strong><span>置信度 {Math.round(preview.overallConfidence * 100)}%</span></div></div><div><span>客户 {customerCount}</span><span>销售 {salesCount}</span>{unknownCount > 0 && <span className="unknown">待确认 {unknownCount}</span>}</div></div>
-    {preview.detectedConversations.length > 1 && <label className="conversation-picker"><span>检测到多个客户或会话，请选择本次创建的任务</span><select value={selectedConversationKey} onChange={(event) => onConversationChange(event.target.value)}>{preview.detectedConversations.map((key) => { const group = preview.messages.filter((message) => message.conversationKey === key); const name = group.find((message) => message.customerName)?.customerName; return <option value={key} key={key}>{name ? `${name} · ` : ""}{key} · {group.length} 条</option>; })}</select></label>}
+    {preview.detectedConversations.length > 1 && <div className="conversation-picker"><div><span>检测到多个客户或会话</span><label><input type="radio" checked={!batchMode} onChange={() => onBatchModeChange?.(false)} />仅创建所选会话</label><label><input type="radio" checked={batchMode} onChange={() => onBatchModeChange?.(true)} />批量创建全部任务</label></div><select value={selectedConversationKey} onChange={(event) => onConversationChange(event.target.value)} disabled={batchMode}>{preview.detectedConversations.map((key) => { const group = preview.messages.filter((message) => message.conversationKey === key); const name = group.find((message) => message.customerName)?.customerName; return <option value={key} key={key}>{name ? `${name} · ` : ""}{key} · {group.length} 条</option>; })}</select></div>}
     {!!preview.mappingSummary.length && <div className="import-mapping-summary">{preview.mappingSummary.map((item) => <span key={item}><Check size={11} />{item}</span>)}</div>}
     {!!preview.warnings.length && <div className="import-warnings">{preview.warnings.map((item) => <p key={item}><CircleAlert size={12} />{item}</p>)}</div>}
     <div className="import-message-list">
@@ -1215,6 +1217,7 @@ function NewTaskModal({ onClose, onCreate, onUpdate }: { onClose: () => void; on
   const [rawImportData, setRawImportData] = useState("");
   const [importPreview, setImportPreview] = useState<ImportPreview | null>(null);
   const [selectedConversationKey, setSelectedConversationKey] = useState("");
+  const [batchImport, setBatchImport] = useState(false);
   const [parsingImport, setParsingImport] = useState(false);
   const [customerName, setCustomerName] = useState("新客户");
   const [searchTerm, setSearchTerm] = useState("");
@@ -1265,6 +1268,40 @@ function NewTaskModal({ onClose, onCreate, onUpdate }: { onClose: () => void; on
     const previewCustomerName = previewMessages.find((message) => message.customerName)?.customerName;
     const name = source === "salesmartly" ? selectedCustomer?.name || "SaleSmartly 客户" : customerName || previewCustomerName || "新客户";
     const normalizedImportConversation = source === "salesmartly" ? conversation : previewMessages.filter((message) => message.role !== "system").map((message) => `${message.time ? `[${message.time}] ` : ""}${message.role === "customer" ? "Customer" : "Sales"}: ${message.content}`).join("\n");
+    if (source !== "salesmartly" && batchImport && importPreview && importPreview.detectedConversations.length > 1) {
+      const batchTasks = importPreview.detectedConversations.flatMap((key, index) => {
+        const group = importPreview.messages.filter((message) => message.conversationKey === key && (message.role === "customer" || message.role === "sales"));
+        if (!group.length || group.some((message) => message.role === "unknown")) return [];
+        const groupName = group.find((message) => message.customerName)?.customerName || `${customerName || "新客户"} ${index + 1}`;
+        const groupConversation = group.map((message) => `${message.time ? `[${message.time}] ` : ""}${message.role === "customer" ? "Customer" : "Sales"}: ${message.content}`).join("\n");
+        return [normalizeTask({
+          id: `task-${Date.now()}-${index}`,
+          name: `${groupName} · 正在分析`,
+          source,
+          status: "analyzing",
+          analysisStep: "analyzing",
+          updatedAt: "刚刚",
+          customer: { name: groupName, country: "待识别", owner: "Tina", product: "待识别", channel: sourceMeta[source].label, lastMessageAt: new Date().toLocaleString("zh-CN") },
+          rawConversation: groupConversation,
+          report: { ...emptyReport, confirmations: defaultConfirmations.map((item) => ({ ...item })) },
+          progress: defaultProgress.map((item) => ({ ...item, state: "todo", locked: false })),
+          provider: "deepseek",
+          model: "AI",
+        })];
+      });
+      if (!batchTasks.length) {
+        setSourceError("没有可批量创建的有效会话，请先确认消息角色");
+        setCreating(false);
+        return;
+      }
+      batchTasks.forEach((batchTask) => onCreate(batchTask));
+      // 两个一组运行，避免批量文件瞬间放大为过多大模型并发请求。
+      for (let index = 0; index < batchTasks.length; index += 2) {
+        await Promise.all(batchTasks.slice(index, index + 2).map((batchTask) => analyzeConcurrently(batchTask, batchTask.rawConversation, onUpdate)));
+      }
+      setCreating(false);
+      return;
+    }
     const task: CustomerTask = normalizeTask({
       id: `task-${Date.now()}`,
       name: `${name} · 正在分析`,
@@ -1340,6 +1377,7 @@ function NewTaskModal({ onClose, onCreate, onUpdate }: { onClose: () => void; on
     setConversation("");
     setImportPreview(null);
     setSelectedConversationKey("");
+    setBatchImport(false);
   };
 
   const parseImport = async () => {
@@ -1355,6 +1393,7 @@ function NewTaskModal({ onClose, onCreate, onUpdate }: { onClose: () => void; on
       const preview = data.preview as ImportPreview;
       setImportPreview(preview);
       setSelectedConversationKey(preview.detectedConversations[0] || preview.messages[0]?.conversationKey || "default");
+      setBatchImport(false);
       const detectedName = preview.messages.find((message) => message.customerName)?.customerName || preview.detectedCustomers[0];
       if (detectedName && customerName === "新客户") setCustomerName(detectedName);
     } catch (error) {
@@ -1368,7 +1407,7 @@ function NewTaskModal({ onClose, onCreate, onUpdate }: { onClose: () => void; on
     setImportPreview((current) => current ? { ...current, messages: current.messages.map((message) => sender ? message.sender === sender ? { ...message, role, confidence: 1 } : message : message.id === messageId ? { ...message, role, confidence: 1 } : message) } : current);
   };
 
-  const selectedPreviewMessages = importPreview?.messages.filter((message) => !selectedConversationKey || message.conversationKey === selectedConversationKey) ?? [];
+  const selectedPreviewMessages = importPreview?.messages.filter((message) => batchImport || !selectedConversationKey || message.conversationKey === selectedConversationKey) ?? [];
   const selectedAnalyzableMessages = selectedPreviewMessages.filter((message) => message.role === "customer" || message.role === "sales");
   const previewUnknownCount = selectedPreviewMessages.filter((message) => message.role === "unknown").length;
 
@@ -1379,7 +1418,7 @@ function NewTaskModal({ onClose, onCreate, onUpdate }: { onClose: () => void; on
         {(Object.keys(sourceMeta) as SourceType[]).map((key) => {
           const item = sourceMeta[key];
           const descriptions = { salesmartly: "选择并同步一个客户的聊天记录", text: "粘贴任意格式的对话文本", excel: "上传 Excel 或 CSV 并自动解析" };
-          return <button key={key} onClick={() => { setStep(key); setImportPreview(null); setSelectedConversationKey(""); setSourceError(""); }}><span className={`source-large ${item.color}`}><item.icon size={24} /></span><strong>{item.label}</strong><p>{descriptions[key]}</p><ChevronRight size={18} /></button>;
+          return <button key={key} onClick={() => { setStep(key); setImportPreview(null); setSelectedConversationKey(""); setBatchImport(false); setSourceError(""); }}><span className={`source-large ${item.color}`}><item.icon size={24} /></span><strong>{item.label}</strong><p>{descriptions[key]}</p><ChevronRight size={18} /></button>;
         })}
       </div>}
       {step === "salesmartly" && <div className="modal-body">
@@ -1387,8 +1426,8 @@ function NewTaskModal({ onClose, onCreate, onUpdate }: { onClose: () => void; on
         <div className={sourceError ? "connection-error" : "connection-ok"}><CircleAlert size={15} />{sourceError || (searching ? "正在连接 SaleSmartly…" : customerTotal == null ? "正在读取客户" : `已连接 SaleSmartly · 共 ${customerTotal} 位客户`)}</div>
         <div className="customer-options">{customers.map((customer) => <button className={selectedCustomerId === customer.id ? "selected" : ""} key={customer.id} onClick={() => setSelectedCustomerId(customer.id)}><div className="avatar small">{initials(customer.name)}</div><div><strong>{customer.name}</strong><span>{customer.channel}{customer.email ? ` · ${customer.email}` : customer.phone ? ` · ${customer.phone}` : ""}</span><small>{customer.lastMessageAt}</small></div>{selectedCustomerId === customer.id && <Check size={17} />}</button>)}{loadedCustomers && !searching && !sourceError && !customers.length && <div className="empty-customers">没有找到匹配客户，请更换关键词。</div>}</div>
       </div>}
-      {step === "text" && <div className="modal-body import-smart-body"><label className="form-label">客户名称（可选提示）</label><input className="text-input" value={customerName} onChange={(e) => setCustomerName(e.target.value)} placeholder="例如 James Carter" />{!importPreview ? <><label className="form-label">粘贴聊天记录</label><textarea className="import-textarea" value={conversation} onChange={(e) => { setConversation(e.target.value); setImportPreview(null); }} placeholder="支持 WhatsApp、Messenger、SaleSmartly 或任意带姓名/时间的复制文本" /><p className="field-help">AI 只识别结构，不会翻译、改写或补写原始聊天。</p></> : <ImportPreviewPanel preview={importPreview} selectedConversationKey={selectedConversationKey} onConversationChange={setSelectedConversationKey} onRoleChange={updateSenderRole} />}{sourceError && <div className="import-parse-error"><CircleAlert size={14} />{sourceError}</div>}</div>}
-      {step === "excel" && <div className="modal-body import-smart-body"><label className="form-label">客户名称（可选提示）</label><input className="text-input" value={customerName} onChange={(e) => setCustomerName(e.target.value)} /><input ref={fileRef} hidden type="file" accept=".xlsx,.xls,.csv" onChange={(e) => void readFile(e.target.files?.[0])} />{!importPreview ? <><button className={`dropzone ${fileName ? "has-file" : ""}`} onClick={() => fileRef.current?.click()}><span><FileSpreadsheet size={28} /></span><strong>{fileName || "点击选择 Excel 或 CSV 文件"}</strong><p>{fileName ? "文件已读取，等待智能识别" : "支持 .xlsx、.xls、.csv，最大 20MB"}</p></button><div className="mapping-preview"><strong>AI 智能映射</strong><span>工作表与会话</span><span>时间与发送人</span><span>客户与销售角色</span><span>消息内容</span></div></> : <ImportPreviewPanel preview={importPreview} selectedConversationKey={selectedConversationKey} onConversationChange={setSelectedConversationKey} onRoleChange={updateSenderRole} />}{sourceError && <div className="import-parse-error"><CircleAlert size={14} />{sourceError}</div>}</div>}
+      {step === "text" && <div className="modal-body import-smart-body"><label className="form-label">客户名称（可选提示）</label><input className="text-input" value={customerName} onChange={(e) => setCustomerName(e.target.value)} placeholder="例如 James Carter" />{!importPreview ? <><label className="form-label">粘贴聊天记录</label><textarea className="import-textarea" value={conversation} onChange={(e) => { setConversation(e.target.value); setImportPreview(null); }} placeholder="支持 WhatsApp、Messenger、SaleSmartly 或任意带姓名/时间的复制文本" /><p className="field-help">AI 只识别结构，不会翻译、改写或补写原始聊天。</p></> : <ImportPreviewPanel preview={importPreview} selectedConversationKey={selectedConversationKey} onConversationChange={setSelectedConversationKey} onRoleChange={updateSenderRole} batchMode={batchImport} onBatchModeChange={setBatchImport} />}{sourceError && <div className="import-parse-error"><CircleAlert size={14} />{sourceError}</div>}</div>}
+      {step === "excel" && <div className="modal-body import-smart-body"><label className="form-label">客户名称（可选提示）</label><input className="text-input" value={customerName} onChange={(e) => setCustomerName(e.target.value)} /><input ref={fileRef} hidden type="file" accept=".xlsx,.xls,.csv" onChange={(e) => void readFile(e.target.files?.[0])} />{!importPreview ? <><button className={`dropzone ${fileName ? "has-file" : ""}`} onClick={() => fileRef.current?.click()}><span><FileSpreadsheet size={28} /></span><strong>{fileName || "点击选择 Excel 或 CSV 文件"}</strong><p>{fileName ? "文件已读取，等待智能识别" : "支持 .xlsx、.xls、.csv，最大 20MB"}</p></button><div className="mapping-preview"><strong>AI 智能映射</strong><span>工作表与会话</span><span>时间与发送人</span><span>客户与销售角色</span><span>消息内容</span></div></> : <ImportPreviewPanel preview={importPreview} selectedConversationKey={selectedConversationKey} onConversationChange={setSelectedConversationKey} onRoleChange={updateSenderRole} batchMode={batchImport} onBatchModeChange={setBatchImport} />}{sourceError && <div className="import-parse-error"><CircleAlert size={14} />{sourceError}</div>}</div>}
       {step !== "source" && <footer>{importPreview && (step === "text" || step === "excel") && <button className="secondary-button import-reparse" onClick={() => { setImportPreview(null); setSelectedConversationKey(""); setSourceError(""); }} disabled={creating || parsingImport}>返回修改</button>}<button className="secondary-button" onClick={onClose} disabled={creating || parsingImport}>取消</button>{(step === "text" || step === "excel") && !importPreview ? <button className="primary-button" onClick={() => void parseImport()} disabled={parsingImport || (step === "excel" ? !fileName : !conversation.trim())}>{parsingImport ? <RefreshCw className="spin" size={16} /> : <Sparkles size={16} />}{parsingImport ? "AI 正在识别格式…" : "智能识别并预览"}</button> : <button className="primary-button" onClick={() => void create()} disabled={creating || (step === "salesmartly" && !selectedCustomerId) || ((step === "text" || step === "excel") && (!selectedAnalyzableMessages.length || previewUnknownCount > 0))}>{creating ? <RefreshCw className="spin" size={16} /> : <Sparkles size={16} />}{creating ? "读取聊天并分析中…" : previewUnknownCount > 0 ? `请先确认 ${previewUnknownCount} 条角色` : "确认并创建分析"}</button>}</footer>}
     </section></div>
   );
