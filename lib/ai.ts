@@ -49,7 +49,7 @@ const riskSchema = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["id", "category", "label", "status", "evidence", "evidenceMessageId", "evidenceQuote", "riskReason", "seedingNeed", "seedingDirection", "seedingPerformed", "seedingPerformedEvidenceMessageId", "seedingPerformedEvidenceQuote", "seedingAccepted", "seedingAcceptanceEvidenceMessageId", "seedingAcceptanceEvidenceQuote", "seedingAdvice", "medicalNeed", "medicalDirection", "medicalAnswered", "medicalAnswerEvidenceMessageId", "medicalAnswerEvidenceQuote", "medicalAccepted", "medicalAcceptanceEvidenceMessageId", "medicalAcceptanceEvidenceQuote", "medicalAdvice", "scamExperienceStatus", "scamExperienceSummary", "scamAddressed", "scamResponseEvidenceMessageId", "scamResponseEvidenceQuote", "scamAccepted", "scamAcceptanceEvidenceMessageId", "scamAcceptanceEvidenceQuote", "scamAdvice", "confidence"],
+        required: ["id", "category", "label", "status", "evidence", "evidenceMessageId", "evidenceQuote", "riskReason", "seedingNeed", "seedingDirection", "seedingPerformed", "seedingPerformedEvidenceMessageId", "seedingPerformedEvidenceQuote", "seedingAccepted", "seedingAcceptanceEvidenceMessageId", "seedingAcceptanceEvidenceQuote", "seedingAdvice", "medicalNeed", "medicalDirection", "medicalAnswered", "medicalAnswerEvidenceMessageId", "medicalAnswerEvidenceQuote", "medicalAccepted", "medicalAcceptanceEvidenceMessageId", "medicalAcceptanceEvidenceQuote", "medicalAdvice", "scamExperienceStatus", "scamExperienceSummary", "scamAddressed", "scamResponseEvidenceMessageId", "scamResponseEvidenceQuote", "scamAccepted", "scamAcceptanceEvidenceMessageId", "scamAcceptanceEvidenceQuote", "scamAdvice", "coaMentionSource", "coaMentionEvidenceMessageId", "coaMentionEvidenceQuote", "coaExplained", "coaExplanationEvidenceMessageId", "coaExplanationEvidenceQuote", "coaAccepted", "coaAcceptanceEvidenceMessageId", "coaAcceptanceEvidenceQuote", "coaAdvice", "confidence"],
         properties: {
           id: { type: "string" },
           category: { type: "string", enum: ["客户角色", "认知与经历", "产品与信任", "交易条件"] },
@@ -86,6 +86,16 @@ const riskSchema = {
           scamAcceptanceEvidenceMessageId: { type: "string" },
           scamAcceptanceEvidenceQuote: { type: "string" },
           scamAdvice: { type: "string" },
+          coaMentionSource: { type: "string", enum: ["客户主动询问", "销售主动提出", "未提及", ""] },
+          coaMentionEvidenceMessageId: { type: "string" },
+          coaMentionEvidenceQuote: { type: "string" },
+          coaExplained: { type: "string", enum: ["已说明", "尚未说明", "未确认", ""] },
+          coaExplanationEvidenceMessageId: { type: "string" },
+          coaExplanationEvidenceQuote: { type: "string" },
+          coaAccepted: { type: "string", enum: ["客户明确肯定", "客户未明确肯定", "未确认", ""] },
+          coaAcceptanceEvidenceMessageId: { type: "string" },
+          coaAcceptanceEvidenceQuote: { type: "string" },
+          coaAdvice: { type: "string" },
           confidence: { type: "number", minimum: 0, maximum: 1 },
         },
       },
@@ -114,6 +124,7 @@ const modulePrompts: Record<AnalysisModule, string> = {
 };
 
 const scamPromptAddon = `\nscammed（是否有被骗经历）必须在“有被骗经历”和“无被骗经历”中二选一。“无被骗经历”仅表示当前聊天未发现相关表述，不得写成已核实的终身事实。有被骗经历时必须用 evidenceMessageId/Quote 引用客户原话，scamExperienceSummary 概括被骗方式、损失或造成的不信任；scamAddressed 判断销售是否针对该经历回应，已回应时 scamResponseEvidenceMessageId/Quote 必须引用销售原话；scamAccepted 只有客户在回应之后明确认可、接受或信任改善时才可填客户明确肯定，并引用更晚的客户原话；scamAdvice 给出建立信任和降低首次合作风险的具体建议。无被骗经历时这些明细字段返回空字符串。非 scammed 项的全部 scam 字段返回空字符串。`;
+const coaPromptAddon = `\ncoa（COA 与产品一致性）必须返回完整四项判断。coaMentionSource 只能是客户主动询问、销售主动提出或未提及；前两种必须分别用 coaMentionEvidenceMessageId/Quote 引用客户或销售原话。coaExplained 判断销售是否已明确说明 COA、批次与实际交付产品的对应关系；已说明必须用 coaExplanationEvidenceMessageId/Quote 引用销售原话。coaAccepted 只有客户在说明之后明确认可、理解或确认接受时才可填客户明确肯定，并用 coaAcceptanceEvidenceMessageId/Quote 引用更晚的客户原话；沉默、礼貌致谢和转移话题不算。coaAdvice 必须结合当前缺口给出具体下一步建议。未提及时相关证据字段为空。非 coa 项的全部 coa 专属字段返回空字符串。`;
 
 export interface CustomerModuleResult {
   summary: string;
@@ -314,6 +325,16 @@ function normalizeRiskResult(value: AnalysisModuleResult, messages: ParsedConver
       scamAcceptanceEvidenceMessageId: item?.id === "scammed" ? item.scamAcceptanceEvidenceMessageId || "" : "",
       scamAcceptanceEvidenceQuote: item?.id === "scammed" ? item.scamAcceptanceEvidenceQuote || "" : "",
       scamAdvice: item?.id === "scammed" ? item.scamAdvice?.trim() || "" : "",
+      coaMentionSource: item?.id === "coa" && (item.coaMentionSource === "客户主动询问" || item.coaMentionSource === "销售主动提出" || item.coaMentionSource === "未提及") ? item.coaMentionSource : undefined,
+      coaMentionEvidenceMessageId: item?.id === "coa" ? item.coaMentionEvidenceMessageId || "" : "",
+      coaMentionEvidenceQuote: item?.id === "coa" ? item.coaMentionEvidenceQuote || "" : "",
+      coaExplained: item?.id === "coa" && (item.coaExplained === "已说明" || item.coaExplained === "尚未说明" || item.coaExplained === "未确认") ? item.coaExplained : undefined,
+      coaExplanationEvidenceMessageId: item?.id === "coa" ? item.coaExplanationEvidenceMessageId || "" : "",
+      coaExplanationEvidenceQuote: item?.id === "coa" ? item.coaExplanationEvidenceQuote || "" : "",
+      coaAccepted: item?.id === "coa" && (item.coaAccepted === "客户明确肯定" || item.coaAccepted === "客户未明确肯定" || item.coaAccepted === "未确认") ? item.coaAccepted : undefined,
+      coaAcceptanceEvidenceMessageId: item?.id === "coa" ? item.coaAcceptanceEvidenceMessageId || "" : "",
+      coaAcceptanceEvidenceQuote: item?.id === "coa" ? item.coaAcceptanceEvidenceQuote || "" : "",
+      coaAdvice: item?.id === "coa" ? item.coaAdvice?.trim() || "" : "",
       confidence: Number.isFinite(confidence) ? Math.min(1, Math.max(0, confidence)) : 0,
     } satisfies ConfirmationItem;
   });
@@ -376,12 +397,26 @@ function validateModuleResult(module: AnalysisModule, value: AnalysisModuleResul
       const scamAcceptanceIndex = messages.findIndex((message) => message.id === scammed.scamAcceptanceEvidenceMessageId);
       if (scammed.scamAccepted === "客户明确肯定" && (scamAcceptanceMessage?.role !== "customer" || scamResponseIndex < 0 || scamAcceptanceIndex <= scamResponseIndex || !hasVerifiedEvidence(messageById, scammed.scamAcceptanceEvidenceMessageId, scammed.scamAcceptanceEvidenceQuote))) throw new Error("被骗经历的客户肯定缺少回应之后的客户原文");
     }
+    const coa = result.confirmations.find((item) => item.id === "coa");
+    if (!coa || !coa.coaAdvice?.trim() || (coa.coaMentionSource !== "客户主动询问" && coa.coaMentionSource !== "销售主动提出" && coa.coaMentionSource !== "未提及")) throw new Error("COA 分析缺少来源判断或建议");
+    if (!coa.coaExplained || !coa.coaAccepted) throw new Error("COA 分析缺少说明或客户肯定判断");
+    const coaMentionMessage = messageById.get(coa.coaMentionEvidenceMessageId || "");
+    if (coa.coaMentionSource !== "未提及" && (coaMentionMessage?.role !== (coa.coaMentionSource === "客户主动询问" ? "customer" : "sales") || !hasVerifiedEvidence(messageById, coa.coaMentionEvidenceMessageId, coa.coaMentionEvidenceQuote))) throw new Error("COA 提及来源缺少对应角色的原文");
+    const coaExplanationMessage = messageById.get(coa.coaExplanationEvidenceMessageId || "");
+    if (coa.coaExplained === "已说明" && (coaExplanationMessage?.role !== "sales" || !hasVerifiedEvidence(messageById, coa.coaExplanationEvidenceMessageId, coa.coaExplanationEvidenceQuote))) throw new Error("COA 已说明结论缺少销售原文");
+    const coaMentionIndex = messages.findIndex((message) => message.id === coa.coaMentionEvidenceMessageId);
+    const coaExplanationIndex = messages.findIndex((message) => message.id === coa.coaExplanationEvidenceMessageId);
+    if (coa.coaMentionSource === "客户主动询问" && coa.coaExplained === "已说明" && coaExplanationIndex <= coaMentionIndex) throw new Error("COA 说明必须发生在客户询问之后");
+    if (coa.coaMentionSource === "未提及" && (coa.coaExplained === "已说明" || coa.coaAccepted === "客户明确肯定")) throw new Error("未提及 COA 时不能判断为已说明或客户明确肯定");
+    const coaAcceptanceMessage = messageById.get(coa.coaAcceptanceEvidenceMessageId || "");
+    const coaAcceptanceIndex = messages.findIndex((message) => message.id === coa.coaAcceptanceEvidenceMessageId);
+    if (coa.coaAccepted === "客户明确肯定" && (coaAcceptanceMessage?.role !== "customer" || coaExplanationIndex < 0 || coaAcceptanceIndex <= coaExplanationIndex || !hasVerifiedEvidence(messageById, coa.coaAcceptanceEvidenceMessageId, coa.coaAcceptanceEvidenceQuote))) throw new Error("COA 客户肯定缺少说明之后的客户原文");
   }
   return value;
 }
 
 async function requestModuleOnce(config: RuntimeProviderConfig, provider: Provider, module: AnalysisModule, input: string, merge = false): Promise<AnalysisModuleResult> {
-  const instruction = `${modulePrompts[module]}${module === "risk" ? scamPromptAddon : ""}${merge ? "\n下面是分段分析结果，请去重并合并为一个最终结果。消息编号与原文必须原样保留。" : ""}`;
+  const instruction = `${modulePrompts[module]}${module === "risk" ? `${scamPromptAddon}${coaPromptAddon}` : ""}${merge ? "\n下面是分段分析结果，请去重并合并为一个最终结果。消息编号与原文必须原样保留。" : ""}`;
   if (provider === "openai") {
     return requestOpenAIJson<AnalysisModuleResult>(config, moduleSchema(module), `customer_${module}_analysis`, instruction, input);
   }

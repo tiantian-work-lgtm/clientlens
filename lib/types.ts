@@ -69,6 +69,16 @@ export interface ConfirmationItem {
   scamAcceptanceEvidenceMessageId?: string;
   scamAcceptanceEvidenceQuote?: string;
   scamAdvice?: string;
+  coaMentionSource?: "客户主动询问" | "销售主动提出" | "未提及";
+  coaMentionEvidenceMessageId?: string;
+  coaMentionEvidenceQuote?: string;
+  coaExplained?: "已说明" | "尚未说明" | "未确认";
+  coaExplanationEvidenceMessageId?: string;
+  coaExplanationEvidenceQuote?: string;
+  coaAccepted?: "客户明确肯定" | "客户未明确肯定" | "未确认";
+  coaAcceptanceEvidenceMessageId?: string;
+  coaAcceptanceEvidenceQuote?: string;
+  coaAdvice?: string;
   confidence: number;
 }
 

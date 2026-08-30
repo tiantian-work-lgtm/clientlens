@@ -201,6 +201,16 @@ function normalizeReport(value: unknown, conversation = ""): CustomerTask["repor
       scamAcceptanceEvidenceMessageId: item.id === "scammed" ? stringValue(item.scamAcceptanceEvidenceMessageId) : "",
       scamAcceptanceEvidenceQuote: item.id === "scammed" ? normalizeEvidenceQuote(item.scamAcceptanceEvidenceQuote, conversation) : "",
       scamAdvice: item.id === "scammed" ? stringValue(item.scamAdvice, fallback.scamAdvice || "") : "",
+      coaMentionSource: item.id === "coa" && (item.coaMentionSource === "客户主动询问" || item.coaMentionSource === "销售主动提出" || item.coaMentionSource === "未提及") ? item.coaMentionSource : fallback.coaMentionSource,
+      coaMentionEvidenceMessageId: item.id === "coa" ? stringValue(item.coaMentionEvidenceMessageId) : "",
+      coaMentionEvidenceQuote: item.id === "coa" ? normalizeEvidenceQuote(item.coaMentionEvidenceQuote, conversation) : "",
+      coaExplained: item.id === "coa" && (item.coaExplained === "已说明" || item.coaExplained === "尚未说明" || item.coaExplained === "未确认") ? item.coaExplained : fallback.coaExplained,
+      coaExplanationEvidenceMessageId: item.id === "coa" ? stringValue(item.coaExplanationEvidenceMessageId) : "",
+      coaExplanationEvidenceQuote: item.id === "coa" ? normalizeEvidenceQuote(item.coaExplanationEvidenceQuote, conversation) : "",
+      coaAccepted: item.id === "coa" && (item.coaAccepted === "客户明确肯定" || item.coaAccepted === "客户未明确肯定" || item.coaAccepted === "未确认") ? item.coaAccepted : fallback.coaAccepted,
+      coaAcceptanceEvidenceMessageId: item.id === "coa" ? stringValue(item.coaAcceptanceEvidenceMessageId) : "",
+      coaAcceptanceEvidenceQuote: item.id === "coa" ? normalizeEvidenceQuote(item.coaAcceptanceEvidenceQuote, conversation) : "",
+      coaAdvice: item.id === "coa" ? stringValue(item.coaAdvice, fallback.coaAdvice || "") : "",
       confidence: Number.isFinite(confidence) ? Math.min(1, Math.max(0, confidence)) : 0,
     };
   });
@@ -736,6 +746,15 @@ function ConfirmationChecklist({ task, onUpdate }: { task: CustomerTask; onUpdat
                     <div><small>是否获得客户肯定</small><p>{item.scamAccepted || "未确认"}</p>{item.scamAcceptanceEvidenceQuote && <blockquote>“{item.scamAcceptanceEvidenceQuote}”</blockquote>}</div>
                     <div className="seeding-advice"><small>建议</small><p>{item.scamAdvice || "先承接客户的不信任，再用可验证资料和低风险首单方案回应。"}</p></div>
                   </div>}
+                </div>}
+                {item.id === "coa" && item.coaMentionSource && <div className={`seeding-analysis coa-analysis ${item.coaMentionSource === "未提及" ? "not-needed" : "needed"}`}>
+                  <header><span>COA 判断</span><strong>{item.coaMentionSource}</strong></header>
+                  <div className="seeding-detail-grid coa-detail-grid">
+                    <div><small>由谁提出</small><p>{item.coaMentionSource}</p>{item.coaMentionEvidenceQuote && <blockquote>“{item.coaMentionEvidenceQuote}”</blockquote>}</div>
+                    <div><small>是否已经说明</small><p>{item.coaExplained || "未确认"}</p>{item.coaExplanationEvidenceQuote && <blockquote>“{item.coaExplanationEvidenceQuote}”</blockquote>}</div>
+                    <div><small>是否获得客户肯定</small><p>{item.coaAccepted || "未确认"}</p>{item.coaAcceptanceEvidenceQuote && <blockquote>“{item.coaAcceptanceEvidenceQuote}”</blockquote>}</div>
+                    <div className="seeding-advice"><small>建议</small><p>{item.coaAdvice || "根据当前对话判断是否需要主动说明 COA、批次与交付产品的对应关系。"}</p></div>
+                  </div>
                 </div>}
                 {(item.status === "unknown" || item.status === "risk") && <div className="confirmation-actions">
                   <button onClick={() => generate(item, "hook")} disabled={!!generating}><Sparkles size={12} />{generating === `${item.id}-hook` ? "生成中…" : "生成探询钩子"}</button>
