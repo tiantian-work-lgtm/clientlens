@@ -22,6 +22,8 @@ export interface Objection {
   severity: "高" | "中" | "低";
   status: "待解决" | "处理中" | "已解决";
   evidence: string;
+  evidenceQuote?: string;
+  evidenceVerified?: boolean;
   advice: string;
 }
 

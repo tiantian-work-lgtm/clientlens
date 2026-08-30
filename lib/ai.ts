@@ -16,12 +16,13 @@ const analysisSchema = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["title", "severity", "status", "evidence", "advice"],
+        required: ["title", "severity", "status", "evidence", "evidenceQuote", "advice"],
         properties: {
           title: { type: "string" },
           severity: { type: "string", enum: ["高", "中", "低"] },
           status: { type: "string", enum: ["待解决", "处理中", "已解决"] },
           evidence: { type: "string" },
+          evidenceQuote: { type: "string" },
           advice: { type: "string" },
         },
       },
@@ -55,7 +56,7 @@ const analysisSchema = {
 const systemPrompt = `你是一名严谨的 B2B 销售对话分析师。根据对话生成结构化客户分析。
 要求：
 1. 判断与事实分开，不确定的信息不要当成事实；
-2. 异议必须引用对话原文作为证据；
+2. objections 中 evidence 用中文说明判断依据，evidenceQuote 必须从对话中逐字摘录最相关的一小段原文（保留原语言和说话方，不超过 200 字）；如果没有直接原文，evidenceQuote 返回空字符串，严禁编造，但仍可保留需要人工核对的异议判断；
 3. 改善建议要具体且可执行；
 4. 销售阶段只能从以下七项选择：初次询盘与客户背调、信任建立、产品与订单匹配、决策推进、等待付款、已成交、售后与复购；主阶段取最接近当前成交里程碑的一项，第1至3阶段可同时放入 parallelStages；
 5. confirmations 必须覆盖：客户角色与经验、是否需要产品种草、是否需要基础知识科普、剂量/使用/医疗问题、是否有被骗经历、COA与产品一致性、产品包装、公司资料、其他客户反馈、物流清关和时效、支付方式与付款安全；

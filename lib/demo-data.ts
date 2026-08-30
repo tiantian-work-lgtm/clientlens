@@ -60,6 +60,7 @@ export const demoReport: AnalysisReport = {
       severity: "高",
       status: "处理中",
       evidence: "“Is the COA from the same batch I will receive?”",
+      evidenceQuote: "Customer: Is the COA from the same batch I will receive?",
       advice: "明确说明文件与批次的对应关系，并只提供可验证的资料。",
     },
     {
@@ -67,6 +68,7 @@ export const demoReport: AnalysisReport = {
       severity: "中",
       status: "待解决",
       evidence: "“What protection do I have for the first order?”",
+      evidenceQuote: "Customer: What protection do I have for the first order?",
       advice: "先解释可用付款路径和流程，再约定一个低风险的首单方案。",
     },
   ],

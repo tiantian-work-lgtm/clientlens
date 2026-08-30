@@ -82,7 +82,7 @@ function stringList(value: unknown, fallback: string[] = []) {
 function normalizeEvidenceQuote(value: unknown, conversation: string) {
   const candidate = stringValue(value).replace(/^[\s"'“”‘’]+|[\s"'“”‘’]+$/g, "").trim();
   if (candidate.length < 4) return "";
-  const normalize = (text: string) => text.normalize("NFKC").replace(/\s+/g, " ").trim().toLocaleLowerCase();
+  const normalize = (text: string) => text.normalize("NFKC").replace(/[‘’]/g, "'").replace(/[–—]/g, "-").replace(/\s+/g, " ").trim().toLocaleLowerCase();
   return normalize(conversation).includes(normalize(candidate)) ? candidate : "";
 }
 
@@ -96,15 +96,16 @@ function normalizeReport(value: unknown, conversation = ""): CustomerTask["repor
   const objections = rawObjections.flatMap((value, index) => {
     if (!value || typeof value !== "object" || Array.isArray(value)) return [];
     const item = value as Record<string, unknown>;
-    const verifiedEvidence = normalizeEvidenceQuote(item.evidence, conversation);
-    if (!verifiedEvidence) return [];
+    const evidenceQuote = normalizeEvidenceQuote(item.evidenceQuote, conversation) || normalizeEvidenceQuote(item.evidence, conversation);
     const severity: "高" | "中" | "低" = item.severity === "高" || item.severity === "中" || item.severity === "低" ? item.severity : "中";
     const status: "待解决" | "处理中" | "已解决" = item.status === "待解决" || item.status === "处理中" || item.status === "已解决" ? item.status : "待解决";
     return [{
       title: stringValue(item.title, `待确认异议 ${index + 1}`),
       severity,
       status,
-      evidence: verifiedEvidence,
+      evidence: stringValue(item.evidence, "AI 识别到潜在犹豫点，具体依据需要人工核对。"),
+      evidenceQuote,
+      evidenceVerified: Boolean(evidenceQuote),
       advice: stringValue(item.advice, "需要结合原始对话进一步确认。"),
     }];
   });
@@ -409,7 +410,13 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
               {activeTask.report.objections.map((item, index) => (
                 <details key={item.title} open={index === 0}>
                   <summary><span className={`severity ${item.severity}`}>{item.severity}</span><strong>{item.title}</strong><span className="objection-state">{item.status}</span><ChevronDown size={16} /></summary>
-                  <div className="evidence"><blockquote>“{item.evidence.replaceAll("“", "").replaceAll("”", "") }”</blockquote><p><Sparkles size={14} />{item.advice}</p></div>
+                  <div className="evidence">
+                    <p className="objection-basis"><span>判断依据</span>{item.evidence}</p>
+                    {item.evidenceVerified && item.evidenceQuote
+                      ? <blockquote><span>已核验原文</span>“{item.evidenceQuote.replaceAll("“", "").replaceAll("”", "") }”</blockquote>
+                      : <div className="objection-unverified"><CircleAlert size={13} />未找到可逐字匹配的原始片段，请结合原始聊天人工核对</div>}
+                    <p><Sparkles size={14} />{item.advice}</p>
+                  </div>
                 </details>
               ))}
             </div>
