@@ -299,7 +299,7 @@ const checklistSchema = {
 };
 
 const analysisPrompts: Record<AnalysisModule, string> = {
-  customer: `${commonPrompt}\n只返回对话总结、客户画像标签和销售阶段。profile 由模型根据真实聊天自由提炼为简洁、具体、可独立阅读的画像标签，不预设分类、数量、顺序或“分类：内容”格式；没有原文依据的特征不得输出，不得为了凑数量重复。stage 只能使用规定七阶段，第一至三阶段可并行。`,
+  customer: `${commonPrompt}\n只返回对话总结、客户画像标签和销售阶段。profile 由模型根据真实聊天自由提炼为简洁、具体、可独立阅读的画像标签，不预设分类、固定数量、顺序或“分类：内容”格式；应尽可能覆盖聊天中有证据的身份、经验、需求、关注点、信任、价格、决策和沟通特征，使画像足够丰富，通常可提炼 5 至 12 个标签，证据确实较少时允许更少。没有原文依据的特征不得输出，不得为了凑数量重复。stage 只能使用规定七阶段，第一至三阶段可并行。`,
   psychology: `${commonPrompt}\n只返回 emotionProfile。依据客户真实原文分析当前情绪、变化、沟通性格倾向、敏感点、沟通和决策方式，并作非临床心理研判：当前心理状态、核心驱动力、信任需求、防御或回避模式、压力反应。使用“可能、倾向”等限定语，不诊断疾病或人格障碍，不推断隐私；evidence 只引用客户消息的真实 M 编号和逐字原文，证据不足就明确说明并降低 confidence。`,
   objections: `${commonPrompt}\n只返回 objections。仅保留有客户逐字原文证据的明确异议或犹豫，禁止占位标题。未正面回答或客户再次追问=未解决；销售正面回答且客户未再追问=未追问-基本解决；销售回答后客户明确认可=客户肯定-完全解决。解决证据必须发生在异议之后；沉默、礼貌致谢和话题切换不算肯定。`,
   checklist: `${commonPrompt}\n只返回 confirmations，必须且只按顺序返回 role、seeding、medical、scammed、coa、packaging、company、feedback、logistics、payment_method 共10项。每项只使用统一精简字段：conclusion 是该项结论，detail 是方向或具体说明，source 是谁提出，handling 是销售是否处理，reaction 是客户反应，advice 是下一步建议。seeding 结论只能“需要种草/无需种草”；medical 只能“需要提供建议/无需提供建议”；scammed 只能“有被骗经历/无被骗经历”。其他项目 conclusion 简洁概括。已处理必须引用销售原文；客户明确肯定、满意或异议必须引用客户原文并符合消息顺序。未提及的字段使用未提及、未确认或不适用，不得虚构证据。只有真实成交障碍才标 risk。`,
@@ -627,8 +627,8 @@ function requireRawModuleResult(module: AnalysisModule, value: unknown, messages
     const profile = Array.isArray(raw.profile) ? raw.profile.filter((item) => typeof item === "string" && item.trim()) : [];
     const stage = typeof raw.stage === "string" ? raw.stage : "";
     const stageReason = typeof raw.stageReason === "string" ? raw.stageReason.trim() : "";
-    if (!summary || profile.length < 3 || !stages.includes(stage) || !stageReason || !Number.isFinite(Number(raw.confidence))) {
-      throw new Error("客户总结或画像字段不完整（至少需要总结、3 个有效画像标签、阶段、阶段依据和置信度）");
+    if (!summary || profile.length < 1 || !stages.includes(stage) || !stageReason || !Number.isFinite(Number(raw.confidence))) {
+      throw new Error("客户总结或画像字段不完整（需要总结、有效画像标签、阶段、阶段依据和置信度）");
     }
     return;
   }
@@ -672,7 +672,7 @@ function requireRawModuleResult(module: AnalysisModule, value: unknown, messages
 function requireNormalizedModuleResult(module: AnalysisModule, value: AnalysisModuleResult, messages: ParsedConversationMessage[]) {
   if (module === "customer") {
     const result = value as CustomerModuleResult;
-    if (!result.summary.trim() || result.profile.length < 3 || !Number.isFinite(result.confidence)) throw new Error("客户总结或画像未通过质量检查");
+    if (!result.summary.trim() || !result.profile.length || !Number.isFinite(result.confidence)) throw new Error("客户总结或画像未通过质量检查");
     return;
   }
   if (module === "psychology") {
@@ -942,7 +942,11 @@ async function requestModuleOnce(config: RuntimeProviderConfig, provider: Provid
     return requestOpenAIJson<AnalysisModuleResult>(config, moduleSchema(module), `customer_${module}_analysis`, instruction, input);
   }
   const tokens = module === "checklist" ? 4200 : module === "psychology" ? 2600 : module === "customer" ? 2200 : module === "objections" ? 2800 : 2400;
-  return requestDeepSeekJson<AnalysisModuleResult>(config, [{ role: "system", content: `${instruction}\n只输出符合字段要求的合法 JSON。` }, { role: "user", content: input }], tokens);
+  const schema = JSON.stringify(moduleSchema(module));
+  return requestDeepSeekJson<AnalysisModuleResult>(config, [{
+    role: "system",
+    content: `${instruction}\n必须严格按照下面的 JSON Schema 返回根对象，字段名、嵌套层级和枚举值不可改名或遗漏；没有内容的数组返回 []，没有证据的字符串返回空字符串。只输出一个可由 JSON.parse 解析的 JSON 对象，不输出 Markdown。\nJSON Schema:\n${schema}`,
+  }, { role: "user", content: input }], tokens);
 }
 
 export async function analyzeModuleWithProvider(provider: Provider, conversation: string, module: AnalysisModule): Promise<AnalysisModuleResult | null> {
@@ -954,7 +958,8 @@ export async function analyzeModuleWithProvider(provider: Provider, conversation
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
       const chunkResults: AnalysisModuleResult[] = [];
-      const retryPrefix = attempt ? "上一次结果未通过字段或原文核验。请严格补全所有必填字段；无法找到直接原文的异议必须删除，不得用占位内容代替。\n\n" : "";
+      const previousError = lastError instanceof Error ? lastError.message : "字段或原文核验未通过";
+      const retryPrefix = attempt ? `上一次结果失败，具体原因：${previousError}。请依据 JSON Schema 修正并补全所有必填字段；无法找到直接原文的异议必须删除，不得用占位内容代替。\n\n` : "";
       for (const chunk of chunks) {
         const rawResult = await requestModuleOnce(config, provider, module, `${retryPrefix}${chunk}`);
         requireRawModuleResult(module, rawResult, messages);
