@@ -135,6 +135,11 @@ function normalizeReport(value: unknown, conversation = ""): CustomerTask["repor
     communicationStyle: stringValue(rawEmotionProfile.communicationStyle, "信息不足，暂无法判断沟通方式"),
     decisionStyle: stringValue(rawEmotionProfile.decisionStyle, "信息不足，暂无法判断决策方式"),
     sensitivities: stringList(rawEmotionProfile.sensitivities, ["信息不足"]).slice(0, 5),
+    psychologicalState: stringValue(rawEmotionProfile.psychologicalState, "信息不足，暂无法进行沟通心理研判"),
+    coreMotivations: stringList(rawEmotionProfile.coreMotivations, ["信息不足"]).slice(0, 5),
+    trustNeeds: stringList(rawEmotionProfile.trustNeeds, ["信息不足"]).slice(0, 5),
+    defensePatterns: stringList(rawEmotionProfile.defensePatterns, ["信息不足"]).slice(0, 5),
+    pressureResponse: stringValue(rawEmotionProfile.pressureResponse, "信息不足，暂无法判断压力下的沟通反应"),
     evidence: emotionEvidence.slice(0, 5),
     advice: stringList(rawEmotionProfile.advice, ["继续观察客户表达，并通过开放式问题确认其真实关注点。"]).slice(0, 5),
     confidence: Number.isFinite(emotionConfidence) ? Math.min(1, Math.max(0, emotionConfidence)) : 0,
@@ -670,7 +675,7 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
             })}</div>
           </ReportCard>
 
-          <ReportCard icon={UsersRound} title="客户情绪与沟通性格" tone="cyan">
+          <ReportCard icon={UsersRound} title="客户情绪、沟通性格与心理研判" tone="cyan">
             <div className="emotion-headline">
               <div><small>当前情绪</small><strong>{activeTask.report.emotionProfile.currentEmotion}</strong></div>
               <div><small>情绪变化</small><strong>{activeTask.report.emotionProfile.emotionTrend}</strong></div>
@@ -682,6 +687,16 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
               <div><small>沟通方式</small><p>{activeTask.report.emotionProfile.communicationStyle}</p></div>
               <div><small>决策方式</small><p>{activeTask.report.emotionProfile.decisionStyle}</p></div>
             </div>
+            <div className="psychology-panel">
+              <div className="psychology-title"><strong>沟通心理研判</strong><span>非临床</span></div>
+              <div className="psychology-state"><small>当前心理状态</small><p>{activeTask.report.emotionProfile.psychologicalState}</p></div>
+              <div className="psychology-grid">
+                <div><small>核心驱动力</small><div className="emotion-tags">{activeTask.report.emotionProfile.coreMotivations.map((item) => <span key={item}>{item}</span>)}</div></div>
+                <div><small>信任需求</small><div className="emotion-tags">{activeTask.report.emotionProfile.trustNeeds.map((item) => <span key={item}>{item}</span>)}</div></div>
+                <div><small>防御或回避模式</small><div className="emotion-tags sensitivity-tags">{activeTask.report.emotionProfile.defensePatterns.map((item) => <span key={item}>{item}</span>)}</div></div>
+                <div><small>压力下的可能反应</small><p>{activeTask.report.emotionProfile.pressureResponse}</p></div>
+              </div>
+            </div>
             {!!activeTask.report.emotionProfile.evidence.length && <div className="emotion-evidence">
               <h4>对话依据</h4>
               {activeTask.report.emotionProfile.evidence.map((item) => <div key={`${item.messageId}-${item.quote}`}>
@@ -691,7 +706,7 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
               </div>)}
             </div>}
             <div className="emotion-advice"><h4>沟通建议</h4>{activeTask.report.emotionProfile.advice.map((item, index) => <p key={item}><span>{index + 1}</span>{item}</p>)}</div>
-            <p className="emotion-disclaimer">仅依据当前聊天判断沟通状态与倾向，不构成心理或人格诊断。</p>
+            <p className="emotion-disclaimer">仅依据当前聊天进行非临床沟通心理研判，不构成精神健康、人格障碍或医学诊断。</p>
           </ReportCard>
           </>}
 

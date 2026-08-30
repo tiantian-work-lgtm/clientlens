@@ -40,7 +40,7 @@ const demoConfirmations: ConfirmationItem[] = defaultConfirmations.map((item) =>
 export const emptyReport: AnalysisReport = {
   summary: "等待 AI 完成对话分析。",
   profile: [],
-  emotionProfile: { currentEmotion: "待分析", emotionTrend: "待分析", personalityTraits: ["信息不足"], communicationStyle: "待分析", decisionStyle: "待分析", sensitivities: ["信息不足"], evidence: [], advice: ["等待更多客户对话后再判断。"], confidence: 0 },
+  emotionProfile: { currentEmotion: "待分析", emotionTrend: "待分析", personalityTraits: ["信息不足"], communicationStyle: "待分析", decisionStyle: "待分析", sensitivities: ["信息不足"], psychologicalState: "待分析", coreMotivations: ["信息不足"], trustNeeds: ["信息不足"], defensePatterns: ["信息不足"], pressureResponse: "待分析", evidence: [], advice: ["等待更多客户对话后再判断。"], confidence: 0 },
   stage: "初次询盘与客户背调",
   parallelStages: [],
   stageReason: "当前尚无足够信息判断销售阶段。",
@@ -75,6 +75,11 @@ export const demoReport: AnalysisReport = {
     communicationStyle: "使用简短直接的问题逐项核验关键风险，不喜欢泛泛介绍",
     decisionStyle: "倾向先获得可验证资料和风险保障，再决定是否推进首单",
     sensitivities: ["答非所问", "不可核验的宣传", "首单付款风险", "文件与实物不一致"],
+    psychologicalState: "从当前表达看，客户处于有兴趣但主动控制风险的审慎状态；并非拒绝，而是在等待足够证据降低首次合作的不确定性。",
+    coreMotivations: ["降低首次采购风险", "确认交付可验证", "保留决策控制权"],
+    trustNeeds: ["批次对应的真实文件", "清晰的付款保障边界", "直接回答具体问题"],
+    defensePatterns: ["遇到模糊回答时继续追问", "关键信息不足时暂缓决策", "用具体问题检验可信度"],
+    pressureResponse: "若被连续催促或收到泛泛宣传，可能降低信任并延后回应；提供可核验证据和清晰选择更容易推动其继续沟通。",
     evidence: [
       { messageId: "M00001", quote: "Is the COA from the same batch I will receive?", interpretation: "关注资料与实际交付的一致性，体现证据导向和风险敏感。" },
       { messageId: "M00003", quote: "What protection do I have for the first order?", interpretation: "首次合作仍有资金安全顾虑，需要明确保障边界。" },

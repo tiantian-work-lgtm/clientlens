@@ -32,6 +32,11 @@ export interface CustomerEmotionProfile {
   communicationStyle: string;
   decisionStyle: string;
   sensitivities: string[];
+  psychologicalState: string;
+  coreMotivations: string[];
+  trustNeeds: string[];
+  defensePatterns: string[];
+  pressureResponse: string;
   evidence: EmotionEvidence[];
   advice: string[];
   confidence: number;
