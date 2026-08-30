@@ -117,6 +117,16 @@ export interface ProductResearch {
   searchedAt: string;
 }
 
+export interface ProductMention {
+  name: string;
+  mentionedBy: "客户" | "销售" | "双方";
+  customerAwareness: "不了解" | "初步了解" | "有使用经验" | "明确熟悉" | "无法判断";
+  customerInterest: "明确感兴趣" | "可能感兴趣" | "未表现兴趣" | "明确拒绝" | "无法判断";
+  awarenessReason: string;
+  evidenceMessageId: string;
+  evidenceQuote: string;
+}
+
 export interface Objection {
   title: string;
   severity: "高" | "中" | "低";
@@ -232,6 +242,7 @@ export interface AnalysisReport {
   profile: string[];
   emotionProfile: CustomerEmotionProfile;
   hesitationAnalysis?: HesitationAnalysis;
+  productMentions: ProductMention[];
   productResearch?: ProductResearch;
   stage: SalesStage;
   parallelStages: SalesStage[];

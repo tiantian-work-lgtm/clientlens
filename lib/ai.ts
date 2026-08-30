@@ -1,17 +1,33 @@
-import type { AnalysisModule, AnalysisReport, ConfirmationItem, CustomerEmotionProfile, HesitationAnalysis, Objection, Provider, SalesStage } from "./types";
+import type { AnalysisModule, AnalysisReport, ConfirmationItem, CustomerEmotionProfile, HesitationAnalysis, Objection, ProductMention, Provider, SalesStage } from "./types";
 import { getRuntimeProviderConfig, type RuntimeProviderConfig } from "./provider-config";
 import { buildNumberedConversationChunks, parseConversationMessages, type ParsedConversationMessage } from "./conversation";
 
 const stages = ["初次询盘与客户背调", "信任建立", "产品与订单匹配", "决策推进", "等待付款", "已成交", "售后与复购"];
 const profileDimensions = ["身份与组织", "客户类型与经验", "核心需求与目标", "产品兴趣", "决策权与流程", "采购意向", "价格敏感度", "信任状态", "核心关注与风险偏好", "沟通风格与下一步倾向"];
 
+const productMentionsProperty = {
+  type: "array",
+  items: {
+    type: "object", additionalProperties: false,
+    required: ["name", "mentionedBy", "customerAwareness", "customerInterest", "awarenessReason", "evidenceMessageId", "evidenceQuote"],
+    properties: {
+      name: { type: "string" },
+      mentionedBy: { type: "string", enum: ["客户", "销售", "双方"] },
+      customerAwareness: { type: "string", enum: ["不了解", "初步了解", "有使用经验", "明确熟悉", "无法判断"] },
+      customerInterest: { type: "string", enum: ["明确感兴趣", "可能感兴趣", "未表现兴趣", "明确拒绝", "无法判断"] },
+      awarenessReason: { type: "string" }, evidenceMessageId: { type: "string" }, evidenceQuote: { type: "string" },
+    },
+  },
+};
+
 const customerSchema = {
   type: "object",
   additionalProperties: false,
-  required: ["summary", "profile", "emotionProfile", "stage", "parallelStages", "stageReason", "confidence"],
+  required: ["summary", "profile", "productMentions", "emotionProfile", "stage", "parallelStages", "stageReason", "confidence"],
   properties: {
     summary: { type: "string" },
     profile: { type: "array", items: { type: "string" } },
+    productMentions: productMentionsProperty,
     emotionProfile: {
       type: "object",
       additionalProperties: false,
@@ -251,10 +267,11 @@ const paymentPromptAddon = `\npayment_method（支付方式与付款安全）必
 
 const profileSchema = {
   type: "object", additionalProperties: false,
-  required: ["summary", "profile", "stage", "parallelStages", "stageReason", "confidence"],
+  required: ["summary", "profile", "productMentions", "stage", "parallelStages", "stageReason", "confidence"],
   properties: {
     summary: customerSchema.properties.summary,
     profile: customerSchema.properties.profile,
+    productMentions: productMentionsProperty,
     stage: customerSchema.properties.stage,
     parallelStages: customerSchema.properties.parallelStages,
     stageReason: customerSchema.properties.stageReason,
@@ -298,7 +315,7 @@ const checklistSchema = {
 };
 
 const analysisPrompts: Record<AnalysisModule, string> = {
-  customer: `${commonPrompt}\n只返回对话总结、客户画像标签和销售阶段。profile 由模型根据真实聊天自由提炼为简洁、具体、可独立阅读的画像标签，不预设分类、固定数量、顺序或“分类：内容”格式；应尽可能覆盖聊天中有证据的身份、经验、需求、关注点、信任、价格、决策和沟通特征，使画像足够丰富，通常可提炼 5 至 12 个标签，证据确实较少时允许更少。没有原文依据的特征不得输出，不得为了凑数量重复。stage 只能使用规定七阶段，第一至三阶段可并行。`,
+  customer: `${commonPrompt}\n只返回对话总结、客户画像标签、对话提及产品和销售阶段。profile 由模型根据真实聊天自由提炼为简洁、具体、可独立阅读的画像标签，不预设分类、固定数量、顺序或“分类：内容”格式；应尽可能覆盖聊天中有证据的身份、经验、需求、关注点、信任、价格、决策和沟通特征，使画像足够丰富，通常可提炼 5 至 12 个标签，证据确实较少时允许更少。没有原文依据的特征不得输出，不得为了凑数量重复。productMentions 必须列出聊天中出现的每一个具体产品、多肽、药物或品牌名称并去重；mentionedBy 判断客户、销售或双方提及；customerAwareness 依据客户原话判断不了解、初步了解、有使用经验、明确熟悉或无法判断；customerInterest 判断明确感兴趣、可能感兴趣、未表现兴趣、明确拒绝或无法判断；awarenessReason 说明判断依据。evidenceMessageId 和 evidenceQuote 必须引用包含该产品名或能直接证明客户了解程度的真实消息编号及逐字原文。仅由销售提及而客户未回应时，客户了解程度和兴趣必须填无法判断。stage 只能使用规定七阶段，第一至三阶段可并行。`,
   psychology: `${commonPrompt}\n只返回 emotionProfile。依据客户真实原文分析当前情绪、变化、沟通性格倾向、敏感点和决策方式，并作非临床心理研判：当前心理状态、核心驱动力、信任需求、防御或回避模式、压力反应。使用“可能、倾向”等限定语，不诊断疾病或人格障碍，不推断隐私；evidence 只引用客户消息的真实 M 编号和逐字原文，证据不足就明确说明并降低 confidence。`,
   objections: `${commonPrompt}\n只返回 objections。仅保留有客户逐字原文证据的明确异议或犹豫，禁止占位标题。未正面回答或客户再次追问=未解决；销售正面回答且客户未再追问=未追问-基本解决；销售回答后客户明确认可=客户肯定-完全解决。解决证据必须发生在异议之后；沉默、礼貌致谢和话题切换不算肯定。`,
   checklist: `${commonPrompt}\n只返回 confirmations，必须且只按顺序返回 role、seeding、medical、scammed、coa、packaging、company、feedback、logistics、payment_method 共10项。每项只使用统一精简字段：conclusion 是该项结论，detail 是方向或具体说明，source 是谁提出，handling 是销售是否处理，reaction 是客户反应，advice 是下一步建议。seeding 结论只能“需要种草/无需种草”；medical 只能“需要提供建议/无需提供建议”；scammed 只能“有被骗经历/无被骗经历”。其他项目 conclusion 简洁概括。已处理必须引用销售原文；客户明确肯定、满意或异议必须引用客户原文并符合消息顺序。未提及的字段使用未提及、未确认或不适用，不得虚构证据。只有真实成交障碍才标 risk。`,
@@ -308,6 +325,7 @@ const analysisPrompts: Record<AnalysisModule, string> = {
 export interface CustomerModuleResult {
   summary: string;
   profile: string[];
+  productMentions: ProductMention[];
   stage: SalesStage;
   parallelStages: SalesStage[];
   stageReason: string;
@@ -423,6 +441,7 @@ function deepSeekJsonExample(module: AnalysisModule): Record<string, unknown> {
   if (module === "customer") return {
     summary: "根据完整对话生成的中文总结",
     profile: ["有原文依据的画像标签一", "有原文依据的画像标签二", "有原文依据的画像标签三"],
+    productMentions: [{ name: "对话中的真实产品名", mentionedBy: "客户", customerAwareness: "初步了解", customerInterest: "明确感兴趣", awarenessReason: "根据客户原话说明判断", evidenceMessageId: "M00001", evidenceQuote: "必须替换成对应消息中的逐字原文" }],
     stage: "初次询盘与客户背调",
     parallelStages: ["信任建立"],
     stageReason: "根据客户真实表达说明阶段判断依据",
@@ -657,15 +676,33 @@ function cleanStringArray(value: unknown, fallback: string[] = ["信息不足"])
   return values.length ? values.slice(0, 5) : fallback;
 }
 
-function normalizeCustomerResult(value: unknown): CustomerModuleResult {
+function normalizeCustomerResult(value: unknown, messages: ParsedConversationMessage[]): CustomerModuleResult {
   const raw = value && typeof value === "object" ? value as Partial<CustomerModuleResult> : {};
   const profile = Array.isArray(raw.profile)
     ? raw.profile.filter((item): item is string => typeof item === "string" && Boolean(item.trim())).map((item) => item.trim())
     : [];
   const confidence = Number(raw.confidence);
+  const messageById = new Map(messages.map((message) => [message.id, message]));
+  const awarenessValues = new Set<ProductMention["customerAwareness"]>(["不了解", "初步了解", "有使用经验", "明确熟悉", "无法判断"]);
+  const interestValues = new Set<ProductMention["customerInterest"]>(["明确感兴趣", "可能感兴趣", "未表现兴趣", "明确拒绝", "无法判断"]);
+  const mentionedByValues = new Set<ProductMention["mentionedBy"]>(["客户", "销售", "双方"]);
+  const productMentions = (Array.isArray(raw.productMentions) ? raw.productMentions : []).flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const mention = item as ProductMention;
+    const message = messageById.get(mention.evidenceMessageId);
+    if (!mention.name?.trim() || !mention.awarenessReason?.trim() || !message || !hasVerifiedEvidence(messageById, mention.evidenceMessageId, mention.evidenceQuote)) return [];
+    return [{
+      name: mention.name.trim(),
+      mentionedBy: mentionedByValues.has(mention.mentionedBy) ? mention.mentionedBy : message.role === "customer" ? "客户" as const : "销售" as const,
+      customerAwareness: awarenessValues.has(mention.customerAwareness) ? mention.customerAwareness : "无法判断" as const,
+      customerInterest: interestValues.has(mention.customerInterest) ? mention.customerInterest : "无法判断" as const,
+      awarenessReason: mention.awarenessReason.trim(), evidenceMessageId: mention.evidenceMessageId, evidenceQuote: mention.evidenceQuote.trim(),
+    }];
+  }).filter((item, index, items) => items.findIndex((candidate) => candidate.name.toLocaleLowerCase() === item.name.toLocaleLowerCase()) === index);
   return {
     summary: raw.summary?.trim() || "当前对话信息不足，建议结合原始聊天人工核对。",
     profile: profile.length ? profile : ["当前对话信息不足，暂未形成明确画像"],
+    productMentions,
     stage: stages.includes(raw.stage || "") ? raw.stage as SalesStage : "初次询盘与客户背调",
     parallelStages: Array.isArray(raw.parallelStages) ? raw.parallelStages.filter((stage): stage is SalesStage => stages.includes(stage)).slice(0, 3) : [],
     stageReason: raw.stageReason?.trim() || "当前信息不足，暂按初次询盘阶段处理。",
@@ -978,7 +1015,7 @@ function validateLegacyModuleResult(module: "customer" | "risk" | "action", valu
 }
 
 function normalizeModuleResult(module: AnalysisModule, value: unknown, messages: ParsedConversationMessage[]): AnalysisModuleResult {
-  if (module === "customer") return normalizeCustomerResult(value);
+  if (module === "customer") return normalizeCustomerResult(value, messages);
   if (module === "psychology") return normalizePsychologyResult(value, messages);
   if (module === "objections") return normalizeObjectionsResult(value, messages);
   if (module === "checklist") return normalizeChecklistResult(value, messages);

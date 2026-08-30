@@ -41,6 +41,7 @@ export const emptyReport: AnalysisReport = {
   summary: "等待 AI 完成对话分析。",
   profile: [],
   emotionProfile: { currentEmotion: "待分析", emotionTrend: "待分析", personalityTraits: ["信息不足"], decisionStyle: "待分析", sensitivities: ["信息不足"], psychologicalState: "待分析", coreMotivations: ["信息不足"], trustNeeds: ["信息不足"], defensePatterns: ["信息不足"], pressureResponse: "待分析", evidence: [], advice: ["等待更多客户对话后再判断。"], confidence: 0 },
+  productMentions: [],
   stage: "初次询盘与客户背调",
   parallelStages: [],
   stageReason: "当前尚无足够信息判断销售阶段。",
@@ -68,6 +69,7 @@ export const demoReport: AnalysisReport = {
     "核心关注与风险偏好：重视 COA 与实物一致性，偏好可控的首单方案",
     "沟通风格与下一步倾向：问题直接，倾向先确认资料和付款安全再推进",
   ],
+  productMentions: [],
   emotionProfile: {
     currentEmotion: "谨慎且存在首单不安全感，但仍保持明确兴趣",
     emotionTrend: "从产品了解逐渐转向对批次一致性和付款保障的审慎核验",

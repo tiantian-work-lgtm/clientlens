@@ -38,7 +38,7 @@ import {
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { defaultConfirmations, defaultProgress, emptyReport, initialTasks } from "@/lib/demo-data";
 import { parseConversationMessages } from "@/lib/conversation";
-import type { AnalysisModule, AnalysisModuleStatus, ConfirmationItem, ConfirmationStatus, CustomerTask, HesitationSignal, ImportPreview, ProductResearch, Provider, SalesStage, SourceType } from "@/lib/types";
+import type { AnalysisModule, AnalysisModuleStatus, ConfirmationItem, ConfirmationStatus, CustomerTask, HesitationSignal, ImportPreview, ProductMention, ProductResearch, Provider, SalesStage, SourceType } from "@/lib/types";
 import SettingsManager from "@/app/components/settings-manager";
 
 type View = "analysis" | "scripts" | "products" | "translate" | "settings";
@@ -183,6 +183,24 @@ function normalizeReport(value: unknown, conversation = ""): CustomerTask["repor
     confidence: Number.isFinite(hesitationConfidence) ? Math.min(1, Math.max(0, hesitationConfidence)) : 0,
   } : undefined;
   const rawProductResearch = report.productResearch && typeof report.productResearch === "object" && !Array.isArray(report.productResearch) ? report.productResearch as ProductResearch : undefined;
+  const rawProductMentions = Array.isArray(report.productMentions) ? report.productMentions : [];
+  const productMentions: CustomerTask["report"]["productMentions"] = rawProductMentions.flatMap((value) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+    const item = value as Record<string, unknown>;
+    const message = messageById.get(stringValue(item.evidenceMessageId));
+    const quote = normalizeEvidenceQuote(item.evidenceQuote, conversation);
+    const name = stringValue(item.name);
+    if (!name || !message || !quote || !message.content.normalize("NFKC").includes(quote.normalize("NFKC"))) return [];
+    const mentionedBy: ProductMention["mentionedBy"] = item.mentionedBy === "客户" || item.mentionedBy === "双方" ? item.mentionedBy : "销售";
+    const customerAwareness: ProductMention["customerAwareness"] = item.customerAwareness === "不了解" || item.customerAwareness === "初步了解" || item.customerAwareness === "有使用经验" || item.customerAwareness === "明确熟悉" ? item.customerAwareness : "无法判断";
+    const customerInterest: ProductMention["customerInterest"] = item.customerInterest === "明确感兴趣" || item.customerInterest === "可能感兴趣" || item.customerInterest === "未表现兴趣" || item.customerInterest === "明确拒绝" ? item.customerInterest : "无法判断";
+    return [{
+      name,
+      mentionedBy, customerAwareness, customerInterest,
+      awarenessReason: stringValue(item.awarenessReason, "当前对话不足以判断客户对该产品的了解程度。"),
+      evidenceMessageId: message.id, evidenceQuote: quote,
+    }];
+  }).filter((item, index, items) => items.findIndex((candidate) => candidate.name.toLocaleLowerCase() === item.name.toLocaleLowerCase()) === index);
   const objections = rawObjections.flatMap((value) => {
     if (!value || typeof value !== "object" || Array.isArray(value)) return [];
     const item = value as Record<string, unknown>;
@@ -334,6 +352,7 @@ function normalizeReport(value: unknown, conversation = ""): CustomerTask["repor
     profile,
     emotionProfile,
     hesitationAnalysis,
+    productMentions,
     productResearch: rawProductResearch,
     stage: normalizeStage(stringValue(report.stage)),
     parallelStages,
@@ -353,7 +372,7 @@ const analysisModuleLabels: Record<AnalysisModule, string> = { customer: "总结
 
 function mergeAnalysisModule(report: CustomerTask["report"], module: AnalysisModule, result: unknown, conversation: string) {
   const value = result && typeof result === "object" ? result as Record<string, unknown> : {};
-  if (module === "customer") return normalizeReport({ ...report, summary: value.summary, profile: value.profile, stage: value.stage, parallelStages: value.parallelStages, stageReason: value.stageReason, confidence: value.confidence }, conversation);
+  if (module === "customer") return normalizeReport({ ...report, summary: value.summary, profile: value.profile, productMentions: value.productMentions, stage: value.stage, parallelStages: value.parallelStages, stageReason: value.stageReason, confidence: value.confidence }, conversation);
   if (module === "psychology") return normalizeReport({ ...report, emotionProfile: value.emotionProfile }, conversation);
   if (module === "objections") return normalizeReport({ ...report, objections: value.objections }, conversation);
   if (module === "checklist") return normalizeReport({ ...report, confirmations: value.confirmations }, conversation);
@@ -563,7 +582,6 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
   const [analyzing, setAnalyzing] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState("");
-  const [showProductResearch, setShowProductResearch] = useState(Boolean(activeTask.report.productResearch));
   const productResearchRef = useRef<HTMLDivElement>(null);
   const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({});
   const [activeReportSection, setActiveReportSection] = useState<ReportSectionId>("summary");
@@ -575,8 +593,6 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
     return state ? state === "done" : activeTask.status !== "analyzing";
   };
   const filtered = tasks.filter((task) => task.name.toLowerCase().includes(taskSearch.toLowerCase()));
-
-  useEffect(() => setShowProductResearch(Boolean(activeTask.report.productResearch)), [activeTask.id, activeTask.report.productResearch]);
 
   useEffect(() => {
     skipCollapseSaveRef.current = true;
@@ -602,7 +618,7 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
     }, { root, rootMargin: "-150px 0px -62% 0px", threshold: 0 });
     sections.forEach((section) => observer.observe(section));
     return () => observer.disconnect();
-  }, [activeTask.id, showProductResearch, activeTask.status]);
+  }, [activeTask.id, activeTask.status]);
 
   const toggleReportSection = (id: ReportSectionId) => setCollapsedSections((current) => ({ ...current, [id]: !current[id] }));
 
@@ -612,10 +628,10 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
     if (moduleVisible("psychology")) sections.push({ id: "psychology", label: "情绪与心理" });
     if (moduleVisible("objections")) sections.push({ id: "objections", label: "异议与犹豫", meta: String(activeTask.report.objections.length) }, { id: "hesitation", label: "深度犹豫", meta: "按需" });
     if (moduleVisible("checklist")) sections.push({ id: "checklist", label: "确认清单", meta: `${activeTask.report.confirmations.filter((item) => item.status === "confirmed" || item.status === "na").length}/${activeTask.report.confirmations.length}` });
-    if (showProductResearch) sections.push({ id: "product-research", label: "产品匹配", meta: "按需" });
+    sections.push({ id: "product-research", label: "产品匹配", meta: activeTask.report.productMentions.length ? String(activeTask.report.productMentions.length) : "按需" });
     if (moduleVisible("action")) sections.push({ id: "improvements", label: "沟通改善" }, { id: "next-actions", label: "下一步建议" });
     return sections;
-  }, [activeTask, showProductResearch]);
+  }, [activeTask]);
 
   const openReportSection = (id: ReportSectionId) => {
     setCollapsedSections((current) => ({ ...current, [id]: false }));
@@ -625,7 +641,6 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
   const setAllReportSections = (collapsed: boolean) => setCollapsedSections(Object.fromEntries(reportSections.map((section) => [section.id, collapsed])));
 
   const openProductResearch = () => {
-    setShowProductResearch(true);
     setCollapsedSections((current) => ({ ...current, "product-research": false }));
     window.setTimeout(() => productResearchRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
   };
@@ -827,9 +842,9 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
           <ConfirmationChecklist task={activeTask} onUpdate={onUpdate} onLocate={openRawChat} onOpenProductResearch={openProductResearch} />
           </>}
 
-          {showProductResearch && <div ref={productResearchRef} className="product-research-anchor">
+          <div ref={productResearchRef} className="product-research-anchor">
             <ProductResearchCard task={activeTask} onUpdate={onUpdate} onLocate={openRawChat} />
-          </div>}
+          </div>
 
           {moduleVisible("action") && <>
           <ReportCard icon={Zap} title="本次沟通可改善" tone="amber" sectionId="improvements">
@@ -977,13 +992,15 @@ function DeepHesitationCard({ task, onUpdate, onLocate }: { task: CustomerTask; 
 
 function ProductResearchCard({ task, onUpdate, onLocate }: { task: CustomerTask; onUpdate: (task: CustomerTask) => void; onLocate: (messageId?: string, quote?: string) => void }) {
   const research = task.report.productResearch;
-  const defaultProduct = research?.productName || (task.customer.product && task.customer.product !== "待识别" ? task.customer.product : "KLOW");
+  const firstMentionName = task.report.productMentions[0]?.name || "";
+  const suggestedProduct = firstMentionName || (task.customer.product && task.customer.product !== "待识别" ? task.customer.product : "KLOW");
+  const defaultProduct = research?.productName || suggestedProduct;
   const [productName, setProductName] = useState(defaultProduct);
   const [stage, setStage] = useState<"searching" | "formatting" | null>(null);
   const [error, setError] = useState("");
   const [searchSummary, setSearchSummary] = useState("");
 
-  useEffect(() => setProductName(defaultProduct), [task.id, defaultProduct]);
+  useEffect(() => setProductName(task.report.productResearch?.productName || suggestedProduct), [task.id, firstMentionName]);
 
   const runResearch = async () => {
     if (!productName.trim()) return setError("请先输入产品名称");
@@ -1021,6 +1038,16 @@ function ProductResearchCard({ task, onUpdate, onLocate }: { task: CustomerTask;
   return <ReportCard icon={Globe2} title="产品匹配与种草建议" tone="violet" sectionId="product-research">
     <div className="product-research">
     <div className="product-research-head"><div><strong>针对当前客户生成有资料依据的价值说明</strong><small>按需运行 · 结果随当前任务保存</small></div><span>DeepSeek Web Search</span></div>
+    <div className="mentioned-products">
+      <header><div><strong>对话提及产品</strong><small>点击产品可作为联网研究目标</small></div><span>{task.report.productMentions.length} 个</span></header>
+      {!task.report.productMentions.length && <div className="mentioned-products-empty">当前对话尚未识别到明确产品；仍可在下方手动输入产品名称。</div>}
+      {task.report.productMentions.map((item) => <article className={productName.toLocaleLowerCase() === item.name.toLocaleLowerCase() ? "selected" : ""} key={item.name}>
+        <button type="button" className="mentioned-product-select" onClick={() => setProductName(item.name)}><strong>{item.name}</strong><span>{item.mentionedBy}提及</span></button>
+        <div className="mentioned-product-status"><span>了解程度 <strong>{item.customerAwareness}</strong></span><span>客户兴趣 <strong>{item.customerInterest}</strong></span></div>
+        <p>{item.awarenessReason}</p>
+        <button type="button" className="mentioned-product-evidence" onClick={() => onLocate(item.evidenceMessageId, item.evidenceQuote)}>查看判断原文</button>
+      </article>)}
+    </div>
     <div className="product-research-form">
       <label><span>目标产品</span><input value={productName} onChange={(event) => setProductName(event.target.value)} placeholder="例如 KLOW" /></label>
       <button type="button" className="primary-button" onClick={() => void runResearch()} disabled={Boolean(stage)}>{stage ? <RefreshCw className="spin" size={14} /> : <Search size={14} />}{stage === "searching" ? "正在搜索产品资料…" : stage === "formatting" ? "正在核验并生成建议…" : research ? "重新联网研究" : "联网研究并生成话术"}</button>
