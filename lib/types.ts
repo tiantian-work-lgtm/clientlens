@@ -22,11 +22,14 @@ export interface Evidence {
 export interface Objection {
   title: string;
   severity: "高" | "中" | "低";
-  status: "待解决" | "处理中" | "已解决";
+  status: "未解决" | "未追问-基本解决" | "客户肯定-完全解决";
   evidence: string;
   evidenceMessageId?: string;
   evidenceQuote?: string;
   evidenceVerified?: boolean;
+  resolutionEvidenceMessageId?: string;
+  resolutionEvidenceQuote?: string;
+  resolutionReason?: string;
   advice: string;
 }
 

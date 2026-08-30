@@ -96,6 +96,12 @@ function isPlaceholderObjectionTitle(value: string) {
   return /^(?:待确认|待核对|需要人工核对(?:的潜在)?)?\s*异议\s*\d*$/i.test(value.trim());
 }
 
+function objectionStatusClass(status: CustomerTask["report"]["objections"][number]["status"]) {
+  if (status === "客户肯定-完全解决") return "complete";
+  if (status === "未追问-基本解决") return "basic";
+  return "unresolved";
+}
+
 function normalizeReport(value: unknown, conversation = ""): CustomerTask["report"] {
   const report = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
   const profile = stringList(report.profile);
@@ -114,7 +120,20 @@ function normalizeReport(value: unknown, conversation = ""): CustomerTask["repor
     if (!title || isPlaceholderObjectionTitle(title)) return [];
     const evidenceQuote = evidenceMessage?.content || normalizeEvidenceQuote(item.evidenceQuote, conversation) || normalizeEvidenceQuote(item.evidence, conversation);
     const severity: "高" | "中" | "低" = item.severity === "高" || item.severity === "中" || item.severity === "低" ? item.severity : "中";
-    const status: "待解决" | "处理中" | "已解决" = item.status === "待解决" || item.status === "处理中" || item.status === "已解决" ? item.status : "待解决";
+    const rawStatus = stringValue(item.status);
+    const requestedStatus: CustomerTask["report"]["objections"][number]["status"] = rawStatus === "客户肯定-完全解决"
+      ? "客户肯定-完全解决"
+      : rawStatus === "未追问-基本解决" || rawStatus === "已解决"
+        ? "未追问-基本解决"
+        : "未解决";
+    const issueIndex = parsedMessages.findIndex((message) => message.id === evidenceMessage?.id);
+    const resolutionMessage = messageById.get(stringValue(item.resolutionEvidenceMessageId));
+    const resolutionIndex = parsedMessages.findIndex((message) => message.id === resolutionMessage?.id);
+    const hasSalesAnswerBeforeResolution = parsedMessages.slice(issueIndex + 1, resolutionIndex).some((message) => message.role === "sales");
+    const resolutionValid = requestedStatus === "未解决"
+      || (requestedStatus === "未追问-基本解决" && issueIndex >= 0 && resolutionIndex > issueIndex && resolutionMessage?.role === "sales")
+      || (requestedStatus === "客户肯定-完全解决" && issueIndex >= 0 && resolutionIndex > issueIndex && resolutionMessage?.role === "customer" && hasSalesAnswerBeforeResolution);
+    const status = resolutionValid ? requestedStatus : "未解决";
     return [{
       title,
       severity,
@@ -123,6 +142,11 @@ function normalizeReport(value: unknown, conversation = ""): CustomerTask["repor
       evidenceQuote,
       evidenceMessageId: evidenceMessage?.id || "",
       evidenceVerified: Boolean(evidenceMessage || evidenceQuote),
+      resolutionEvidenceMessageId: status === "未解决" ? "" : resolutionMessage?.id || "",
+      resolutionEvidenceQuote: status === "未解决" ? "" : resolutionMessage?.content || "",
+      resolutionReason: status !== requestedStatus
+        ? "原解决状态缺少符合消息顺序要求的证据，已降级为未解决。"
+        : stringValue(item.resolutionReason, status === "未解决" ? "尚未找到符合消息顺序要求的解决证据。" : "已按消息顺序核验解决状态。"),
       advice: stringValue(item.advice, "需要结合原始对话进一步确认。"),
     }];
   });
@@ -505,12 +529,13 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
               {!activeTask.report.objections.length && <div className="empty-objections"><CheckCircle2 size={15} />暂未识别到具有原始聊天依据的明确异议</div>}
               {activeTask.report.objections.map((item, index) => (
                 <details key={item.title} open={index === 0}>
-                  <summary onClick={() => openRawChat(item.evidenceMessageId, item.evidenceQuote || item.evidence)} title="点击定位到原始聊天"><span className={`severity ${item.severity}`}>{item.severity}</span><strong>{item.title}</strong><span className="objection-state">{item.status}</span><ChevronDown size={16} /></summary>
+                  <summary><span className={`severity ${item.severity}`}>{item.severity}</span><strong>{item.title}</strong><span className={`objection-state ${objectionStatusClass(item.status)}`}>{item.status}</span><ChevronDown size={16} /></summary>
                   <div className="evidence">
                     <p className="objection-basis"><span>判断依据</span>{item.evidence}</p>
                     {item.evidenceVerified && item.evidenceQuote
-                      ? <blockquote><span>已核验原文</span>“{item.evidenceQuote.replaceAll("“", "").replaceAll("”", "") }”</blockquote>
+                      ? <blockquote><button type="button" className="evidence-locate" onClick={() => openRawChat(item.evidenceMessageId, item.evidenceQuote || item.evidence)} title="定位到原始聊天">已核验原文</button>“{item.evidenceQuote.replaceAll("“", "").replaceAll("”", "") }”</blockquote>
                       : <div className="objection-unverified"><CircleAlert size={13} />未找到可逐字匹配的原始片段，请结合原始聊天人工核对</div>}
+                    <p className="resolution-basis"><span>状态判断</span>{item.resolutionReason}</p>
                     <p><Sparkles size={14} />{item.advice}</p>
                   </div>
                 </details>

@@ -28,14 +28,17 @@ const riskSchema = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["title", "severity", "status", "evidence", "evidenceMessageId", "evidenceQuote", "advice"],
+        required: ["title", "severity", "status", "evidence", "evidenceMessageId", "evidenceQuote", "resolutionEvidenceMessageId", "resolutionEvidenceQuote", "resolutionReason", "advice"],
         properties: {
           title: { type: "string" },
           severity: { type: "string", enum: ["高", "中", "低"] },
-          status: { type: "string", enum: ["待解决", "处理中", "已解决"] },
+          status: { type: "string", enum: ["未解决", "未追问-基本解决", "客户肯定-完全解决"] },
           evidence: { type: "string" },
           evidenceMessageId: { type: "string" },
           evidenceQuote: { type: "string" },
+          resolutionEvidenceMessageId: { type: "string" },
+          resolutionEvidenceQuote: { type: "string" },
+          resolutionReason: { type: "string" },
           advice: { type: "string" },
         },
       },
@@ -78,7 +81,7 @@ const commonPrompt = `你是一名严谨的 B2B 销售对话分析师。判断�
 
 const modulePrompts: Record<AnalysisModule, string> = {
   customer: `${commonPrompt}\n只分析：对话总结、客户画像、销售阶段和总体置信度。销售阶段只能从七阶段中选择；主阶段取最接近当前成交里程碑的一项，第1至3阶段可以同时放入 parallelStages。`,
-  risk: `${commonPrompt}\n只分析异议、犹豫点、风险和确认清单。JSON 根对象必须且只能包含 objections 和 confirmations。objections 每项必须完整包含 title、severity、status、evidence、evidenceMessageId、evidenceQuote、advice；没有原始聊天直接依据的判断不要放入 objections，绝不能返回“待确认异议1”等占位标题。evidence 用中文概括；evidenceMessageId 必须填写最相关且真实存在的 M 编号；evidenceQuote 必须逐字摘录该编号消息的原文。confirmations 每项必须完整包含 id、category、label、status、evidence、evidenceMessageId、evidenceQuote、riskReason、confidence，并覆盖且只覆盖以下 11 项及括号内 id：客户角色与经验(role)、是否需要产品种草(seeding)、是否需要基础知识科普(education)、剂量/使用/医疗问题(medical)、是否有被骗经历(scammed)、COA与产品一致性(coa)、产品包装(packaging)、公司资料(company)、其他客户反馈(feedback)、物流清关和时效(logistics)、支付方式与付款安全(payment_method)。只有明确顾虑、冲突、负面信号或成交阻碍才能标记 risk，仅仅没谈到必须标记 unknown；无直接依据时 evidenceMessageId 和 evidenceQuote 都返回空字符串。`,
+  risk: `${commonPrompt}\n只分析异议、犹豫点、风险和确认清单。JSON 根对象必须且只能包含 objections 和 confirmations。objections 每项必须完整包含 title、severity、status、evidence、evidenceMessageId、evidenceQuote、resolutionEvidenceMessageId、resolutionEvidenceQuote、resolutionReason、advice；没有原始聊天直接依据的判断不要放入 objections，绝不能返回“待确认异议1”等占位标题。evidence 用中文概括；evidenceMessageId 必须填写客户提出该异议的真实 M 编号；evidenceQuote 必须逐字摘录该编号消息的原文。必须按 M 编号顺序判断解决状态：①销售没有在后续消息正面回答核心问题、回答回避问题，或客户后来再次追问同一问题，status=未解决；②销售在后续消息正面回答，且此后客户没有再追问同一问题，但客户也没有明确表示认可，status=未追问-基本解决；③销售正面回答后，客户在更晚的消息中明确肯定、接受或赞同该答案，status=客户肯定-完全解决。普通礼貌致谢、话题切换、沉默和问题发生前的肯定都不能算完全解决。基本解决时 resolutionEvidenceMessageId/Quote 必须引用异议之后销售的直接回答；完全解决时必须引用销售回答之后客户明确肯定的原文；未解决时这两个字段返回空字符串。resolutionReason 用中文说明为何符合该状态。confirmations 每项必须完整包含 id、category、label、status、evidence、evidenceMessageId、evidenceQuote、riskReason、confidence，并覆盖且只覆盖以下 11 项及括号内 id：客户角色与经验(role)、是否需要产品种草(seeding)、是否需要基础知识科普(education)、剂量/使用/医疗问题(medical)、是否有被骗经历(scammed)、COA与产品一致性(coa)、产品包装(packaging)、公司资料(company)、其他客户反馈(feedback)、物流清关和时效(logistics)、支付方式与付款安全(payment_method)。只有明确顾虑、冲突、负面信号或成交阻碍才能标记 risk，仅仅没谈到必须标记 unknown；无直接依据时 evidenceMessageId 和 evidenceQuote 都返回空字符串。`,
   action: `${commonPrompt}\n只分析本次沟通可改善之处、下一步行动和建议回复。建议必须具体可执行；suggestedReply 沿用客户语言，suggestedReplyTranslation 返回自然简体中文翻译。`,
 };
 
@@ -194,15 +197,53 @@ function hasVerifiedEvidence(messageById: Map<string, ParsedConversationMessage>
   return normalizedQuote.length >= 4 && (normalizedMessage.includes(normalizedQuote) || normalizedQuote.includes(normalizedMessage));
 }
 
+function resolutionEvidenceIsValid(
+  messages: ParsedConversationMessage[],
+  issueMessageId: string | undefined,
+  resolutionMessageId: string | undefined,
+  resolutionQuote: string | undefined,
+  status: Objection["status"],
+) {
+  if (status === "未解决") return true;
+  const issueIndex = messages.findIndex((message) => message.id === issueMessageId);
+  const resolutionIndex = messages.findIndex((message) => message.id === resolutionMessageId);
+  const messageById = new Map(messages.map((message) => [message.id, message]));
+  if (issueIndex < 0 || resolutionIndex <= issueIndex || !hasVerifiedEvidence(messageById, resolutionMessageId, resolutionQuote)) return false;
+  if (status === "未追问-基本解决") return messages[resolutionIndex]?.role === "sales";
+  return messages[resolutionIndex]?.role === "customer"
+    && messages.slice(issueIndex + 1, resolutionIndex).some((message) => message.role === "sales");
+}
+
 function normalizeRiskResult(value: AnalysisModuleResult, messages: ParsedConversationMessage[]): RiskModuleResult {
   const raw = value && typeof value === "object" ? value as Partial<RiskModuleResult> : {};
   const messageById = new Map(messages.map((message) => [message.id, message]));
-  const objections = (Array.isArray(raw.objections) ? raw.objections : []).filter((item) => {
-    return Boolean(item?.title?.trim())
+  const objections = (Array.isArray(raw.objections) ? raw.objections : []).flatMap((item) => {
+    const valid = Boolean(item?.title?.trim())
       && !/^(?:待确认|待核对|需要人工核对(?:的潜在)?)?\s*异议\s*\d*$/i.test(item.title.trim())
       && Boolean(item.evidence?.trim())
       && Boolean(item.advice?.trim())
       && hasVerifiedEvidence(messageById, item.evidenceMessageId, item.evidenceQuote);
+    if (!valid) return [];
+    const rawStatus = String(item.status);
+    const requestedStatus: Objection["status"] = rawStatus === "未追问-基本解决" || rawStatus === "客户肯定-完全解决"
+      ? rawStatus
+      : "未解决";
+    const status = resolutionEvidenceIsValid(
+      messages,
+      item.evidenceMessageId,
+      item.resolutionEvidenceMessageId,
+      item.resolutionEvidenceQuote,
+      requestedStatus,
+    ) ? requestedStatus : "未解决";
+    return [{
+      ...item,
+      status,
+      resolutionEvidenceMessageId: status === "未解决" ? "" : item.resolutionEvidenceMessageId || "",
+      resolutionEvidenceQuote: status === "未解决" ? "" : item.resolutionEvidenceQuote || "",
+      resolutionReason: status !== requestedStatus
+        ? "原解决状态缺少符合消息顺序要求的证据，已降级为未解决。"
+        : item.resolutionReason?.trim() || (status === "未解决" ? "尚未找到符合顺序要求的解决证据。" : "已按消息顺序核验解决证据。"),
+    } satisfies Objection];
   });
   const rawConfirmations = Array.isArray(raw.confirmations) ? raw.confirmations : [];
   const confirmations = confirmationDefinitions.map((definition) => {
@@ -232,6 +273,10 @@ function validateModuleResult(module: AnalysisModule, value: AnalysisModuleResul
     const messageById = new Map(messages.map((message) => [message.id, message]));
     if (result.objections.some((item) => !item.title?.trim() || /^(?:待确认|待核对|需要人工核对(?:的潜在)?)?\s*异议\s*\d*$/i.test(item.title.trim()))) throw new Error("风险模块返回了无效异议标题");
     if (result.objections.some((item) => !item.evidence?.trim() || !item.advice?.trim() || !hasVerifiedEvidence(messageById, item.evidenceMessageId, item.evidenceQuote))) throw new Error("风险模块异议缺少可核验的原始聊天依据");
+    if (result.objections.some((item) => !["未解决", "未追问-基本解决", "客户肯定-完全解决"].includes(item.status))) throw new Error("风险模块异议状态无效");
+    if (result.objections.some((item) => !item.resolutionReason?.trim())) throw new Error("风险模块异议缺少解决状态判断说明");
+    if (result.objections.some((item) => item.status === "未解决" && (item.resolutionEvidenceMessageId || item.resolutionEvidenceQuote))) throw new Error("未解决异议不应包含解决证据");
+    if (result.objections.some((item) => !resolutionEvidenceIsValid(messages, item.evidenceMessageId, item.resolutionEvidenceMessageId, item.resolutionEvidenceQuote, item.status))) throw new Error("风险模块解决状态与消息顺序不一致");
     if (result.confirmations.some((item) => !item.label?.trim() || !Number.isFinite(item.confidence))) throw new Error("风险模块确认清单字段不完整");
     if (result.confirmations.some((item) => item.status === "risk" && !hasVerifiedEvidence(messageById, item.evidenceMessageId, item.evidenceQuote))) throw new Error("风险项缺少可核验的原始聊天依据");
   }
