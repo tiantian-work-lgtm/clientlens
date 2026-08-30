@@ -31,13 +31,14 @@ const analysisSchema = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["id", "category", "label", "status", "evidence", "confidence"],
+        required: ["id", "category", "label", "status", "evidence", "riskReason", "confidence"],
         properties: {
           id: { type: "string" },
           category: { type: "string", enum: ["客户角色", "认知与经历", "产品与信任", "交易条件"] },
           label: { type: "string" },
           status: { type: "string", enum: ["confirmed", "unknown", "risk", "na"] },
           evidence: { type: "string" },
+          riskReason: { type: "string" },
           confidence: { type: "number", minimum: 0, maximum: 1 },
         },
       },
@@ -57,8 +58,9 @@ const systemPrompt = `你是一名严谨的 B2B 销售对话分析师。根据�
 3. 改善建议要具体且可执行；
 4. 销售阶段只能从以下七项选择：初次询盘与客户背调、信任建立、产品与订单匹配、决策推进、等待付款、已成交、售后与复购；主阶段取最接近当前成交里程碑的一项，第1至3阶段可同时放入 parallelStages；
 5. confirmations 必须覆盖：客户角色与经验、是否需要产品种草、是否需要基础知识科普、剂量/使用/医疗问题、是否有被骗经历、COA与产品一致性、产品包装、公司资料、其他客户反馈、物流清关和时效、支付方式与付款安全；
-6. suggestedReply 沿用客户语言，suggestedReplyTranslation 必须给出对应的自然简体中文翻译，其他分析字段使用中文；
-7. 医疗相关内容只识别是否出现以及是否需要合规转介，不生成个体化剂量或医疗建议；不虚构公开背调信息。`;
+6. confirmations 中只有对话出现明确顾虑、冲突、负面信号或成交阻碍时才能标记 risk；仅仅没有谈到必须标记 unknown。risk 项必须在 riskReason 说明风险原因，并在 evidence 提供对话依据；非 risk 项的 riskReason 返回空字符串；
+7. suggestedReply 沿用客户语言，suggestedReplyTranslation 必须给出对应的自然简体中文翻译，其他分析字段使用中文；
+8. 医疗相关内容只识别是否出现以及是否需要合规转介，不生成个体化剂量或医疗建议；不虚构公开背调信息。`;
 
 function extractOpenAIText(payload: unknown): string {
   const data = payload as { output_text?: string; output?: Array<{ content?: Array<{ type?: string; text?: string }> }> };

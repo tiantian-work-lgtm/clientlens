@@ -107,10 +107,12 @@ function normalizeReport(value: unknown): CustomerTask["report"] {
     const item = raw as Record<string, unknown>;
     const status = item.status === "confirmed" || item.status === "unknown" || item.status === "risk" || item.status === "na" ? item.status : fallback.status;
     const confidence = Number(item.confidence);
+    const evidence = stringValue(item.evidence, fallback.evidence);
     return {
       ...fallback,
       status,
-      evidence: stringValue(item.evidence, fallback.evidence),
+      evidence,
+      riskReason: status === "risk" ? stringValue(item.riskReason, evidence) : "",
       confidence: Number.isFinite(confidence) ? Math.min(1, Math.max(0, confidence)) : fallback.confidence,
     };
   });
@@ -469,13 +471,18 @@ function ConfirmationChecklist({ task, onUpdate }: { task: CustomerTask; onUpdat
   const [result, setResult] = useState<{ id: string; mode: "hook" | "explain"; text: string; translation: string } | null>(null);
   const categories: ConfirmationItem["category"][] = ["客户角色", "认知与经历", "产品与信任", "交易条件"];
   const completed = task.report.confirmations.filter((item) => item.status === "confirmed" || item.status === "na").length;
+  const riskItems = task.report.confirmations.filter((item) => item.status === "risk");
 
   const cycleStatus = (item: ConfirmationItem) => {
     const order: ConfirmationStatus[] = ["unknown", "confirmed", "risk", "na"];
     const status = order[(order.indexOf(item.status) + 1) % order.length];
     onUpdate({
       ...task,
-      report: { ...task.report, confirmations: task.report.confirmations.map((current) => current.id === item.id ? { ...current, status } : current) },
+      report: { ...task.report, confirmations: task.report.confirmations.map((current) => current.id === item.id ? {
+        ...current,
+        status,
+        riskReason: status === "risk" ? current.riskReason || "该项目由人工标记为风险，具体原因需要补充确认。" : "",
+      } : current) },
     });
   };
 
@@ -500,6 +507,14 @@ function ConfirmationChecklist({ task, onUpdate }: { task: CustomerTask; onUpdat
   return (
     <ReportCard icon={ListChecks} title={`客户确认清单 · ${completed}/${task.report.confirmations.length}`} tone="green">
       <p className="checklist-intro">点击状态可人工切换。对未确认或存在风险的项目，可结合当前对话生成探询钩子或直接说明。</p>
+      {!!riskItems.length && <div className="risk-summary">
+        <header><CircleAlert size={14} /><strong>发现 {riskItems.length} 个风险点</strong></header>
+        {riskItems.map((item) => <div className="risk-summary-item" key={item.id}>
+          <strong>{item.label}</strong>
+          <p><span>风险原因</span>{item.riskReason || item.evidence || "该项目被人工标记为风险，原因尚待补充。"}</p>
+          <p><span>对话依据</span>{item.evidence || "暂无直接对话依据，建议进一步确认。"}</p>
+        </div>)}
+      </div>}
       <div className="confirmation-groups">
         {categories.map((category) => {
           const items = task.report.confirmations.filter((item) => item.category === category);
