@@ -60,6 +60,15 @@ export interface ConfirmationItem {
   medicalAcceptanceEvidenceMessageId?: string;
   medicalAcceptanceEvidenceQuote?: string;
   medicalAdvice?: string;
+  scamExperienceStatus?: "有被骗经历" | "无被骗经历";
+  scamExperienceSummary?: string;
+  scamAddressed?: "已回应" | "尚未回应" | "未确认";
+  scamResponseEvidenceMessageId?: string;
+  scamResponseEvidenceQuote?: string;
+  scamAccepted?: "客户明确肯定" | "客户未明确肯定" | "未确认";
+  scamAcceptanceEvidenceMessageId?: string;
+  scamAcceptanceEvidenceQuote?: string;
+  scamAdvice?: string;
   confidence: number;
 }
 

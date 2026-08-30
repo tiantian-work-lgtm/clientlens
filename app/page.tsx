@@ -192,6 +192,15 @@ function normalizeReport(value: unknown, conversation = ""): CustomerTask["repor
       medicalAcceptanceEvidenceMessageId: item.id === "medical" ? stringValue(item.medicalAcceptanceEvidenceMessageId) : "",
       medicalAcceptanceEvidenceQuote: item.id === "medical" ? normalizeEvidenceQuote(item.medicalAcceptanceEvidenceQuote, conversation) : "",
       medicalAdvice: item.id === "medical" ? stringValue(item.medicalAdvice, fallback.medicalAdvice || "") : "",
+      scamExperienceStatus: item.id === "scammed" && (item.scamExperienceStatus === "有被骗经历" || item.scamExperienceStatus === "无被骗经历") ? item.scamExperienceStatus : fallback.scamExperienceStatus,
+      scamExperienceSummary: item.id === "scammed" ? stringValue(item.scamExperienceSummary, fallback.scamExperienceSummary || "") : "",
+      scamAddressed: item.id === "scammed" && (item.scamAddressed === "已回应" || item.scamAddressed === "尚未回应" || item.scamAddressed === "未确认") ? item.scamAddressed : fallback.scamAddressed,
+      scamResponseEvidenceMessageId: item.id === "scammed" ? stringValue(item.scamResponseEvidenceMessageId) : "",
+      scamResponseEvidenceQuote: item.id === "scammed" ? normalizeEvidenceQuote(item.scamResponseEvidenceQuote, conversation) : "",
+      scamAccepted: item.id === "scammed" && (item.scamAccepted === "客户明确肯定" || item.scamAccepted === "客户未明确肯定" || item.scamAccepted === "未确认") ? item.scamAccepted : fallback.scamAccepted,
+      scamAcceptanceEvidenceMessageId: item.id === "scammed" ? stringValue(item.scamAcceptanceEvidenceMessageId) : "",
+      scamAcceptanceEvidenceQuote: item.id === "scammed" ? normalizeEvidenceQuote(item.scamAcceptanceEvidenceQuote, conversation) : "",
+      scamAdvice: item.id === "scammed" ? stringValue(item.scamAdvice, fallback.scamAdvice || "") : "",
       confidence: Number.isFinite(confidence) ? Math.min(1, Math.max(0, confidence)) : 0,
     };
   });
@@ -717,6 +726,15 @@ function ConfirmationChecklist({ task, onUpdate }: { task: CustomerTask; onUpdat
                     <div><small>是否已经解答</small><p>{item.medicalAnswered || "未确认"}</p>{item.medicalAnswerEvidenceQuote && <blockquote>“{item.medicalAnswerEvidenceQuote}”</blockquote>}</div>
                     <div><small>是否获得客户肯定</small><p>{item.medicalAccepted || "未确认"}</p>{item.medicalAcceptanceEvidenceQuote && <blockquote>“{item.medicalAcceptanceEvidenceQuote}”</blockquote>}</div>
                     <div className="seeding-advice"><small>建议</small><p>{item.medicalAdvice || "明确沟通边界，并在需要时建议客户咨询合格医疗专业人士。"}</p></div>
+                  </div>}
+                </div>}
+                {item.id === "scammed" && item.scamExperienceStatus && <div className={`seeding-analysis scam-analysis ${item.scamExperienceStatus === "有被骗经历" ? "needed" : "not-needed"}`}>
+                  <header><span>被骗经历</span><strong>{item.scamExperienceStatus}</strong></header>
+                  {item.scamExperienceStatus === "有被骗经历" && <div className="seeding-detail-grid scam-detail-grid">
+                    <div><small>具体经历概述</small><p>{item.scamExperienceSummary || "待确认被骗方式、损失或由此产生的不信任。"}</p></div>
+                    <div><small>是否针对问题回应</small><p>{item.scamAddressed || "未确认"}</p>{item.scamResponseEvidenceQuote && <blockquote>“{item.scamResponseEvidenceQuote}”</blockquote>}</div>
+                    <div><small>是否获得客户肯定</small><p>{item.scamAccepted || "未确认"}</p>{item.scamAcceptanceEvidenceQuote && <blockquote>“{item.scamAcceptanceEvidenceQuote}”</blockquote>}</div>
+                    <div className="seeding-advice"><small>建议</small><p>{item.scamAdvice || "先承接客户的不信任，再用可验证资料和低风险首单方案回应。"}</p></div>
                   </div>}
                 </div>}
                 {(item.status === "unknown" || item.status === "risk") && <div className="confirmation-actions">

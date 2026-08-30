@@ -49,7 +49,7 @@ const riskSchema = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["id", "category", "label", "status", "evidence", "evidenceMessageId", "evidenceQuote", "riskReason", "seedingNeed", "seedingDirection", "seedingPerformed", "seedingPerformedEvidenceMessageId", "seedingPerformedEvidenceQuote", "seedingAccepted", "seedingAcceptanceEvidenceMessageId", "seedingAcceptanceEvidenceQuote", "seedingAdvice", "medicalNeed", "medicalDirection", "medicalAnswered", "medicalAnswerEvidenceMessageId", "medicalAnswerEvidenceQuote", "medicalAccepted", "medicalAcceptanceEvidenceMessageId", "medicalAcceptanceEvidenceQuote", "medicalAdvice", "confidence"],
+        required: ["id", "category", "label", "status", "evidence", "evidenceMessageId", "evidenceQuote", "riskReason", "seedingNeed", "seedingDirection", "seedingPerformed", "seedingPerformedEvidenceMessageId", "seedingPerformedEvidenceQuote", "seedingAccepted", "seedingAcceptanceEvidenceMessageId", "seedingAcceptanceEvidenceQuote", "seedingAdvice", "medicalNeed", "medicalDirection", "medicalAnswered", "medicalAnswerEvidenceMessageId", "medicalAnswerEvidenceQuote", "medicalAccepted", "medicalAcceptanceEvidenceMessageId", "medicalAcceptanceEvidenceQuote", "medicalAdvice", "scamExperienceStatus", "scamExperienceSummary", "scamAddressed", "scamResponseEvidenceMessageId", "scamResponseEvidenceQuote", "scamAccepted", "scamAcceptanceEvidenceMessageId", "scamAcceptanceEvidenceQuote", "scamAdvice", "confidence"],
         properties: {
           id: { type: "string" },
           category: { type: "string", enum: ["客户角色", "认知与经历", "产品与信任", "交易条件"] },
@@ -77,6 +77,15 @@ const riskSchema = {
           medicalAcceptanceEvidenceMessageId: { type: "string" },
           medicalAcceptanceEvidenceQuote: { type: "string" },
           medicalAdvice: { type: "string" },
+          scamExperienceStatus: { type: "string", enum: ["有被骗经历", "无被骗经历", ""] },
+          scamExperienceSummary: { type: "string" },
+          scamAddressed: { type: "string", enum: ["已回应", "尚未回应", "未确认", ""] },
+          scamResponseEvidenceMessageId: { type: "string" },
+          scamResponseEvidenceQuote: { type: "string" },
+          scamAccepted: { type: "string", enum: ["客户明确肯定", "客户未明确肯定", "未确认", ""] },
+          scamAcceptanceEvidenceMessageId: { type: "string" },
+          scamAcceptanceEvidenceQuote: { type: "string" },
+          scamAdvice: { type: "string" },
           confidence: { type: "number", minimum: 0, maximum: 1 },
         },
       },
@@ -103,6 +112,8 @@ const modulePrompts: Record<AnalysisModule, string> = {
   risk: `${commonPrompt}\n只分析异议、犹豫点、风险和确认清单，JSON 根对象只能包含 objections 和 confirmations。异议必须有真实客户原文，禁止“待确认异议1”等占位标题。按消息顺序判断：未正面回答、回避或客户再次追问=未解决；销售正面回答且客户未再追问=未追问-基本解决；销售回答后客户明确认可=客户肯定-完全解决。基本解决引用销售回答，完全解决引用客户后续肯定；沉默、礼貌致谢或话题切换不算肯定。确认清单必须且只返回 10 项：role、seeding、medical、scammed、coa、packaging、company、feedback、logistics、payment_method，禁止返回 education。只有明确顾虑或成交阻碍才能标记 risk，没谈到应标记 unknown。所有 evidenceQuote 必须逐字引用对应 M 编号原文。seeding 必须在需要种草/无需种草中二选一：需要时填写客户改善期望或痛点方向、销售是否已种草、客户是否在种草后明确肯定及下一步建议；已种草必须引用销售原话，客户明确肯定必须引用更晚的客户原话；非 seeding 项的全部 seeding 字段为空。medical 必须在需要提供建议/无需提供建议中二选一：客户提出剂量、用法、不良反应、禁忌、身体状况、疗效预期等需求时判为需要；需要时填写需求方向、是否已合规解答、客户是否在解答后明确肯定及下一步建议；已解答必须引用销售原话，客户明确肯定必须引用更晚的客户原话；不得生成个体化剂量、诊疗结论或替代专业医生，建议只能是安全沟通或专业转介；非 medical 项的全部 medical 字段为空。`,
   action: `${commonPrompt}\n只分析本次沟通可改善之处、下一步行动和建议回复。建议必须具体可执行；suggestedReply 沿用客户语言，suggestedReplyTranslation 返回自然简体中文翻译。`,
 };
+
+const scamPromptAddon = `\nscammed（是否有被骗经历）必须在“有被骗经历”和“无被骗经历”中二选一。“无被骗经历”仅表示当前聊天未发现相关表述，不得写成已核实的终身事实。有被骗经历时必须用 evidenceMessageId/Quote 引用客户原话，scamExperienceSummary 概括被骗方式、损失或造成的不信任；scamAddressed 判断销售是否针对该经历回应，已回应时 scamResponseEvidenceMessageId/Quote 必须引用销售原话；scamAccepted 只有客户在回应之后明确认可、接受或信任改善时才可填客户明确肯定，并引用更晚的客户原话；scamAdvice 给出建立信任和降低首次合作风险的具体建议。无被骗经历时这些明细字段返回空字符串。非 scammed 项的全部 scam 字段返回空字符串。`;
 
 export interface CustomerModuleResult {
   summary: string;
@@ -294,6 +305,15 @@ function normalizeRiskResult(value: AnalysisModuleResult, messages: ParsedConver
       medicalAcceptanceEvidenceMessageId: item?.id === "medical" ? item.medicalAcceptanceEvidenceMessageId || "" : "",
       medicalAcceptanceEvidenceQuote: item?.id === "medical" ? item.medicalAcceptanceEvidenceQuote || "" : "",
       medicalAdvice: item?.id === "medical" ? item.medicalAdvice?.trim() || "" : "",
+      scamExperienceStatus: item?.id === "scammed" && (item.scamExperienceStatus === "有被骗经历" || item.scamExperienceStatus === "无被骗经历") ? item.scamExperienceStatus : undefined,
+      scamExperienceSummary: item?.id === "scammed" ? item.scamExperienceSummary?.trim() || "" : "",
+      scamAddressed: item?.id === "scammed" && (item.scamAddressed === "已回应" || item.scamAddressed === "尚未回应" || item.scamAddressed === "未确认") ? item.scamAddressed : undefined,
+      scamResponseEvidenceMessageId: item?.id === "scammed" ? item.scamResponseEvidenceMessageId || "" : "",
+      scamResponseEvidenceQuote: item?.id === "scammed" ? item.scamResponseEvidenceQuote || "" : "",
+      scamAccepted: item?.id === "scammed" && (item.scamAccepted === "客户明确肯定" || item.scamAccepted === "客户未明确肯定" || item.scamAccepted === "未确认") ? item.scamAccepted : undefined,
+      scamAcceptanceEvidenceMessageId: item?.id === "scammed" ? item.scamAcceptanceEvidenceMessageId || "" : "",
+      scamAcceptanceEvidenceQuote: item?.id === "scammed" ? item.scamAcceptanceEvidenceQuote || "" : "",
+      scamAdvice: item?.id === "scammed" ? item.scamAdvice?.trim() || "" : "",
       confidence: Number.isFinite(confidence) ? Math.min(1, Math.max(0, confidence)) : 0,
     } satisfies ConfirmationItem;
   });
@@ -343,12 +363,25 @@ function validateModuleResult(module: AnalysisModule, value: AnalysisModuleResul
     const answerIndex = messages.findIndex((message) => message.id === medical.medicalAnswerEvidenceMessageId);
     const medicalAcceptanceIndex = messages.findIndex((message) => message.id === medical.medicalAcceptanceEvidenceMessageId);
     if (medical.medicalAccepted === "客户明确肯定" && (medicalAcceptanceMessage?.role !== "customer" || answerIndex < 0 || medicalAcceptanceIndex <= answerIndex || !hasVerifiedEvidence(messageById, medical.medicalAcceptanceEvidenceMessageId, medical.medicalAcceptanceEvidenceQuote))) throw new Error("客户肯定结论缺少解答之后的可核验原文");
+    const scammed = result.confirmations.find((item) => item.id === "scammed");
+    if (!scammed || (scammed.scamExperienceStatus !== "有被骗经历" && scammed.scamExperienceStatus !== "无被骗经历")) throw new Error("被骗经历分析缺少明确结论");
+    if (scammed.scamExperienceStatus === "有被骗经历") {
+      const scamEvidenceMessage = messageById.get(scammed.evidenceMessageId || "");
+      if (scamEvidenceMessage?.role !== "customer" || !hasVerifiedEvidence(messageById, scammed.evidenceMessageId, scammed.evidenceQuote)) throw new Error("被骗经历缺少可核验的客户原文");
+      if (!scammed.scamExperienceSummary?.trim() || !scammed.scamAddressed || !scammed.scamAccepted || !scammed.scamAdvice?.trim()) throw new Error("被骗经历必须完整返回经历、回应、肯定与建议");
+      const scamResponseMessage = messageById.get(scammed.scamResponseEvidenceMessageId || "");
+      if (scammed.scamAddressed === "已回应" && (scamResponseMessage?.role !== "sales" || !hasVerifiedEvidence(messageById, scammed.scamResponseEvidenceMessageId, scammed.scamResponseEvidenceQuote))) throw new Error("被骗经历已回应结论缺少销售原文");
+      const scamAcceptanceMessage = messageById.get(scammed.scamAcceptanceEvidenceMessageId || "");
+      const scamResponseIndex = messages.findIndex((message) => message.id === scammed.scamResponseEvidenceMessageId);
+      const scamAcceptanceIndex = messages.findIndex((message) => message.id === scammed.scamAcceptanceEvidenceMessageId);
+      if (scammed.scamAccepted === "客户明确肯定" && (scamAcceptanceMessage?.role !== "customer" || scamResponseIndex < 0 || scamAcceptanceIndex <= scamResponseIndex || !hasVerifiedEvidence(messageById, scammed.scamAcceptanceEvidenceMessageId, scammed.scamAcceptanceEvidenceQuote))) throw new Error("被骗经历的客户肯定缺少回应之后的客户原文");
+    }
   }
   return value;
 }
 
 async function requestModuleOnce(config: RuntimeProviderConfig, provider: Provider, module: AnalysisModule, input: string, merge = false): Promise<AnalysisModuleResult> {
-  const instruction = `${modulePrompts[module]}${merge ? "\n下面是分段分析结果，请去重并合并为一个最终结果。消息编号与原文必须原样保留。" : ""}`;
+  const instruction = `${modulePrompts[module]}${module === "risk" ? scamPromptAddon : ""}${merge ? "\n下面是分段分析结果，请去重并合并为一个最终结果。消息编号与原文必须原样保留。" : ""}`;
   if (provider === "openai") {
     return requestOpenAIJson<AnalysisModuleResult>(config, moduleSchema(module), `customer_${module}_analysis`, instruction, input);
   }
