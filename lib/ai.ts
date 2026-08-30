@@ -617,6 +617,80 @@ function normalizeCustomerResult(value: unknown): CustomerModuleResult {
   };
 }
 
+function requireRawModuleResult(module: AnalysisModule, value: unknown, messages: ParsedConversationMessage[]) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${module} 模块返回了空结果或无效 JSON 对象`);
+  }
+  const raw = value as Record<string, unknown>;
+  if (module === "customer") {
+    const summary = typeof raw.summary === "string" ? raw.summary.trim() : "";
+    const profile = Array.isArray(raw.profile) ? raw.profile.filter((item) => typeof item === "string" && item.trim()) : [];
+    const stage = typeof raw.stage === "string" ? raw.stage : "";
+    const stageReason = typeof raw.stageReason === "string" ? raw.stageReason.trim() : "";
+    if (!summary || profile.length < 3 || !stages.includes(stage) || !stageReason || !Number.isFinite(Number(raw.confidence))) {
+      throw new Error("客户总结或画像字段不完整（至少需要总结、3 个有效画像标签、阶段、阶段依据和置信度）");
+    }
+    return;
+  }
+  if (module === "psychology") {
+    const emotion = raw.emotionProfile && typeof raw.emotionProfile === "object" && !Array.isArray(raw.emotionProfile)
+      ? raw.emotionProfile as Record<string, unknown> : {};
+    const requiredStrings = ["currentEmotion", "emotionTrend", "communicationStyle", "decisionStyle", "psychologicalState", "pressureResponse"];
+    const requiredLists = ["personalityTraits", "sensitivities", "coreMotivations", "trustNeeds", "defensePatterns", "advice"];
+    const stringsComplete = requiredStrings.every((key) => typeof emotion[key] === "string" && Boolean((emotion[key] as string).trim()));
+    const listsComplete = requiredLists.every((key) => Array.isArray(emotion[key]) && (emotion[key] as unknown[]).some((item) => typeof item === "string" && item.trim()));
+    if (!stringsComplete || !listsComplete || !Array.isArray(emotion.evidence) || !Number.isFinite(Number(emotion.confidence))) {
+      throw new Error("客户情绪与沟通性格模块字段不完整");
+    }
+    if (messages.some((message) => message.role === "customer") && emotion.evidence.length === 0) {
+      throw new Error("客户情绪与沟通性格模块缺少客户原文依据");
+    }
+    return;
+  }
+  if (module === "objections") {
+    if (!Array.isArray(raw.objections)) throw new Error("异议模块缺少 objections 数组");
+    return;
+  }
+  if (module === "checklist") {
+    const confirmations = Array.isArray(raw.confirmations) ? raw.confirmations as Array<Record<string, unknown>> : [];
+    const ids = new Set(confirmations.map((item) => item?.id));
+    if (confirmations.length !== confirmationIds.length || confirmationIds.some((id) => !ids.has(id))) {
+      throw new Error("客户确认清单字段不完整，必须返回全部 10 项");
+    }
+    if (confirmations.some((item) => typeof item.advice !== "string" || !item.advice.trim() || !Number.isFinite(Number(item.confidence)))) {
+      throw new Error("客户确认清单缺少建议或置信度");
+    }
+    return;
+  }
+  const improvements = Array.isArray(raw.improvements) ? raw.improvements.filter((item) => typeof item === "string" && item.trim()) : [];
+  const nextActions = Array.isArray(raw.nextActions) ? raw.nextActions.filter((item) => typeof item === "string" && item.trim()) : [];
+  if (!improvements.length || !nextActions.length || typeof raw.suggestedReply !== "string" || !raw.suggestedReply.trim() || typeof raw.suggestedReplyTranslation !== "string" || !raw.suggestedReplyTranslation.trim()) {
+    throw new Error("行动建议模块字段不完整");
+  }
+}
+
+function requireNormalizedModuleResult(module: AnalysisModule, value: AnalysisModuleResult, messages: ParsedConversationMessage[]) {
+  if (module === "customer") {
+    const result = value as CustomerModuleResult;
+    if (!result.summary.trim() || result.profile.length < 3 || !Number.isFinite(result.confidence)) throw new Error("客户总结或画像未通过质量检查");
+    return;
+  }
+  if (module === "psychology") {
+    const result = value as PsychologyModuleResult;
+    if (messages.some((message) => message.role === "customer") && !result.emotionProfile.evidence.length) throw new Error("情绪与沟通性格原文依据未通过核验");
+    return;
+  }
+  if (module === "objections") {
+    const result = value as ObjectionsModuleResult;
+    if (result.objections.some((item) => !item.title.trim() || !item.advice.trim() || !item.evidenceMessageId || !item.evidenceQuote)) throw new Error("异议模块包含无法核验的结果");
+    return;
+  }
+  if (module === "checklist") {
+    const result = value as ChecklistModuleResult;
+    if (result.confirmations.length !== confirmationIds.length) throw new Error("客户确认清单未通过完整性检查");
+  }
+}
+
 function normalizePsychologyResult(value: unknown, messages: ParsedConversationMessage[]): PsychologyModuleResult {
   const rawRoot = value && typeof value === "object" ? value as Partial<PsychologyModuleResult> : {};
   const raw = rawRoot.emotionProfile && typeof rawRoot.emotionProfile === "object" ? rawRoot.emotionProfile as Partial<CustomerEmotionProfile> : {};
@@ -883,12 +957,17 @@ export async function analyzeModuleWithProvider(provider: Provider, conversation
       const retryPrefix = attempt ? "上一次结果未通过字段或原文核验。请严格补全所有必填字段；无法找到直接原文的异议必须删除，不得用占位内容代替。\n\n" : "";
       for (const chunk of chunks) {
         const rawResult = await requestModuleOnce(config, provider, module, `${retryPrefix}${chunk}`);
-        chunkResults.push(normalizeModuleResult(module, rawResult, messages));
+        requireRawModuleResult(module, rawResult, messages);
+        const normalizedChunk = normalizeModuleResult(module, rawResult, messages);
+        requireNormalizedModuleResult(module, normalizedChunk, messages);
+        chunkResults.push(normalizedChunk);
       }
-      const result = chunkResults.length === 1
-        ? chunkResults[0]
-        : await requestModuleOnce(config, provider, module, JSON.stringify(chunkResults), true);
-      return normalizeModuleResult(module, result, messages);
+      if (chunkResults.length === 1) return chunkResults[0];
+      const mergedRaw = await requestModuleOnce(config, provider, module, JSON.stringify(chunkResults), true);
+      requireRawModuleResult(module, mergedRaw, messages);
+      const result = normalizeModuleResult(module, mergedRaw, messages);
+      requireNormalizedModuleResult(module, result, messages);
+      return result;
     } catch (error) {
       lastError = error;
     }

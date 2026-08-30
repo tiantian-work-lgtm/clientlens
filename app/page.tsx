@@ -356,14 +356,25 @@ function mergeAnalysisModule(report: CustomerTask["report"], module: AnalysisMod
 }
 
 async function analyzeConcurrently(task: CustomerTask, conversation: string, onUpdate: (task: CustomerTask) => void, requestedModules: AnalysisModule[] = analysisModules) {
-  const resettingObjections = requestedModules.includes("objections");
-  const resettingChecklist = requestedModules.includes("checklist");
-  // 风险模块开始时先清空旧结果，避免失败时继续展示旧版本占位或过期判断。
-  let report: CustomerTask["report"] = resettingObjections || resettingChecklist ? {
-    ...task.report,
-    objections: resettingObjections ? [] : task.report.objections,
-    confirmations: resettingChecklist ? defaultConfirmations.map((item) => ({ ...item })) : task.report.confirmations,
-  } : task.report;
+  const resetAll = requestedModules.length === analysisModules.length && analysisModules.every((module) => requestedModules.includes(module));
+  // 完整重新分析时立即丢弃旧报告；单模块重试时只清空对应模块，避免旧数据与本次结果混在一起。
+  let report: CustomerTask["report"] = resetAll
+    ? { ...emptyReport, confirmations: defaultConfirmations.map((item) => ({ ...item })) }
+    : {
+      ...task.report,
+      ...(requestedModules.includes("customer") ? {
+        summary: emptyReport.summary,
+        profile: [],
+        stage: emptyReport.stage,
+        parallelStages: [],
+        stageReason: emptyReport.stageReason,
+        confidence: 0,
+      } : {}),
+      ...(requestedModules.includes("psychology") ? { emotionProfile: { ...emptyReport.emotionProfile, evidence: [], advice: [...emptyReport.emotionProfile.advice] } } : {}),
+      ...(requestedModules.includes("objections") ? { objections: [] } : {}),
+      ...(requestedModules.includes("checklist") ? { confirmations: defaultConfirmations.map((item) => ({ ...item })) } : {}),
+      ...(requestedModules.includes("action") ? { improvements: [], nextActions: [], suggestedReply: "", suggestedReplyTranslation: "" } : {}),
+    };
   let provider: Provider = task.provider;
   let completed = 0;
   let succeeded = 0;
@@ -371,7 +382,7 @@ async function analyzeConcurrently(task: CustomerTask, conversation: string, onU
   for (const module of requestedModules) states[module] = "analyzing";
   let errors: Partial<Record<AnalysisModule, string>> = { ...(task.analysisModuleErrors ?? {}) };
   for (const module of requestedModules) delete errors[module];
-  let latest: CustomerTask = { ...task, rawConversation: conversation, status: "analyzing", analysisStep: "analyzing", analysisModules: states, analysisModuleErrors: errors, analysisError: undefined };
+  let latest: CustomerTask = { ...task, rawConversation: conversation, report, status: "analyzing", analysisStep: "analyzing", analysisModules: states, analysisModuleErrors: errors, analysisError: undefined };
   onUpdate(latest);
   await Promise.all(requestedModules.map(async (module) => {
     try {
