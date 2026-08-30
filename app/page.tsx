@@ -211,6 +211,16 @@ function normalizeReport(value: unknown, conversation = ""): CustomerTask["repor
       coaAcceptanceEvidenceMessageId: item.id === "coa" ? stringValue(item.coaAcceptanceEvidenceMessageId) : "",
       coaAcceptanceEvidenceQuote: item.id === "coa" ? normalizeEvidenceQuote(item.coaAcceptanceEvidenceQuote, conversation) : "",
       coaAdvice: item.id === "coa" ? stringValue(item.coaAdvice, fallback.coaAdvice || "") : "",
+      packagingMentionSource: item.id === "packaging" && (item.packagingMentionSource === "客户主动询问" || item.packagingMentionSource === "销售主动提出" || item.packagingMentionSource === "未提及") ? item.packagingMentionSource : fallback.packagingMentionSource,
+      packagingMentionEvidenceMessageId: item.id === "packaging" ? stringValue(item.packagingMentionEvidenceMessageId) : "",
+      packagingMentionEvidenceQuote: item.id === "packaging" ? normalizeEvidenceQuote(item.packagingMentionEvidenceQuote, conversation) : "",
+      packagingExplained: item.id === "packaging" && (item.packagingExplained === "已说明" || item.packagingExplained === "尚未说明" || item.packagingExplained === "未确认") ? item.packagingExplained : fallback.packagingExplained,
+      packagingExplanationEvidenceMessageId: item.id === "packaging" ? stringValue(item.packagingExplanationEvidenceMessageId) : "",
+      packagingExplanationEvidenceQuote: item.id === "packaging" ? normalizeEvidenceQuote(item.packagingExplanationEvidenceQuote, conversation) : "",
+      packagingAccepted: item.id === "packaging" && (item.packagingAccepted === "客户明确肯定" || item.packagingAccepted === "客户未明确肯定" || item.packagingAccepted === "未确认") ? item.packagingAccepted : fallback.packagingAccepted,
+      packagingAcceptanceEvidenceMessageId: item.id === "packaging" ? stringValue(item.packagingAcceptanceEvidenceMessageId) : "",
+      packagingAcceptanceEvidenceQuote: item.id === "packaging" ? normalizeEvidenceQuote(item.packagingAcceptanceEvidenceQuote, conversation) : "",
+      packagingAdvice: item.id === "packaging" ? stringValue(item.packagingAdvice, fallback.packagingAdvice || "") : "",
       confidence: Number.isFinite(confidence) ? Math.min(1, Math.max(0, confidence)) : 0,
     };
   });
@@ -754,6 +764,15 @@ function ConfirmationChecklist({ task, onUpdate }: { task: CustomerTask; onUpdat
                     <div><small>是否已经说明</small><p>{item.coaExplained || "未确认"}</p>{item.coaExplanationEvidenceQuote && <blockquote>“{item.coaExplanationEvidenceQuote}”</blockquote>}</div>
                     <div><small>是否获得客户肯定</small><p>{item.coaAccepted || "未确认"}</p>{item.coaAcceptanceEvidenceQuote && <blockquote>“{item.coaAcceptanceEvidenceQuote}”</blockquote>}</div>
                     <div className="seeding-advice"><small>建议</small><p>{item.coaAdvice || "根据当前对话判断是否需要主动说明 COA、批次与交付产品的对应关系。"}</p></div>
+                  </div>
+                </div>}
+                {item.id === "packaging" && item.packagingMentionSource && <div className={`seeding-analysis packaging-analysis ${item.packagingMentionSource === "未提及" ? "not-needed" : "needed"}`}>
+                  <header><span>包装判断</span><strong>{item.packagingMentionSource}</strong></header>
+                  <div className="seeding-detail-grid packaging-detail-grid">
+                    <div><small>由谁提出</small><p>{item.packagingMentionSource}</p>{item.packagingMentionEvidenceQuote && <blockquote>“{item.packagingMentionEvidenceQuote}”</blockquote>}</div>
+                    <div><small>是否已经说明</small><p>{item.packagingExplained || "未确认"}</p>{item.packagingExplanationEvidenceQuote && <blockquote>“{item.packagingExplanationEvidenceQuote}”</blockquote>}</div>
+                    <div><small>是否获得客户肯定</small><p>{item.packagingAccepted || "未确认"}</p>{item.packagingAcceptanceEvidenceQuote && <blockquote>“{item.packagingAcceptanceEvidenceQuote}”</blockquote>}</div>
+                    <div className="seeding-advice"><small>建议</small><p>{item.packagingAdvice || "根据当前对话判断是否需要主动说明包装规格、标签、隐私性和运输防护。"}</p></div>
                   </div>
                 </div>}
                 {(item.status === "unknown" || item.status === "risk") && <div className="confirmation-actions">

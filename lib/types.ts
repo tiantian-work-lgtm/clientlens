@@ -79,6 +79,16 @@ export interface ConfirmationItem {
   coaAcceptanceEvidenceMessageId?: string;
   coaAcceptanceEvidenceQuote?: string;
   coaAdvice?: string;
+  packagingMentionSource?: "客户主动询问" | "销售主动提出" | "未提及";
+  packagingMentionEvidenceMessageId?: string;
+  packagingMentionEvidenceQuote?: string;
+  packagingExplained?: "已说明" | "尚未说明" | "未确认";
+  packagingExplanationEvidenceMessageId?: string;
+  packagingExplanationEvidenceQuote?: string;
+  packagingAccepted?: "客户明确肯定" | "客户未明确肯定" | "未确认";
+  packagingAcceptanceEvidenceMessageId?: string;
+  packagingAcceptanceEvidenceQuote?: string;
+  packagingAdvice?: string;
   confidence: number;
 }
 
