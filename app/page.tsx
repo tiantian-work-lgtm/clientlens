@@ -266,11 +266,17 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
   const [renaming, setRenaming] = useState<string | null>(null);
   const [draftName, setDraftName] = useState("");
   const [showRaw, setShowRaw] = useState(false);
+  const [rawTarget, setRawTarget] = useState<{ quote: string; nonce: number } | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState("");
   const isAnalyzing = analyzing || activeTask.status === "analyzing";
   const filtered = tasks.filter((task) => task.name.toLowerCase().includes(taskSearch.toLowerCase()));
+
+  const openRawChat = (quote = "") => {
+    setShowRaw(true);
+    setRawTarget({ quote, nonce: Date.now() });
+  };
 
   const rename = (task: CustomerTask) => {
     const clean = draftName.trim();
@@ -324,7 +330,7 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
   };
 
   return (
-    <div className="analysis-grid">
+    <div className={`analysis-grid ${showRaw ? "raw-open" : ""}`}>
       <aside className="task-rail">
         <div className="rail-head">
           <div><span className="eyebrow">WORKSPACE</span><h2>分析任务</h2></div>
@@ -364,7 +370,7 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
           </div>
           <div className="toolbar-actions">
             {activeTask.source === "salesmartly" && <button className="secondary-button" onClick={() => void syncLatestMessages()} disabled={syncing || isAnalyzing}><Cloud size={16} className={syncing ? "spin" : ""} />{syncing ? "同步中…" : "同步最新消息"}</button>}
-            <button className="secondary-button" onClick={() => setShowRaw(true)}><FileText size={16} />原始聊天</button>
+            <button className={`secondary-button ${showRaw ? "active" : ""}`} onClick={() => openRawChat()}><FileText size={16} />原始聊天</button>
             <button className="secondary-button"><Upload size={16} />导出</button>
             <button className="primary-button" onClick={reanalyze} disabled={isAnalyzing}><RefreshCw size={16} className={isAnalyzing ? "spin" : ""} />{isAnalyzing ? "分析中…" : "重新分析"}</button>
           </div>
@@ -409,7 +415,7 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
             <div className="objection-list">
               {activeTask.report.objections.map((item, index) => (
                 <details key={item.title} open={index === 0}>
-                  <summary><span className={`severity ${item.severity}`}>{item.severity}</span><strong>{item.title}</strong><span className="objection-state">{item.status}</span><ChevronDown size={16} /></summary>
+                  <summary onClick={() => openRawChat(item.evidenceQuote || item.evidence)} title="点击定位到原始聊天"><span className={`severity ${item.severity}`}>{item.severity}</span><strong>{item.title}</strong><span className="objection-state">{item.status}</span><ChevronDown size={16} /></summary>
                   <div className="evidence">
                     <p className="objection-basis"><span>判断依据</span>{item.evidence}</p>
                     {item.evidenceVerified && item.evidenceQuote
@@ -435,9 +441,9 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
         </div>}
       </section>
 
-      <CustomerPanel task={activeTask} onUpdate={onUpdate} onAnalyze={reanalyze} analyzing={isAnalyzing} />
-
-      {showRaw && <RawDrawer task={activeTask} onUpdate={onUpdate} onClose={() => setShowRaw(false)} />}
+      {showRaw
+        ? <RawChatPanel task={activeTask} onUpdate={onUpdate} onClose={() => setShowRaw(false)} target={rawTarget} />
+        : <CustomerPanel task={activeTask} onUpdate={onUpdate} onAnalyze={reanalyze} analyzing={isAnalyzing} />}
     </div>
   );
 }
@@ -653,13 +659,29 @@ function parseConversation(conversation: string) {
   return messages;
 }
 
-function RawDrawer({ task, onClose, onUpdate }: { task: CustomerTask; onClose: () => void; onUpdate: (task: CustomerTask) => void }) {
+function RawChatPanel({ task, onClose, onUpdate, target }: { task: CustomerTask; onClose: () => void; onUpdate: (task: CustomerTask) => void; target: { quote: string; nonce: number } | null }) {
   const [translating, setTranslating] = useState(false);
   const [translationError, setTranslationError] = useState("");
+  const [highlightedIndex, setHighlightedIndex] = useState<number | null>(null);
+  const messageRefs = useRef<Array<HTMLDivElement | null>>([]);
   const messages = useMemo(() => parseConversation(task.rawConversation), [task.rawConversation]);
   const savedTranslation = task.rawTranslation?.source === task.rawConversation && task.rawTranslation.lines.length === messages.length
     ? task.rawTranslation.lines
     : undefined;
+
+  useEffect(() => {
+    if (!target?.quote) return;
+    const cleanQuote = target.quote.replace(/^[\s"'“”‘’]+|[\s"'“”‘’]+$/g, "").replace(/^(?:\[[^\]]+\]\s*)?(?:Customer|Sales|客户|销售)\s*:\s*/i, "").trim();
+    const normalize = (text: string) => text.normalize("NFKC").replace(/[‘’]/g, "'").replace(/[–—]/g, "-").replace(/\s+/g, " ").trim().toLocaleLowerCase();
+    const needle = normalize(cleanQuote);
+    if (!needle) return;
+    const index = messages.findIndex((message) => normalize(message.content).includes(needle) || needle.includes(normalize(message.content)));
+    if (index < 0) return;
+    setHighlightedIndex(index);
+    messageRefs.current[index]?.scrollIntoView({ behavior: "smooth", block: "center" });
+    const timer = window.setTimeout(() => setHighlightedIndex(null), 1800);
+    return () => window.clearTimeout(timer);
+  }, [messages, target]);
 
   const translate = async () => {
     setTranslating(true);
@@ -682,17 +704,17 @@ function RawDrawer({ task, onClose, onUpdate }: { task: CustomerTask; onClose: (
     }
   };
 
-  return <><div className="overlay" onClick={onClose} /><aside className="drawer raw-drawer">
+  return <aside className="raw-side-panel">
     <header><div><span className="eyebrow">SOURCE DATA</span><h2>原始聊天记录</h2></div><div className="drawer-actions"><button className="secondary-button" onClick={() => void translate()} disabled={translating}><Languages size={15} />{translating ? "翻译中…" : savedTranslation ? "重新翻译" : "翻译"}</button><button className="icon-button" onClick={onClose}><X size={18} /></button></div></header>
     <div className="drawer-meta"><span>{sourceMeta[task.source].label}</span><span>{task.customer.name}</span><span>{messages.length} 条消息</span></div>
     {translationError && <div className="raw-translation-error"><CircleAlert size={14} />{translationError}</div>}
     <div className="raw-chat-scroll">
-      {messages.map((message, index) => <div className={`raw-message ${message.role}`} key={`${index}-${message.content.slice(0, 20)}`}>
+      {messages.map((message, index) => <div ref={(element) => { messageRefs.current[index] = element; }} className={`raw-message ${message.role} ${highlightedIndex === index ? "flash-highlight" : ""}`} key={`${index}-${message.content.slice(0, 20)}`}>
         <div className="raw-message-meta"><strong>{message.label}</strong>{message.time && <span>{message.time}</span>}</div>
         <div className="raw-message-bubble"><p>{message.content}</p>{savedTranslation?.[index] && <div className="raw-message-translation"><span>中文</span><p>{savedTranslation[index]}</p></div>}</div>
       </div>)}
     </div>
-  </aside></>;
+  </aside>;
 }
 
 interface SaleSmartlyCustomerOption {
@@ -831,7 +853,7 @@ function NewTaskModal({ onClose, onCreate, onUpdate }: { onClose: () => void; on
     const workbook = XLSX.read(await file.arrayBuffer());
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
     const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "" });
-    setConversation(rows.slice(0, 200).map((row) => Object.values(row).filter(Boolean).join(" | ")).join("\n"));
+    setConversation(rows.map((row) => Object.values(row).filter(Boolean).join(" | ")).join("\n"));
   };
 
   return (

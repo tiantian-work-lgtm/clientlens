@@ -8,14 +8,34 @@ export async function POST(request: Request) {
   try {
     const body = await request.json() as { texts?: unknown };
     if (!Array.isArray(body.texts) || !body.texts.length) return NextResponse.json({ error: "缺少聊天内容" }, { status: 400 });
-    if (body.texts.length > 200) return NextResponse.json({ error: "单次最多翻译 200 条消息" }, { status: 400 });
     const texts = body.texts.map((item) => typeof item === "string" ? item.trim() : "");
-    const totalLength = texts.reduce((total, item) => total + item.length, 0);
-    if (totalLength > 20_000) return NextResponse.json({ error: "聊天内容过长，单次最多翻译 20,000 个字符" }, { status: 400 });
     const assignments = await getModelAssignments();
-    const translations = await translateConversationWithProvider(assignments.translationProvider, texts);
-    if (!translations) return NextResponse.json({ error: "请先配置翻译模型 API" }, { status: 400 });
-    return NextResponse.json({ translations, provider: assignments.translationProvider });
+    const segments = texts.flatMap((text, messageIndex) => {
+      const parts = text.match(/[\s\S]{1,6000}/g) || [""];
+      return parts.map((part, segmentIndex) => ({ messageIndex, segmentIndex, text: part }));
+    });
+    const translatedSegments: string[] = [];
+    for (let offset = 0; offset < segments.length;) {
+      const batch: typeof segments = [];
+      let characters = 0;
+      while (offset < segments.length && batch.length < 40 && characters + segments[offset].text.length <= 12_000) {
+        batch.push(segments[offset]);
+        characters += segments[offset].text.length;
+        offset += 1;
+      }
+      if (!batch.length) {
+        batch.push(segments[offset]);
+        offset += 1;
+      }
+      const translated = await translateConversationWithProvider(assignments.translationProvider, batch.map((item) => item.text));
+      if (!translated) return NextResponse.json({ error: "请先配置翻译模型 API" }, { status: 400 });
+      translatedSegments.push(...translated);
+    }
+    const translations = texts.map(() => "");
+    segments.forEach((segment, index) => {
+      translations[segment.messageIndex] += `${translations[segment.messageIndex] ? "\n" : ""}${translatedSegments[index] || ""}`;
+    });
+    return NextResponse.json({ translations, provider: assignments.translationProvider, batches: Math.ceil(segments.length / 40) });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "聊天翻译失败" }, { status: 502 });
   }

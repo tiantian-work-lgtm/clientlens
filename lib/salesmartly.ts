@@ -103,12 +103,26 @@ export async function searchSaleSmartlyCustomers(search: string) {
 }
 
 export async function getSaleSmartlyConversation(chatUserId: string) {
-  const data = await saleSmartlyGet<{ list?: RawMessage[]; total?: number }>("/api/v2/get-message-list", {
-    chat_user_id: chatUserId,
-    page_size: "100",
-    sort_type: "1",
-  });
-  const rawMessages = data.list ?? [];
+  const rawMessages: RawMessage[] = [];
+  let page = 1;
+  let total = Number.POSITIVE_INFINITY;
+  let previousPageSignature = "";
+  while (rawMessages.length < total) {
+    const data = await saleSmartlyGet<{ list?: RawMessage[]; total?: number }>("/api/v2/get-message-list", {
+      chat_user_id: chatUserId,
+      page: String(page),
+      page_size: "100",
+      sort_type: "1",
+    });
+    const pageMessages = data.list ?? [];
+    total = typeof data.total === "number" ? data.total : Number.POSITIVE_INFINITY;
+    const signature = pageMessages.map((item) => `${item.sequence_id ?? ""}:${item.send_time ?? ""}:${item.sender ?? ""}:${item.text ?? ""}`).join("|");
+    if (!pageMessages.length || (page > 1 && signature === previousPageSignature)) break;
+    rawMessages.push(...pageMessages);
+    previousPageSignature = signature;
+    if (pageMessages.length < 100) break;
+    page += 1;
+  }
   const systemMessageCount = rawMessages.filter((item) => isEnabledFlag(item.is_system)).length;
   const withdrawnMessageCount = rawMessages.filter((item) => isEnabledFlag(item.is_withdraw)).length;
   const messages = rawMessages
@@ -127,7 +141,7 @@ export async function getSaleSmartlyConversation(chatUserId: string) {
     rawMessageCount: rawMessages.length,
     systemMessageCount,
     withdrawnMessageCount,
-    total: data.total ?? rawMessages.length,
+    total: Number.isFinite(total) ? total : rawMessages.length,
   };
 }
 
