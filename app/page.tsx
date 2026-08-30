@@ -990,6 +990,7 @@ function ProductResearchCard({ task, onUpdate, onLocate }: { task: CustomerTask;
     setStage("searching");
     setError("");
     setSearchSummary("");
+    onUpdate(normalizeTask({ ...task, report: { ...task.report, productResearch: undefined }, updatedAt: "刚刚" }));
     try {
       const searchResponse = await fetch("/api/product-research", {
         method: "POST",

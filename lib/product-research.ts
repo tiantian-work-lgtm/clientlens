@@ -46,7 +46,26 @@ export async function searchProductEvidence(productName: string, conversation: s
     headers: { Authorization: `Bearer ${config.apiKey}`, "Content-Type": "application/json" },
     body: JSON.stringify({
       model: config.model,
-      instructions: `你是严谨的产品资料搜索员。使用 web_search 搜索“${productName}”及其可确认成分的公开资料。输出一份中文证据资料包，不要输出 JSON。\n\n必须包含：1. 产品名称是否存在歧义、可确认组成和规格；2. 与客户关注点有关的公开资料；3. 每条资料的完整标题、完整 http/https URL、来源级别和简短摘录；4. 资料能证明什么、不能证明什么。\n\n优先同行评审论文、政府、监管或研究机构资料，其次厂商资料。不得编造 URL、研究、成分或规格；成分研究不能直接当作复合产品效果。资料不足时明确写出。`,
+      instructions: `你是一名产品情报搜索员。必须使用 web_search 对“${productName}”进行多轮中英文搜索，先弄清楚它是什么产品或什么多肽，再调查成分、益处、作用方向和适合沟通的客户价值。输出一份中文产品情报资料包，不要输出 JSON。
+
+必须主动组合并搜索这些关键词：
+- ${productName} peptide / ${productName} 是什么多肽 / ${productName} 多肽
+- ${productName} ingredients / composition / formulation / 成分 / 配方
+- ${productName} benefits / mechanism / 功效 / 益处 / 作用原理
+- ${productName} official product / product description / 产品说明 / 官网
+- ${productName} recovery / joint / weight management / 客户在聊天中明确提到的痛点关键词
+
+如果找到可能的组成成分，继续分别搜索“成分名 benefits / mechanism / clinical research / 对应痛点”。不要只搜索一次产品名称便结束。
+
+资料包必须包含：
+1. 产品身份：它是单一多肽、复合产品、品牌名还是其他产品；英文全称、别名、拼写差异以及同名歧义。
+2. 产品成分：可确认的主要成分、各成分的作用方向、配方或规格；无法确认时说明尝试搜索过哪些方向。
+3. 益处与价值：公开资料中常见的益处、使用目的、作用方向、可能对应的客户痛点，以及与相近产品相比可能的差异。
+4. 客户关联：结合聊天中客户明确说过的痛点、期望、既往尝试和不满意之处，标出最可能打动客户的产品价值方向。
+5. 证据素材：每条资料给出完整标题、完整 http/https URL、来源级别、简短摘录，以及它能支持什么说法。
+6. 销售素材：提炼客户容易理解的通俗说法、可以自然追问的问题，以及哪些内容不宜夸大。
+
+优先产品官网或说明书、同行评审论文、政府、监管或研究机构资料，其次可靠厂商资料。不得编造 URL、研究、成分、规格或客户经历。必须区分“品牌产品信息”和“单独成分研究”，但即使品牌资料不完整，也要保留已确认的相关成分信息、客户价值方向和可继续核实的线索。`,
       input: `目标产品：${productName}\n\n客户对话：\n${numberedConversation(conversation)}`,
       tools: [{ type: "web_search" }], tool_choice: { type: "web_search" }, reasoning: { effort: "low" }, max_output_tokens: 7000,
     }),
@@ -61,15 +80,22 @@ export async function searchProductEvidence(productName: string, conversation: s
 export async function structureProductResearch(productName: string, conversation: string, searchSummary: string): Promise<ProductResearch | null> {
   const config = await getRuntimeProviderConfig("deepseek");
   if (!config) return null;
-  const instructions = `你是销售产品资料研究员。根据给定的联网搜索资料包和客户原始聊天，生成严格 JSON。不要再次联网，不要输出解释、Markdown 或 JSON 之外的文字。
+  const instructions = `你是一名具有产品理解能力和客户心理洞察能力的资深销售顾问。你的目标不是撰写机械的研究审查报告，而是把已核验的产品信息转化为自然、有吸引力、适合当前客户的种草策略。根据联网搜索资料包和客户原始聊天生成严格 JSON，不要再次联网，不要输出解释、Markdown 或 JSON 之外的文字。
 
-证据规则：
+种草分析流程：
+1. 先从客户原话理解其核心痛点、改善期望、既往尝试、对原方案的不满、购买动机、当前顾虑和最可能被打动的价值点。
+2. customerNeed 要写成具体的客户动机，不要只写产品名或笼统需求；customerEvidenceQuote 必须逐字复制最能代表需求的一条客户消息，customerEvidenceMessageId 必须是对应 M 编号。
+3. matchSummary 要站在销售视角说明“应该从哪个方向种草、为什么这个方向与客户有关、先讲什么后讲什么”，不要写成资料审查结论。
+4. talkingPoints 每一项都是一个可直接用于沟通的种草点：title 写客户能理解的价值主题；explanation 按“客户痛点 → 产品或成分价值 → 为什么与客户有关 → 如何自然表达”的顺序写，语言具体、有温度、不机械罗列功效。
+5. 优先选择最能打动当前客户的一至三个价值点，不要一次堆砌所有功效。根据客户特点选择成本比较、恢复场景、方便性、信任证据或改善期望作为切入口。
+6. suggestedReply 必须像真人销售回复：先承接客户刚才说的话，让客户感觉被理解；再自然引入一至两个最相关价值点；最后用一个容易回答的问题推动客户继续交流。使用客户主要语言，suggestedReplyTranslation 返回自然简体中文。
+7. 不要反复使用“资料不足”“无法确认”等机械句式。资料不完整时，在 limitations 准确说明边界，同时仍要基于已确认的信息给出可用的种草方向、自然探询问题和后续核实建议。只有完全没有任何相关信息时才将 matchLevel 设为“资料不足”。
+
+证据底线：
 1. 每个 talkingPoint 必须引用 sources 中至少一个完全相同的 URL，且 URL 必须逐字存在于搜索资料包；不得编造 URL、研究、成分、产品规格或客户经历。
-2. 必须区分品牌产品资料与单独成分研究。成分研究不能直接证明复合产品在客户身上的效果。
-3. 无法确认产品组成、规格或对应证据时，将 matchLevel 设为“资料不足”并写入 limitations。
-4. customerEvidenceQuote 必须逐字复制一条客户消息，customerEvidenceMessageId 必须是其 M 编号。
-5. suggestedReply 使用客户主要语言，suggestedReplyTranslation 返回自然简体中文；连接客户关注点与有依据的信息，避免空泛营销。
-6. 不生成个体化剂量、频率、周期、注射方法、联合使用、诊断或治疗方案；不作绝对疗效承诺，也不自动添加固定免责声明。`;
+2. 必须区分品牌产品资料与单独成分研究。可以利用相关成分资料设计沟通方向，但不得声称成分研究已经证明整个复合产品的效果。
+3. limitations 只记录真正影响判断的资料边界，不要让它盖过客户价值和种草策略。
+4. 不生成个体化剂量、频率、周期、注射方法、联合使用方案、诊断或治疗方案；不作保证、治愈或一定有效等绝对承诺，也不自动添加固定免责声明。`;
 
   const requestOnce = async (retry = false) => {
     const response = await fetch(`${cleanBaseUrl(config.baseUrl)}/chat/completions`, {
