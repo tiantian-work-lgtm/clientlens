@@ -25,14 +25,14 @@ interface RawCustomer {
 interface RawMessage {
   chat_user_id?: string;
   sequence_id?: number;
-  is_system?: number;
+  is_system?: number | string | boolean;
   send_time?: number;
   sender?: string;
   sender_type?: number;
   msg_type?: number;
   text?: string;
-  content?: string;
-  is_withdraw?: number;
+  content?: string | Record<string, unknown>;
+  is_withdraw?: number | string | boolean;
 }
 
 export interface SaleSmartlyCustomer {
@@ -108,15 +108,42 @@ export async function getSaleSmartlyConversation(chatUserId: string) {
     page_size: "100",
     sort_type: "1",
   });
-  const messages = (data.list ?? [])
-    .filter((item) => !item.is_withdraw && !item.is_system)
+  const rawMessages = data.list ?? [];
+  const systemMessageCount = rawMessages.filter((item) => isEnabledFlag(item.is_system)).length;
+  const withdrawnMessageCount = rawMessages.filter((item) => isEnabledFlag(item.is_withdraw)).length;
+  const messages = rawMessages
+    // SaleSmartly 的 is_system=-1 表示机器人消息，应当保留；只有 1 才是系统通知。
+    // 部分项目会将 0/1 返回为字符串，因此不能直接用 JavaScript 真值判断。
+    .filter((item) => !isEnabledFlag(item.is_withdraw) && !isEnabledFlag(item.is_system))
     .sort((left, right) => (left.send_time ?? left.sequence_id ?? 0) - (right.send_time ?? right.sequence_id ?? 0));
   const conversation = messages.map((item) => {
     const role = item.sender === chatUserId || item.sender_type === 1 ? "Customer" : "Sales";
-    const text = item.text?.trim() || item.content?.trim() || messageTypeNames[item.msg_type ?? 0] || `[消息类型 ${item.msg_type ?? 0}]`;
+    const text = extractMessageText(item);
     return `[${formatTimestamp(item.send_time ?? 0)}] ${role}: ${text}`;
   }).join("\n");
-  return { conversation, messageCount: messages.length, total: data.total ?? messages.length };
+  return {
+    conversation,
+    messageCount: messages.length,
+    rawMessageCount: rawMessages.length,
+    systemMessageCount,
+    withdrawnMessageCount,
+    total: data.total ?? rawMessages.length,
+  };
+}
+
+function isEnabledFlag(value: number | string | boolean | undefined) {
+  return value === true || value === 1 || value === "1";
+}
+
+function extractMessageText(item: RawMessage) {
+  const text = typeof item.text === "string" ? item.text.trim() : "";
+  if (text) return text;
+  if (typeof item.content === "string" && item.content.trim()) return item.content.trim();
+  if (item.content && typeof item.content === "object") {
+    const contentText = item.content.text;
+    if (typeof contentText === "string" && contentText.trim()) return contentText.trim();
+  }
+  return messageTypeNames[item.msg_type ?? 0] || `[消息类型 ${item.msg_type ?? 0}]`;
 }
 
 function formatTimestamp(value: number) {

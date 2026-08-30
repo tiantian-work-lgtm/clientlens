@@ -551,7 +551,16 @@ function NewTaskModal({ onClose, onCreate }: { onClose: () => void; onCreate: (t
       if (!response.ok) throw new Error(data.error || "读取聊天记录失败");
       importedConversation = data.conversation || "";
       importedMessageCount = data.messageCount || 0;
-      if (!importedConversation.trim()) throw new Error("该客户暂无可分析的聊天记录");
+      if (!importedConversation.trim()) {
+        const rawCount = Number(data.rawMessageCount ?? 0);
+        const total = Number(data.total ?? 0);
+        if (rawCount === 0) {
+          throw new Error(`SaleSmartly 消息接口返回 0 条记录（total: ${total}）。请确认该客户在当前 Project ID 下确实存在聊天内容。`);
+        }
+        throw new Error(
+          `SaleSmartly 返回 ${rawCount} 条记录，但均为系统通知或已撤回消息（系统 ${Number(data.systemMessageCount ?? 0)} 条，撤回 ${Number(data.withdrawnMessageCount ?? 0)} 条）。`,
+        );
+      }
     }
     if (!importedConversation.trim()) importedConversation = "Customer: Please send me more information about your product and pricing.";
     const analysisResponse = await fetch("/api/analyze", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ conversation: importedConversation }) });
