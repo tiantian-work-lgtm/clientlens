@@ -116,6 +116,29 @@ function normalizeReport(value: unknown, conversation = ""): CustomerTask["repor
   const rawObjections = Array.isArray(report.objections) ? report.objections : [];
   const parsedMessages = parseConversationMessages(conversation);
   const messageById = new Map(parsedMessages.map((message) => [message.id, message]));
+  const rawEmotionProfile = report.emotionProfile && typeof report.emotionProfile === "object" && !Array.isArray(report.emotionProfile) ? report.emotionProfile as Record<string, unknown> : {};
+  const rawEmotionEvidence = Array.isArray(rawEmotionProfile.evidence) ? rawEmotionProfile.evidence : [];
+  const emotionEvidence = rawEmotionEvidence.flatMap((value) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+    const item = value as Record<string, unknown>;
+    const message = messageById.get(stringValue(item.messageId));
+    if (!message || message.role !== "customer") return [];
+    const quote = normalizeEvidenceQuote(item.quote, conversation);
+    if (!quote || !message.content.normalize("NFKC").includes(quote.normalize("NFKC"))) return [];
+    return [{ messageId: message.id, quote, interpretation: stringValue(item.interpretation, "该原文支持当前沟通判断。") }];
+  });
+  const emotionConfidence = Number(rawEmotionProfile.confidence);
+  const emotionProfile: CustomerTask["report"]["emotionProfile"] = {
+    currentEmotion: stringValue(rawEmotionProfile.currentEmotion, "信息不足，暂无法判断当前情绪"),
+    emotionTrend: stringValue(rawEmotionProfile.emotionTrend, "信息不足，暂无法判断情绪变化"),
+    personalityTraits: stringList(rawEmotionProfile.personalityTraits, ["信息不足"]).slice(0, 5),
+    communicationStyle: stringValue(rawEmotionProfile.communicationStyle, "信息不足，暂无法判断沟通方式"),
+    decisionStyle: stringValue(rawEmotionProfile.decisionStyle, "信息不足，暂无法判断决策方式"),
+    sensitivities: stringList(rawEmotionProfile.sensitivities, ["信息不足"]).slice(0, 5),
+    evidence: emotionEvidence.slice(0, 5),
+    advice: stringList(rawEmotionProfile.advice, ["继续观察客户表达，并通过开放式问题确认其真实关注点。"]).slice(0, 5),
+    confidence: Number.isFinite(emotionConfidence) ? Math.min(1, Math.max(0, emotionConfidence)) : 0,
+  };
   const objections = rawObjections.flatMap((value) => {
     if (!value || typeof value !== "object" || Array.isArray(value)) return [];
     const item = value as Record<string, unknown>;
@@ -265,6 +288,7 @@ function normalizeReport(value: unknown, conversation = ""): CustomerTask["repor
   return {
     summary: stringValue(report.summary, "AI 未返回有效的对话总结。"),
     profile,
+    emotionProfile,
     stage: normalizeStage(stringValue(report.stage)),
     parallelStages,
     stageReason: stringValue(report.stageReason, "当前聊天记录不足以支持更具体的阶段判断。"),
@@ -279,11 +303,11 @@ function normalizeReport(value: unknown, conversation = ""): CustomerTask["repor
 }
 
 const analysisModules: AnalysisModule[] = ["customer", "risk", "action"];
-const analysisModuleLabels: Record<AnalysisModule, string> = { customer: "客户与阶段", risk: "异议与风险", action: "行动与回复" };
+const analysisModuleLabels: Record<AnalysisModule, string> = { customer: "客户、情绪与阶段", risk: "异议与风险", action: "行动与回复" };
 
 function mergeAnalysisModule(report: CustomerTask["report"], module: AnalysisModule, result: unknown, conversation: string) {
   const value = result && typeof result === "object" ? result as Record<string, unknown> : {};
-  if (module === "customer") return normalizeReport({ ...report, summary: value.summary, profile: value.profile, stage: value.stage, parallelStages: value.parallelStages, stageReason: value.stageReason, confidence: value.confidence }, conversation);
+  if (module === "customer") return normalizeReport({ ...report, summary: value.summary, profile: value.profile, emotionProfile: value.emotionProfile, stage: value.stage, parallelStages: value.parallelStages, stageReason: value.stageReason, confidence: value.confidence }, conversation);
   if (module === "risk") return normalizeReport({ ...report, objections: value.objections, confirmations: value.confirmations }, conversation);
   return normalizeReport({ ...report, improvements: value.improvements, nextActions: value.nextActions, suggestedReply: value.suggestedReply, suggestedReplyTranslation: value.suggestedReplyTranslation }, conversation);
 }
@@ -602,6 +626,30 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
               return <div key={`${label}-${index}`}><small>{label}</small><strong className={detail === "待确认" ? "unknown" : ""}>{detail}</strong></div>;
             })}</div>
           </ReportCard>
+
+          <ReportCard icon={UsersRound} title="客户情绪与沟通性格" tone="cyan">
+            <div className="emotion-headline">
+              <div><small>当前情绪</small><strong>{activeTask.report.emotionProfile.currentEmotion}</strong></div>
+              <div><small>情绪变化</small><strong>{activeTask.report.emotionProfile.emotionTrend}</strong></div>
+              <span className={`emotion-confidence score-${confidenceLabel(activeTask.report.emotionProfile.confidence)}`}>{confidenceLabel(activeTask.report.emotionProfile.confidence)} · {Math.round(activeTask.report.emotionProfile.confidence * 100)}%</span>
+            </div>
+            <div className="emotion-columns">
+              <div><small>沟通性格倾向</small><div className="emotion-tags">{activeTask.report.emotionProfile.personalityTraits.map((item) => <span key={item}>{item}</span>)}</div></div>
+              <div><small>敏感点</small><div className="emotion-tags sensitivity-tags">{activeTask.report.emotionProfile.sensitivities.map((item) => <span key={item}>{item}</span>)}</div></div>
+              <div><small>沟通方式</small><p>{activeTask.report.emotionProfile.communicationStyle}</p></div>
+              <div><small>决策方式</small><p>{activeTask.report.emotionProfile.decisionStyle}</p></div>
+            </div>
+            {!!activeTask.report.emotionProfile.evidence.length && <div className="emotion-evidence">
+              <h4>对话依据</h4>
+              {activeTask.report.emotionProfile.evidence.map((item) => <div key={`${item.messageId}-${item.quote}`}>
+                <blockquote>“{item.quote}”</blockquote>
+                <p>{item.interpretation}</p>
+                <button type="button" onClick={() => openRawChat(item.messageId, item.quote)}>定位原文</button>
+              </div>)}
+            </div>}
+            <div className="emotion-advice"><h4>沟通建议</h4>{activeTask.report.emotionProfile.advice.map((item, index) => <p key={item}><span>{index + 1}</span>{item}</p>)}</div>
+            <p className="emotion-disclaimer">仅依据当前聊天判断沟通状态与倾向，不构成心理或人格诊断。</p>
+          </ReportCard>
           </>}
 
           {moduleVisible("risk") && <>
@@ -659,7 +707,7 @@ function AnalysisLoading({ task }: { task: CustomerTask }) {
       <div className="analysis-loader"><Sparkles size={25} /><i /><i /><i /></div>
       <span className="eyebrow">AI ANALYSIS</span>
       <h2>{importing ? "正在同步客户聊天记录" : "正在生成客户分析报告"}</h2>
-      <p>{importing ? "正在从 SaleSmartly 获取并整理该客户的历史消息…" : "AI 正在识别客户画像、销售阶段、异议和下一步建议…"}</p>
+      <p>{importing ? "正在从 SaleSmartly 获取并整理该客户的历史消息…" : "AI 正在识别客户画像、情绪与沟通性格、异议和下一步建议…"}</p>
       {importing ? <div className="analysis-steps"><span className="active"><Cloud size={13} />读取聊天记录</span></div> : <AnalysisModuleProgress task={task} />}
     </div>
   );

@@ -40,6 +40,7 @@ const demoConfirmations: ConfirmationItem[] = defaultConfirmations.map((item) =>
 export const emptyReport: AnalysisReport = {
   summary: "等待 AI 完成对话分析。",
   profile: [],
+  emotionProfile: { currentEmotion: "待分析", emotionTrend: "待分析", personalityTraits: ["信息不足"], communicationStyle: "待分析", decisionStyle: "待分析", sensitivities: ["信息不足"], evidence: [], advice: ["等待更多客户对话后再判断。"], confidence: 0 },
   stage: "初次询盘与客户背调",
   parallelStages: [],
   stageReason: "当前尚无足够信息判断销售阶段。",
@@ -67,6 +68,20 @@ export const demoReport: AnalysisReport = {
     "核心关注与风险偏好：重视 COA 与实物一致性，偏好可控的首单方案",
     "沟通风格与下一步倾向：问题直接，倾向先确认资料和付款安全再推进",
   ],
+  emotionProfile: {
+    currentEmotion: "谨慎且存在首单不安全感，但仍保持明确兴趣",
+    emotionTrend: "从产品了解逐渐转向对批次一致性和付款保障的审慎核验",
+    personalityTraits: ["证据导向", "风险敏感", "表达直接", "决策谨慎"],
+    communicationStyle: "使用简短直接的问题逐项核验关键风险，不喜欢泛泛介绍",
+    decisionStyle: "倾向先获得可验证资料和风险保障，再决定是否推进首单",
+    sensitivities: ["答非所问", "不可核验的宣传", "首单付款风险", "文件与实物不一致"],
+    evidence: [
+      { messageId: "M00001", quote: "Is the COA from the same batch I will receive?", interpretation: "关注资料与实际交付的一致性，体现证据导向和风险敏感。" },
+      { messageId: "M00003", quote: "What protection do I have for the first order?", interpretation: "首次合作仍有资金安全顾虑，需要明确保障边界。" },
+    ],
+    advice: ["先直接回答客户当前问题，再补充必要背景。", "用可核验资料和清晰边界降低不确定性，避免绝对承诺。", "每次只推进一个明确的下一步选择。"],
+    confidence: 0.86,
+  },
   stage: "产品与订单匹配",
   parallelStages: ["初次询盘与客户背调", "信任建立"],
   stageReason: "客户已越过初步询价，连续追问 COA、批次和付款保障，说明核心障碍已从需求转为风险判断。",

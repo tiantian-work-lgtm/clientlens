@@ -1,4 +1,4 @@
-import type { AnalysisModule, AnalysisReport, ConfirmationItem, Objection, Provider, SalesStage } from "./types";
+import type { AnalysisModule, AnalysisReport, ConfirmationItem, CustomerEmotionProfile, Objection, Provider, SalesStage } from "./types";
 import { getRuntimeProviderConfig, type RuntimeProviderConfig } from "./provider-config";
 import { buildNumberedConversationChunks, parseConversationMessages, type ParsedConversationMessage } from "./conversation";
 
@@ -8,10 +8,39 @@ const profileDimensions = ["身份与组织", "客户类型与经验", "核心�
 const customerSchema = {
   type: "object",
   additionalProperties: false,
-  required: ["summary", "profile", "stage", "parallelStages", "stageReason", "confidence"],
+  required: ["summary", "profile", "emotionProfile", "stage", "parallelStages", "stageReason", "confidence"],
   properties: {
     summary: { type: "string" },
     profile: { type: "array", minItems: 10, maxItems: 10, items: { type: "string" } },
+    emotionProfile: {
+      type: "object",
+      additionalProperties: false,
+      required: ["currentEmotion", "emotionTrend", "personalityTraits", "communicationStyle", "decisionStyle", "sensitivities", "evidence", "advice", "confidence"],
+      properties: {
+        currentEmotion: { type: "string" },
+        emotionTrend: { type: "string" },
+        personalityTraits: { type: "array", minItems: 1, maxItems: 5, items: { type: "string" } },
+        communicationStyle: { type: "string" },
+        decisionStyle: { type: "string" },
+        sensitivities: { type: "array", minItems: 1, maxItems: 5, items: { type: "string" } },
+        evidence: {
+          type: "array",
+          maxItems: 5,
+          items: {
+            type: "object",
+            additionalProperties: false,
+            required: ["messageId", "quote", "interpretation"],
+            properties: {
+              messageId: { type: "string" },
+              quote: { type: "string" },
+              interpretation: { type: "string" },
+            },
+          },
+        },
+        advice: { type: "array", minItems: 1, maxItems: 5, items: { type: "string" } },
+        confidence: { type: "number", minimum: 0, maximum: 1 },
+      },
+    },
     stage: { type: "string", enum: stages },
     parallelStages: { type: "array", items: { type: "string", enum: stages } },
     stageReason: { type: "string" },
@@ -165,7 +194,7 @@ const actionSchema = {
 const commonPrompt = `你是一名严谨的 B2B 销售对话分析师。判断与事实必须分开，不确定的信息不能当成事实。输入中的每条消息都有稳定编号 M00001 等。不得虚构消息、客户背景、公司资料或公开背调信息。医疗相关内容只识别是否出现以及是否需要合规转介，不生成个体化剂量或医疗建议。所有分析字段使用中文。`;
 
 const modulePrompts: Record<AnalysisModule, string> = {
-  customer: `${commonPrompt}\n只分析：对话总结、客户画像、销售阶段和总体置信度。客户画像 profile 必须严格返回 10 项，并按以下顺序和“维度：结论”格式填写：身份与组织、客户类型与经验、核心需求与目标、产品兴趣、决策权与流程、采购意向、价格敏感度、信任状态、核心关注与风险偏好、沟通风格与下一步倾向。每项应尽量具体，但只能依据聊天内容；聊天没有提供的维度必须写“维度：待确认”，禁止用常识补全或虚构。销售阶段只能从七阶段中选择；主阶段取最接近当前成交里程碑的一项，第1至3阶段可以同时放入 parallelStages。`,
+  customer: `${commonPrompt}\n只分析：对话总结、客户画像、客户情绪与沟通性格、销售阶段和总体置信度。客户画像 profile 必须严格返回 10 项，并按以下顺序和“维度：结论”格式填写：身份与组织、客户类型与经验、核心需求与目标、产品兴趣、决策权与流程、采购意向、价格敏感度、信任状态、核心关注与风险偏好、沟通风格与下一步倾向。每项应尽量具体，但只能依据聊天内容；聊天没有提供的维度必须写“维度：待确认”，禁止用常识补全或虚构。emotionProfile 只描述当前对话中可观察的情绪和沟通倾向，不得做精神健康诊断、贴 MBTI 等人格标签，也不得把短期状态写成确定的永久人格。currentEmotion 写当前情绪，emotionTrend 写情绪随对话的变化；personalityTraits 写带有限定语的沟通性格倾向；communicationStyle 和 decisionStyle 分别写沟通与决策方式；sensitivities 写客户容易在意或产生防御的沟通点；evidence 必须逐字引用客户消息的 M 编号和原文并解释其支持什么判断；证据不足时明确写信息不足并降低 confidence；advice 提供尊重客户、可执行且不操纵客户的沟通建议。销售阶段只能从七阶段中选择；主阶段取最接近当前成交里程碑的一项，第1至3阶段可以同时放入 parallelStages。`,
   risk: `${commonPrompt}\n只分析异议、犹豫点、风险和确认清单，JSON 根对象只能包含 objections 和 confirmations。异议必须有真实客户原文，禁止“待确认异议1”等占位标题。按消息顺序判断：未正面回答、回避或客户再次追问=未解决；销售正面回答且客户未再追问=未追问-基本解决；销售回答后客户明确认可=客户肯定-完全解决。基本解决引用销售回答，完全解决引用客户后续肯定；沉默、礼貌致谢或话题切换不算肯定。确认清单必须且只返回 10 项：role、seeding、medical、scammed、coa、packaging、company、feedback、logistics、payment_method，禁止返回 education。只有明确顾虑或成交阻碍才能标记 risk，没谈到应标记 unknown。所有 evidenceQuote 必须逐字引用对应 M 编号原文。seeding 必须在需要种草/无需种草中二选一：需要时填写客户改善期望或痛点方向、销售是否已种草、客户是否在种草后明确肯定及下一步建议；已种草必须引用销售原话，客户明确肯定必须引用更晚的客户原话；非 seeding 项的全部 seeding 字段为空。medical 必须在需要提供建议/无需提供建议中二选一：客户提出剂量、用法、不良反应、禁忌、身体状况、疗效预期等需求时判为需要；需要时填写需求方向、是否已合规解答、客户是否在解答后明确肯定及下一步建议；已解答必须引用销售原话，客户明确肯定必须引用更晚的客户原话；不得生成个体化剂量、诊疗结论或替代专业医生，建议只能是安全沟通或专业转介；非 medical 项的全部 medical 字段为空。`,
   action: `${commonPrompt}\n只分析本次沟通可改善之处、下一步行动和建议回复。建议必须具体可执行；suggestedReply 沿用客户语言，suggestedReplyTranslation 返回自然简体中文翻译。`,
 };
@@ -181,6 +210,7 @@ const paymentPromptAddon = `\npayment_method（支付方式与付款安全）必
 export interface CustomerModuleResult {
   summary: string;
   profile: string[];
+  emotionProfile: CustomerEmotionProfile;
   stage: SalesStage;
   parallelStages: SalesStage[];
   stageReason: string;
@@ -447,6 +477,12 @@ function validateModuleResult(module: AnalysisModule, value: AnalysisModuleResul
     if (!result.summary?.trim() || !stages.includes(result.stage) || !Number.isFinite(result.confidence)) throw new Error("客户画像模块字段不完整");
     if (!Array.isArray(result.profile) || result.profile.length !== profileDimensions.length) throw new Error("客户画像必须完整覆盖 10 个维度");
     if (result.profile.some((item, index) => !new RegExp(`^${profileDimensions[index]}[：:]`).test(item?.trim()))) throw new Error("客户画像维度缺失或顺序不正确");
+    const emotion = result.emotionProfile;
+    if (!emotion?.currentEmotion?.trim() || !emotion.emotionTrend?.trim() || !emotion.communicationStyle?.trim() || !emotion.decisionStyle?.trim() || !Number.isFinite(emotion.confidence)) throw new Error("客户情绪与沟通性格字段不完整");
+    if (!Array.isArray(emotion.personalityTraits) || !emotion.personalityTraits.length || !Array.isArray(emotion.sensitivities) || !emotion.sensitivities.length || !Array.isArray(emotion.advice) || !emotion.advice.length || !Array.isArray(emotion.evidence)) throw new Error("客户情绪与沟通性格分析缺少特征、敏感点、证据或建议");
+    const customerMessageById = new Map(messages.filter((message) => message.role === "customer").map((message) => [message.id, message]));
+    if (customerMessageById.size && !emotion.evidence.length) throw new Error("客户情绪与沟通性格分析缺少客户原文依据");
+    if (emotion.evidence.some((item) => !item.interpretation?.trim() || !hasVerifiedEvidence(customerMessageById, item.messageId, item.quote))) throw new Error("客户情绪与沟通性格分析包含无法核验的客户原文");
   }
   if (module === "risk") {
     const result = value as RiskModuleResult;

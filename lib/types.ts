@@ -19,6 +19,24 @@ export interface Evidence {
   time?: string;
 }
 
+export interface EmotionEvidence {
+  messageId: string;
+  quote: string;
+  interpretation: string;
+}
+
+export interface CustomerEmotionProfile {
+  currentEmotion: string;
+  emotionTrend: string;
+  personalityTraits: string[];
+  communicationStyle: string;
+  decisionStyle: string;
+  sensitivities: string[];
+  evidence: EmotionEvidence[];
+  advice: string[];
+  confidence: number;
+}
+
 export interface Objection {
   title: string;
   severity: "高" | "中" | "低";
@@ -132,6 +150,7 @@ export interface ConfirmationItem {
 export interface AnalysisReport {
   summary: string;
   profile: string[];
+  emotionProfile: CustomerEmotionProfile;
   stage: SalesStage;
   parallelStages: SalesStage[];
   stageReason: string;
