@@ -251,6 +251,13 @@ function normalizeReport(value: unknown, conversation = ""): CustomerTask["repor
       logisticsReactionEvidenceMessageId: item.id === "logistics" ? stringValue(item.logisticsReactionEvidenceMessageId) : "",
       logisticsReactionEvidenceQuote: item.id === "logistics" ? normalizeEvidenceQuote(item.logisticsReactionEvidenceQuote, conversation) : "",
       logisticsAdvice: item.id === "logistics" ? stringValue(item.logisticsAdvice, fallback.logisticsAdvice || "") : "",
+      paymentMentionSource: item.id === "payment_method" && (item.paymentMentionSource === "客户主动询问" || item.paymentMentionSource === "销售主动提出" || item.paymentMentionSource === "未提及") ? item.paymentMentionSource : fallback.paymentMentionSource,
+      paymentMentionEvidenceMessageId: item.id === "payment_method" ? stringValue(item.paymentMentionEvidenceMessageId) : "",
+      paymentMentionEvidenceQuote: item.id === "payment_method" ? normalizeEvidenceQuote(item.paymentMentionEvidenceQuote, conversation) : "",
+      paymentCustomerReaction: item.id === "payment_method" && (item.paymentCustomerReaction === "客户明确肯定" || item.paymentCustomerReaction === "存在异议" || item.paymentCustomerReaction === "客户未明确表态" || item.paymentCustomerReaction === "未确认") ? item.paymentCustomerReaction : fallback.paymentCustomerReaction,
+      paymentReactionEvidenceMessageId: item.id === "payment_method" ? stringValue(item.paymentReactionEvidenceMessageId) : "",
+      paymentReactionEvidenceQuote: item.id === "payment_method" ? normalizeEvidenceQuote(item.paymentReactionEvidenceQuote, conversation) : "",
+      paymentAdvice: item.id === "payment_method" ? stringValue(item.paymentAdvice, fallback.paymentAdvice || "") : "",
       confidence: Number.isFinite(confidence) ? Math.min(1, Math.max(0, confidence)) : 0,
     };
   });
@@ -830,6 +837,14 @@ function ConfirmationChecklist({ task, onUpdate }: { task: CustomerTask; onUpdat
                     <div><small>是否已经解答</small><p>{item.logisticsAnswered || "未确认"}</p>{item.logisticsAnswerEvidenceQuote && <blockquote>“{item.logisticsAnswerEvidenceQuote}”</blockquote>}</div>
                     <div><small>客户是否满意或存在异议</small><p>{item.logisticsCustomerReaction || "未确认"}</p>{item.logisticsReactionEvidenceQuote && <blockquote>“{item.logisticsReactionEvidenceQuote}”</blockquote>}</div>
                     <div className="seeding-advice"><small>建议</small><p>{item.logisticsAdvice || "结合目的国家，明确渠道、参考时效、清关边界和异常处理方式。"}</p></div>
+                  </div>
+                </div>}
+                {item.id === "payment_method" && item.paymentMentionSource && <div className={`seeding-analysis payment-analysis ${item.paymentMentionSource === "未提及" ? "not-needed" : "needed"}`}>
+                  <header><span>支付判断</span><strong>{item.paymentMentionSource}</strong></header>
+                  <div className="seeding-detail-grid payment-detail-grid">
+                    <div><small>由谁提出</small><p>{item.paymentMentionSource}</p>{item.paymentMentionEvidenceQuote && <blockquote>“{item.paymentMentionEvidenceQuote}”</blockquote>}</div>
+                    <div><small>客户是否肯定或存在异议</small><p>{item.paymentCustomerReaction || "未确认"}</p>{item.paymentReactionEvidenceQuote && <blockquote>“{item.paymentReactionEvidenceQuote}”</blockquote>}</div>
+                    <div className="seeding-advice"><small>建议</small><p>{item.paymentAdvice || "确认客户可用的支付渠道，并如实说明流程、费用和可核验的付款保障。"}</p></div>
                   </div>
                 </div>}
                 {(item.status === "unknown" || item.status === "risk") && <div className="confirmation-actions">

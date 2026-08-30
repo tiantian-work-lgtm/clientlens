@@ -119,6 +119,13 @@ export interface ConfirmationItem {
   logisticsReactionEvidenceMessageId?: string;
   logisticsReactionEvidenceQuote?: string;
   logisticsAdvice?: string;
+  paymentMentionSource?: "客户主动询问" | "销售主动提出" | "未提及";
+  paymentMentionEvidenceMessageId?: string;
+  paymentMentionEvidenceQuote?: string;
+  paymentCustomerReaction?: "客户明确肯定" | "存在异议" | "客户未明确表态" | "未确认";
+  paymentReactionEvidenceMessageId?: string;
+  paymentReactionEvidenceQuote?: string;
+  paymentAdvice?: string;
   confidence: number;
 }
 

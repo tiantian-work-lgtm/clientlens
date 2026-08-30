@@ -49,7 +49,7 @@ const riskSchema = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["id", "category", "label", "status", "evidence", "evidenceMessageId", "evidenceQuote", "riskReason", "seedingNeed", "seedingDirection", "seedingPerformed", "seedingPerformedEvidenceMessageId", "seedingPerformedEvidenceQuote", "seedingAccepted", "seedingAcceptanceEvidenceMessageId", "seedingAcceptanceEvidenceQuote", "seedingAdvice", "medicalNeed", "medicalDirection", "medicalAnswered", "medicalAnswerEvidenceMessageId", "medicalAnswerEvidenceQuote", "medicalAccepted", "medicalAcceptanceEvidenceMessageId", "medicalAcceptanceEvidenceQuote", "medicalAdvice", "scamExperienceStatus", "scamExperienceSummary", "scamAddressed", "scamResponseEvidenceMessageId", "scamResponseEvidenceQuote", "scamAccepted", "scamAcceptanceEvidenceMessageId", "scamAcceptanceEvidenceQuote", "scamAdvice", "coaMentionSource", "coaMentionEvidenceMessageId", "coaMentionEvidenceQuote", "coaExplained", "coaExplanationEvidenceMessageId", "coaExplanationEvidenceQuote", "coaAccepted", "coaAcceptanceEvidenceMessageId", "coaAcceptanceEvidenceQuote", "coaAdvice", "packagingMentionSource", "packagingMentionEvidenceMessageId", "packagingMentionEvidenceQuote", "packagingExplained", "packagingExplanationEvidenceMessageId", "packagingExplanationEvidenceQuote", "packagingAccepted", "packagingAcceptanceEvidenceMessageId", "packagingAcceptanceEvidenceQuote", "packagingAdvice", "companyMentionSource", "companyMentionEvidenceMessageId", "companyMentionEvidenceQuote", "companyExplained", "companyExplanationEvidenceMessageId", "companyExplanationEvidenceQuote", "companyAccepted", "companyAcceptanceEvidenceMessageId", "companyAcceptanceEvidenceQuote", "companyAdvice", "feedbackMentionSource", "feedbackMentionEvidenceMessageId", "feedbackMentionEvidenceQuote", "feedbackAnswered", "feedbackAnswerEvidenceMessageId", "feedbackAnswerEvidenceQuote", "feedbackAccepted", "feedbackAcceptanceEvidenceMessageId", "feedbackAcceptanceEvidenceQuote", "feedbackAdvice", "logisticsMentionSource", "logisticsMentionEvidenceMessageId", "logisticsMentionEvidenceQuote", "logisticsAnswered", "logisticsAnswerEvidenceMessageId", "logisticsAnswerEvidenceQuote", "logisticsCustomerReaction", "logisticsReactionEvidenceMessageId", "logisticsReactionEvidenceQuote", "logisticsAdvice", "confidence"],
+        required: ["id", "category", "label", "status", "evidence", "evidenceMessageId", "evidenceQuote", "riskReason", "seedingNeed", "seedingDirection", "seedingPerformed", "seedingPerformedEvidenceMessageId", "seedingPerformedEvidenceQuote", "seedingAccepted", "seedingAcceptanceEvidenceMessageId", "seedingAcceptanceEvidenceQuote", "seedingAdvice", "medicalNeed", "medicalDirection", "medicalAnswered", "medicalAnswerEvidenceMessageId", "medicalAnswerEvidenceQuote", "medicalAccepted", "medicalAcceptanceEvidenceMessageId", "medicalAcceptanceEvidenceQuote", "medicalAdvice", "scamExperienceStatus", "scamExperienceSummary", "scamAddressed", "scamResponseEvidenceMessageId", "scamResponseEvidenceQuote", "scamAccepted", "scamAcceptanceEvidenceMessageId", "scamAcceptanceEvidenceQuote", "scamAdvice", "coaMentionSource", "coaMentionEvidenceMessageId", "coaMentionEvidenceQuote", "coaExplained", "coaExplanationEvidenceMessageId", "coaExplanationEvidenceQuote", "coaAccepted", "coaAcceptanceEvidenceMessageId", "coaAcceptanceEvidenceQuote", "coaAdvice", "packagingMentionSource", "packagingMentionEvidenceMessageId", "packagingMentionEvidenceQuote", "packagingExplained", "packagingExplanationEvidenceMessageId", "packagingExplanationEvidenceQuote", "packagingAccepted", "packagingAcceptanceEvidenceMessageId", "packagingAcceptanceEvidenceQuote", "packagingAdvice", "companyMentionSource", "companyMentionEvidenceMessageId", "companyMentionEvidenceQuote", "companyExplained", "companyExplanationEvidenceMessageId", "companyExplanationEvidenceQuote", "companyAccepted", "companyAcceptanceEvidenceMessageId", "companyAcceptanceEvidenceQuote", "companyAdvice", "feedbackMentionSource", "feedbackMentionEvidenceMessageId", "feedbackMentionEvidenceQuote", "feedbackAnswered", "feedbackAnswerEvidenceMessageId", "feedbackAnswerEvidenceQuote", "feedbackAccepted", "feedbackAcceptanceEvidenceMessageId", "feedbackAcceptanceEvidenceQuote", "feedbackAdvice", "logisticsMentionSource", "logisticsMentionEvidenceMessageId", "logisticsMentionEvidenceQuote", "logisticsAnswered", "logisticsAnswerEvidenceMessageId", "logisticsAnswerEvidenceQuote", "logisticsCustomerReaction", "logisticsReactionEvidenceMessageId", "logisticsReactionEvidenceQuote", "logisticsAdvice", "paymentMentionSource", "paymentMentionEvidenceMessageId", "paymentMentionEvidenceQuote", "paymentCustomerReaction", "paymentReactionEvidenceMessageId", "paymentReactionEvidenceQuote", "paymentAdvice", "confidence"],
         properties: {
           id: { type: "string" },
           category: { type: "string", enum: ["客户角色", "认知与经历", "产品与信任", "交易条件"] },
@@ -136,6 +136,13 @@ const riskSchema = {
           logisticsReactionEvidenceMessageId: { type: "string" },
           logisticsReactionEvidenceQuote: { type: "string" },
           logisticsAdvice: { type: "string" },
+          paymentMentionSource: { type: "string", enum: ["客户主动询问", "销售主动提出", "未提及", ""] },
+          paymentMentionEvidenceMessageId: { type: "string" },
+          paymentMentionEvidenceQuote: { type: "string" },
+          paymentCustomerReaction: { type: "string", enum: ["客户明确肯定", "存在异议", "客户未明确表态", "未确认", ""] },
+          paymentReactionEvidenceMessageId: { type: "string" },
+          paymentReactionEvidenceQuote: { type: "string" },
+          paymentAdvice: { type: "string" },
           confidence: { type: "number", minimum: 0, maximum: 1 },
         },
       },
@@ -169,6 +176,7 @@ const packagingPromptAddon = `\npackaging（产品包装）必须返回完整四
 const companyPromptAddon = `\ncompany（公司资料）必须返回完整四项判断。companyMentionSource 只能是客户主动询问、销售主动提出或未提及；前两种必须分别用 companyMentionEvidenceMessageId/Quote 引用客户或销售原话。companyExplained 判断销售是否已提供客户关心且可核验的公司资料，例如公司主体、所在地、生产或办公信息、官网、资质证书或联系方式；只有“多年经验”“实力强”等笼统宣传不能单独算已说明。已说明必须用 companyExplanationEvidenceMessageId/Quote 引用销售原话。companyAccepted 只有客户在说明之后明确认可、理解或确认资料足够时才可填客户明确肯定，并用 companyAcceptanceEvidenceMessageId/Quote 引用更晚的客户原话；沉默、礼貌致谢和转移话题不算。companyAdvice 必须结合当前缺口给出具体下一步建议，不得虚构公司资料。未提及时相关证据字段为空。非 company 项的全部 company 专属字段返回空字符串。`;
 const feedbackPromptAddon = `\nfeedback（其他客户反馈）指用于增强信任的真实社会证明，包括物流签收或时效参考、其他客户返图、真实聊天反馈、评价和相似客户案例。必须返回完整四项判断。feedbackMentionSource 只能是客户主动询问、销售主动提出或未提及；前两种必须分别用 feedbackMentionEvidenceMessageId/Quote 引用客户或销售原话。feedbackAnswered 判断销售是否已针对客户关心点提供具体反馈或案例；只说“很多客户满意”“我们口碑很好”等空泛宣传不能单独算已解答。已解答必须用 feedbackAnswerEvidenceMessageId/Quote 引用销售原话。feedbackAccepted 只有客户在解答之后明确认可、信任增强或确认该参考有帮助时才可填客户明确肯定，并用 feedbackAcceptanceEvidenceMessageId/Quote 引用更晚的客户原话；沉默、礼貌致谢和转移话题不算。feedbackAdvice 必须结合客户所在国家、关注点或信任缺口建议最相关的证明类型，同时提醒保护其他客户隐私，不得虚构案例或反馈。未提及时相关证据字段为空。非 feedback 项的全部 feedback 专属字段返回空字符串。`;
 const logisticsPromptAddon = `\nlogistics（物流、清关和时效）必须返回完整判断。范围包括发货方式、承运渠道、运输时效、轨迹查询、目的国清关、税费、延误和异常处理。logisticsMentionSource 只能是客户主动询问、销售主动提出或未提及；前两种必须分别用 logisticsMentionEvidenceMessageId/Quote 引用客户或销售原话。logisticsAnswered 判断销售是否针对客户实际关心点给出具体且不过度承诺的说明；已解答必须用 logisticsAnswerEvidenceMessageId/Quote 引用销售原话。logisticsCustomerReaction 只能是客户满意、存在异议、客户未明确表态或未确认。客户满意必须引用销售解答之后明确表示认可或接受的客户原话；沉默、礼貌致谢或转移话题不算满意。存在异议必须引用客户关于价格、时效、清关、税费、渠道或风险的真实质疑，可发生在解答前或解答后。logisticsAdvice 必须针对尚未回答的物流要素或客户异议给出下一步建议，不得承诺无法保证的时效或清关结果。未提及时相关证据字段为空。非 logistics 项的全部 logistics 专属字段返回空字符串。`;
+const paymentPromptAddon = `\npayment_method（支付方式与付款安全）必须返回完整判断。范围包括可用支付渠道、手续费、币种、到账、退款、拒付、首单资金安全和付款保障。paymentMentionSource 只能是客户主动询问、销售主动提出或未提及；前两种必须分别用 paymentMentionEvidenceMessageId/Quote 引用客户或销售原话。paymentCustomerReaction 只能是客户明确肯定、存在异议、客户未明确表态或未确认。客户明确肯定必须引用支付信息提出之后，客户明确接受某种支付方式或认可付款安排的原话；沉默、礼貌致谢和转移话题不算肯定。存在异议必须引用客户对安全、保障、费用、退款、到账或支付渠道的真实顾虑；单纯询问“支持哪些付款方式”不自动算异议。paymentAdvice 必须针对客户尚未确认的支付要素或真实异议给出下一步建议，不得虚构保障、平台规则或承诺绝对安全。未提及时相关证据字段为空。非 payment_method 项的全部 payment 专属字段返回空字符串。`;
 
 export interface CustomerModuleResult {
   summary: string;
@@ -419,6 +427,13 @@ function normalizeRiskResult(value: AnalysisModuleResult, messages: ParsedConver
       logisticsReactionEvidenceMessageId: item?.id === "logistics" ? item.logisticsReactionEvidenceMessageId || "" : "",
       logisticsReactionEvidenceQuote: item?.id === "logistics" ? item.logisticsReactionEvidenceQuote || "" : "",
       logisticsAdvice: item?.id === "logistics" ? item.logisticsAdvice?.trim() || "" : "",
+      paymentMentionSource: item?.id === "payment_method" && (item.paymentMentionSource === "客户主动询问" || item.paymentMentionSource === "销售主动提出" || item.paymentMentionSource === "未提及") ? item.paymentMentionSource : undefined,
+      paymentMentionEvidenceMessageId: item?.id === "payment_method" ? item.paymentMentionEvidenceMessageId || "" : "",
+      paymentMentionEvidenceQuote: item?.id === "payment_method" ? item.paymentMentionEvidenceQuote || "" : "",
+      paymentCustomerReaction: item?.id === "payment_method" && (item.paymentCustomerReaction === "客户明确肯定" || item.paymentCustomerReaction === "存在异议" || item.paymentCustomerReaction === "客户未明确表态" || item.paymentCustomerReaction === "未确认") ? item.paymentCustomerReaction : undefined,
+      paymentReactionEvidenceMessageId: item?.id === "payment_method" ? item.paymentReactionEvidenceMessageId || "" : "",
+      paymentReactionEvidenceQuote: item?.id === "payment_method" ? item.paymentReactionEvidenceQuote || "" : "",
+      paymentAdvice: item?.id === "payment_method" ? item.paymentAdvice?.trim() || "" : "",
       confidence: Number.isFinite(confidence) ? Math.min(1, Math.max(0, confidence)) : 0,
     } satisfies ConfirmationItem;
   });
@@ -552,12 +567,24 @@ function validateModuleResult(module: AnalysisModule, value: AnalysisModuleResul
     const logisticsReactionIndex = messages.findIndex((message) => message.id === logistics.logisticsReactionEvidenceMessageId);
     if ((logistics.logisticsCustomerReaction === "客户满意" || logistics.logisticsCustomerReaction === "存在异议") && (logisticsReactionMessage?.role !== "customer" || !hasVerifiedEvidence(messageById, logistics.logisticsReactionEvidenceMessageId, logistics.logisticsReactionEvidenceQuote))) throw new Error("物流清关客户反应缺少客户原文");
     if (logistics.logisticsCustomerReaction === "客户满意" && (logisticsAnswerIndex < 0 || logisticsReactionIndex <= logisticsAnswerIndex)) throw new Error("物流清关客户满意必须有解答之后的客户原文");
+    const payment = result.confirmations.find((item) => item.id === "payment_method");
+    if (!payment || !payment.paymentAdvice?.trim() || (payment.paymentMentionSource !== "客户主动询问" && payment.paymentMentionSource !== "销售主动提出" && payment.paymentMentionSource !== "未提及")) throw new Error("支付安全分析缺少来源判断或建议");
+    if (!payment.paymentCustomerReaction) throw new Error("支付安全分析缺少客户反应判断");
+    const paymentMentionMessage = messageById.get(payment.paymentMentionEvidenceMessageId || "");
+    if (payment.paymentMentionSource !== "未提及" && (paymentMentionMessage?.role !== (payment.paymentMentionSource === "客户主动询问" ? "customer" : "sales") || !hasVerifiedEvidence(messageById, payment.paymentMentionEvidenceMessageId, payment.paymentMentionEvidenceQuote))) throw new Error("支付安全提及来源缺少对应角色的原文");
+    if (payment.paymentMentionSource === "未提及" && (payment.paymentCustomerReaction === "客户明确肯定" || payment.paymentCustomerReaction === "存在异议")) throw new Error("未提及支付安全时不能判断为客户肯定或存在异议");
+    const paymentMentionIndex = messages.findIndex((message) => message.id === payment.paymentMentionEvidenceMessageId);
+    const paymentReactionMessage = messageById.get(payment.paymentReactionEvidenceMessageId || "");
+    const paymentReactionIndex = messages.findIndex((message) => message.id === payment.paymentReactionEvidenceMessageId);
+    if ((payment.paymentCustomerReaction === "客户明确肯定" || payment.paymentCustomerReaction === "存在异议") && (paymentReactionMessage?.role !== "customer" || !hasVerifiedEvidence(messageById, payment.paymentReactionEvidenceMessageId, payment.paymentReactionEvidenceQuote))) throw new Error("支付安全客户反应缺少客户原文");
+    if (payment.paymentCustomerReaction === "客户明确肯定" && paymentReactionIndex <= paymentMentionIndex) throw new Error("支付安全客户肯定必须发生在支付信息提出之后");
+    if (payment.paymentMentionSource === "销售主动提出" && payment.paymentCustomerReaction === "存在异议" && paymentReactionIndex <= paymentMentionIndex) throw new Error("销售主动提出支付信息时，客户异议必须发生在其后");
   }
   return value;
 }
 
 async function requestModuleOnce(config: RuntimeProviderConfig, provider: Provider, module: AnalysisModule, input: string, merge = false): Promise<AnalysisModuleResult> {
-  const instruction = `${modulePrompts[module]}${module === "risk" ? `${scamPromptAddon}${coaPromptAddon}${packagingPromptAddon}${companyPromptAddon}${feedbackPromptAddon}${logisticsPromptAddon}` : ""}${merge ? "\n下面是分段分析结果，请去重并合并为一个最终结果。消息编号与原文必须原样保留。" : ""}`;
+  const instruction = `${modulePrompts[module]}${module === "risk" ? `${scamPromptAddon}${coaPromptAddon}${packagingPromptAddon}${companyPromptAddon}${feedbackPromptAddon}${logisticsPromptAddon}${paymentPromptAddon}` : ""}${merge ? "\n下面是分段分析结果，请去重并合并为一个最终结果。消息编号与原文必须原样保留。" : ""}`;
   if (provider === "openai") {
     return requestOpenAIJson<AnalysisModuleResult>(config, moduleSchema(module), `customer_${module}_analysis`, instruction, input);
   }
