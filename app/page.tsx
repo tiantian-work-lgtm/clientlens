@@ -28,7 +28,6 @@ import {
   Settings,
   ShieldCheck,
   Sparkles,
-  Target,
   Upload,
   UserRound,
   UsersRound,
@@ -100,6 +99,12 @@ function objectionStatusClass(status: CustomerTask["report"]["objections"][numbe
   if (status === "客户肯定-完全解决") return "complete";
   if (status === "未追问-基本解决") return "basic";
   return "unresolved";
+}
+
+function profileParts(value: string) {
+  const fullWidthSeparator = value.indexOf("：");
+  const separator = fullWidthSeparator >= 0 ? fullWidthSeparator : value.indexOf(":");
+  return separator < 0 ? ["画像特征", value] : [value.slice(0, separator), value.slice(separator + 1)];
 }
 
 function normalizeReport(value: unknown, conversation = ""): CustomerTask["report"] {
@@ -507,20 +512,12 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
             <p className="summary-text">{activeTask.report.summary}</p>
           </ReportCard>
 
-          <div className="split-cards">
-            <ReportCard icon={UserRound} title="客户画像" tone="blue">
-              <div className="tag-cloud">{activeTask.report.profile.map((tag) => <span key={tag}>{tag}</span>)}</div>
-              <div className="mini-metrics">
-                <div><small>采购意向</small><strong>较高</strong><i className="meter"><b style={{ width: "78%" }} /></i></div>
-                <div><small>信任程度</small><strong>建立中</strong><i className="meter"><b style={{ width: "54%" }} /></i></div>
-              </div>
-            </ReportCard>
-            <ReportCard icon={Target} title="当前销售阶段" tone="cyan">
-              <div className="stage-label"><small>主阶段</small><div className="stage-chip">{activeTask.report.stage}</div></div>
-              {!!activeTask.report.parallelStages.length && <div className="parallel-stages"><small>并行进行</small>{activeTask.report.parallelStages.map((stage) => <span key={stage}>{stage}</span>)}</div>}
-              <p className="muted-copy">{activeTask.report.stageReason}</p>
-            </ReportCard>
-          </div>
+          <ReportCard icon={UserRound} title="客户画像" tone="blue">
+            <div className="profile-grid">{activeTask.report.profile.map((item, index) => {
+              const [label, detail] = profileParts(item);
+              return <div key={`${label}-${index}`}><small>{label}</small><strong className={detail === "待确认" ? "unknown" : ""}>{detail}</strong></div>;
+            })}</div>
+          </ReportCard>
           </>}
 
           {moduleVisible("risk") && <>

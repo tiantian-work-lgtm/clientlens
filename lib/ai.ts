@@ -3,6 +3,7 @@ import { getRuntimeProviderConfig, type RuntimeProviderConfig } from "./provider
 import { buildNumberedConversationChunks, parseConversationMessages, type ParsedConversationMessage } from "./conversation";
 
 const stages = ["初次询盘与客户背调", "信任建立", "产品与订单匹配", "决策推进", "等待付款", "已成交", "售后与复购"];
+const profileDimensions = ["身份与组织", "客户类型与经验", "核心需求与目标", "产品兴趣", "决策权与流程", "采购意向", "价格敏感度", "信任状态", "核心关注与风险偏好", "沟通风格与下一步倾向"];
 
 const customerSchema = {
   type: "object",
@@ -10,7 +11,7 @@ const customerSchema = {
   required: ["summary", "profile", "stage", "parallelStages", "stageReason", "confidence"],
   properties: {
     summary: { type: "string" },
-    profile: { type: "array", items: { type: "string" } },
+    profile: { type: "array", minItems: 10, maxItems: 10, items: { type: "string" } },
     stage: { type: "string", enum: stages },
     parallelStages: { type: "array", items: { type: "string", enum: stages } },
     stageReason: { type: "string" },
@@ -80,7 +81,7 @@ const actionSchema = {
 const commonPrompt = `你是一名严谨的 B2B 销售对话分析师。判断与事实必须分开，不确定的信息不能当成事实。输入中的每条消息都有稳定编号 M00001 等。不得虚构消息、客户背景、公司资料或公开背调信息。医疗相关内容只识别是否出现以及是否需要合规转介，不生成个体化剂量或医疗建议。所有分析字段使用中文。`;
 
 const modulePrompts: Record<AnalysisModule, string> = {
-  customer: `${commonPrompt}\n只分析：对话总结、客户画像、销售阶段和总体置信度。销售阶段只能从七阶段中选择；主阶段取最接近当前成交里程碑的一项，第1至3阶段可以同时放入 parallelStages。`,
+  customer: `${commonPrompt}\n只分析：对话总结、客户画像、销售阶段和总体置信度。客户画像 profile 必须严格返回 10 项，并按以下顺序和“维度：结论”格式填写：身份与组织、客户类型与经验、核心需求与目标、产品兴趣、决策权与流程、采购意向、价格敏感度、信任状态、核心关注与风险偏好、沟通风格与下一步倾向。每项应尽量具体，但只能依据聊天内容；聊天没有提供的维度必须写“维度：待确认”，禁止用常识补全或虚构。销售阶段只能从七阶段中选择；主阶段取最接近当前成交里程碑的一项，第1至3阶段可以同时放入 parallelStages。`,
   risk: `${commonPrompt}\n只分析异议、犹豫点、风险和确认清单。JSON 根对象必须且只能包含 objections 和 confirmations。objections 每项必须完整包含 title、severity、status、evidence、evidenceMessageId、evidenceQuote、resolutionEvidenceMessageId、resolutionEvidenceQuote、resolutionReason、advice；没有原始聊天直接依据的判断不要放入 objections，绝不能返回“待确认异议1”等占位标题。evidence 用中文概括；evidenceMessageId 必须填写客户提出该异议的真实 M 编号；evidenceQuote 必须逐字摘录该编号消息的原文。必须按 M 编号顺序判断解决状态：①销售没有在后续消息正面回答核心问题、回答回避问题，或客户后来再次追问同一问题，status=未解决；②销售在后续消息正面回答，且此后客户没有再追问同一问题，但客户也没有明确表示认可，status=未追问-基本解决；③销售正面回答后，客户在更晚的消息中明确肯定、接受或赞同该答案，status=客户肯定-完全解决。普通礼貌致谢、话题切换、沉默和问题发生前的肯定都不能算完全解决。基本解决时 resolutionEvidenceMessageId/Quote 必须引用异议之后销售的直接回答；完全解决时必须引用销售回答之后客户明确肯定的原文；未解决时这两个字段返回空字符串。resolutionReason 用中文说明为何符合该状态。confirmations 每项必须完整包含 id、category、label、status、evidence、evidenceMessageId、evidenceQuote、riskReason、confidence，并覆盖且只覆盖以下 11 项及括号内 id：客户角色与经验(role)、是否需要产品种草(seeding)、是否需要基础知识科普(education)、剂量/使用/医疗问题(medical)、是否有被骗经历(scammed)、COA与产品一致性(coa)、产品包装(packaging)、公司资料(company)、其他客户反馈(feedback)、物流清关和时效(logistics)、支付方式与付款安全(payment_method)。只有明确顾虑、冲突、负面信号或成交阻碍才能标记 risk，仅仅没谈到必须标记 unknown；无直接依据时 evidenceMessageId 和 evidenceQuote 都返回空字符串。`,
   action: `${commonPrompt}\n只分析本次沟通可改善之处、下一步行动和建议回复。建议必须具体可执行；suggestedReply 沿用客户语言，suggestedReplyTranslation 返回自然简体中文翻译。`,
 };
@@ -266,6 +267,12 @@ function normalizeRiskResult(value: AnalysisModuleResult, messages: ParsedConver
 
 function validateModuleResult(module: AnalysisModule, value: AnalysisModuleResult, messages: ParsedConversationMessage[] = []) {
   if (!value || typeof value !== "object") throw new Error(`${module} 模块返回空结果`);
+  if (module === "customer") {
+    const result = value as CustomerModuleResult;
+    if (!result.summary?.trim() || !stages.includes(result.stage) || !Number.isFinite(result.confidence)) throw new Error("客户画像模块字段不完整");
+    if (!Array.isArray(result.profile) || result.profile.length !== profileDimensions.length) throw new Error("客户画像必须完整覆盖 10 个维度");
+    if (result.profile.some((item, index) => !new RegExp(`^${profileDimensions[index]}[：:]`).test(item?.trim()))) throw new Error("客户画像维度缺失或顺序不正确");
+  }
   if (module === "risk") {
     const result = value as RiskModuleResult;
     if (!Array.isArray(result.objections) || !Array.isArray(result.confirmations)) throw new Error("风险模块字段不完整");
