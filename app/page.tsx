@@ -558,23 +558,75 @@ function KnowledgeView({ kind }: { kind: "scripts" | "products" }) {
   </section>;
 }
 
+const translationLanguages = [
+  { value: "zh-CN", label: "简体中文", prompt: "Simplified Chinese" },
+  { value: "en", label: "English", prompt: "English" },
+  { value: "es", label: "Español", prompt: "Spanish" },
+  { value: "fr", label: "Français", prompt: "French" },
+  { value: "de", label: "Deutsch", prompt: "German" },
+  { value: "pt", label: "Português", prompt: "Portuguese" },
+  { value: "ru", label: "Русский", prompt: "Russian" },
+  { value: "ar", label: "العربية", prompt: "Arabic" },
+  { value: "ja", label: "日本語", prompt: "Japanese" },
+  { value: "ko", label: "한국어", prompt: "Korean" },
+] as const;
+
+type TranslationTone = "professional" | "friendly" | "concise";
+
 function TranslateView() {
   const [source, setSource] = useState("Could you please confirm the quantity and delivery address? Once confirmed, I can prepare the exact quotation for you.");
   const [target, setTarget] = useState("请您确认一下数量和收货地址。确认后，我可以为您准备准确的报价。");
+  const [sourceLanguage, setSourceLanguage] = useState("auto");
+  const [targetLanguage, setTargetLanguage] = useState("zh-CN");
+  const [tone, setTone] = useState<TranslationTone>("professional");
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [translationMeta, setTranslationMeta] = useState("DeepSeek · 商务翻译");
+  const languagePrompt = (value: string) => translationLanguages.find((item) => item.value === value)?.prompt || "Auto detect";
+  const swapLanguages = () => {
+    const fallbackTarget = targetLanguage === "zh-CN" ? "en" : "zh-CN";
+    setSourceLanguage(targetLanguage);
+    setTargetLanguage(sourceLanguage === "auto" ? fallbackTarget : sourceLanguage);
+    setSource(target);
+    setTarget(source);
+    setError("");
+  };
   const translate = async () => {
+    if (!source.trim()) { setError("请先输入需要翻译的内容"); return; }
     setLoading(true);
+    setError("");
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 45_000);
     try {
-      const result = await fetch("/api/translate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: source, targetLanguage: "简体中文" }) }).then((r) => r.json());
+      const response = await fetch("/api/translate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
+        body: JSON.stringify({
+          text: source,
+          sourceLanguage: sourceLanguage === "auto" ? "Auto detect" : languagePrompt(sourceLanguage),
+          targetLanguage: languagePrompt(targetLanguage),
+          tone,
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "翻译失败");
       setTarget(result.translation);
-    } finally { setLoading(false); }
+      const providerName = result.provider === "openai" ? "OpenAI" : "DeepSeek";
+      setTranslationMeta(`${providerName} · ${Math.max(0.1, result.elapsedMs / 1000).toFixed(1)} 秒`);
+    } catch (requestError) {
+      setError(requestError instanceof DOMException && requestError.name === "AbortError" ? "翻译超时，请稍后重试或切换模型" : requestError instanceof Error ? requestError.message : "翻译失败，请稍后重试");
+    } finally {
+      window.clearTimeout(timeout);
+      setLoading(false);
+    }
   };
   return <section className="page-view translate-page">
-    <div className="page-header"><div><span className="eyebrow">AI TRANSLATOR</span><h1>AI 翻译</h1><p>保留产品术语、数字和语气的自然商务翻译。</p></div><div className="translation-model"><span className="provider-dot openai" />GPT · 商务翻译</div></div>
+    <div className="page-header"><div><span className="eyebrow">AI TRANSLATOR</span><h1>AI 翻译</h1><p>保留产品术语、数字和语气的自然商务翻译。</p></div><div className="translation-model"><span className="provider-dot deepseek" />{translationMeta}</div></div>
     <div className="translator-card">
-      <div className="language-row"><button>自动检测 · English <ChevronDown size={15} /></button><button className="swap-button"><ArrowLeftRight size={17} /></button><button>简体中文 <ChevronDown size={15} /></button></div>
-      <div className="translation-grid"><div><textarea value={source} onChange={(e) => setSource(e.target.value)} /><footer><span>{source.length} / 5,000</span><button onClick={() => setSource("")}><X size={15} /></button></footer></div><div className="translation-result"><textarea value={target} onChange={(e) => setTarget(e.target.value)} /><footer><span><Sparkles size={14} />自然商务版</span><button onClick={() => navigator.clipboard.writeText(target)}><Copy size={15} />复制</button></footer></div></div>
-      <div className="translate-actions"><div className="tone-selector"><span>语气</span><button className="active">专业</button><button>友好</button><button>简洁</button></div><button className="primary-button" onClick={translate} disabled={loading}><Languages size={17} />{loading ? "翻译中…" : "开始翻译"}</button></div>
+      <div className="language-row"><label className="language-select"><select aria-label="源语言" value={sourceLanguage} onChange={(event) => setSourceLanguage(event.target.value)}><option value="auto">自动检测</option>{translationLanguages.map((language) => <option key={language.value} value={language.value}>{language.label}</option>)}</select><ChevronDown size={15} /></label><button className="swap-button" aria-label="交换语言和文本" onClick={swapLanguages}><ArrowLeftRight size={17} /></button><label className="language-select"><select aria-label="目标语言" value={targetLanguage} onChange={(event) => setTargetLanguage(event.target.value)}>{translationLanguages.map((language) => <option key={language.value} value={language.value}>{language.label}</option>)}</select><ChevronDown size={15} /></label></div>
+      <div className="translation-grid"><div><textarea aria-label="需要翻译的内容" maxLength={5000} value={source} onChange={(e) => setSource(e.target.value)} /><footer><span>{source.length} / 5,000</span><button aria-label="清空原文" onClick={() => setSource("")}><X size={15} /></button></footer></div><div className="translation-result"><textarea aria-label="翻译结果" value={target} onChange={(e) => setTarget(e.target.value)} /><footer><span><Sparkles size={14} />自然商务版</span><button onClick={() => navigator.clipboard.writeText(target)}><Copy size={15} />复制</button></footer></div></div>
+      <div className="translate-actions"><div><div className="tone-selector"><span>语气</span>{([['professional', '专业'], ['friendly', '友好'], ['concise', '简洁']] as const).map(([value, label]) => <button key={value} className={tone === value ? "active" : ""} onClick={() => setTone(value)}>{label}</button>)}</div>{error && <p className="translation-error">{error}</p>}</div><button className="primary-button" onClick={translate} disabled={loading || !source.trim()}><Languages size={17} />{loading ? "AI 翻译中，请稍候…" : "开始翻译"}</button></div>
     </div>
     <div className="translator-features"><div><ShieldCheck size={20} /><strong>术语保护</strong><p>产品名、规格、单位不会被错误改写。</p></div><div><Sparkles size={20} /><strong>自然表达</strong><p>根据商务场景优化语气，不是逐字直译。</p></div><div><LockKeyhole size={20} /><strong>隐私模式</strong><p>可关闭翻译历史，不在浏览器长期保存。</p></div></div>
   </section>;

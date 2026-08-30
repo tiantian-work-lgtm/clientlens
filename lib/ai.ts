@@ -148,15 +148,28 @@ export async function generateChecklistSuggestion(provider: Provider, conversati
   return content ? JSON.parse(content) as BilingualSuggestion : null;
 }
 
-export async function translateWithProvider(provider: Provider, text: string, targetLanguage: string): Promise<string | null> {
-  const prompt = `Translate the following text into ${targetLanguage}. Preserve product names, numbers, units, links and paragraph breaks. Use natural professional business language. Return only the translation.\n\n${text}`;
+export async function translateWithProvider(
+  provider: Provider,
+  text: string,
+  targetLanguage: string,
+  sourceLanguage = "Auto detect",
+  tone = "professional",
+): Promise<string | null> {
+  const toneInstruction: Record<string, string> = {
+    professional: "Use a natural, professional business tone.",
+    friendly: "Use a warm, friendly business tone.",
+    concise: "Use a concise, direct business tone without losing meaning.",
+  };
+  const prompt = `Translate from ${sourceLanguage} into ${targetLanguage}. Preserve product names, numbers, units, links and paragraph breaks. ${toneInstruction[tone] || toneInstruction.professional} Return only the translated text, with no explanation.\n\n${text}`;
+  const maxOutputTokens = Math.min(6000, Math.max(256, Math.ceil(text.length * 2)));
   const config = await getRuntimeProviderConfig(provider);
   if (!config) return null;
   if (provider === "openai") {
     const response = await fetch(`${config.baseUrl || "https://api.openai.com"}/v1/responses`, {
       method: "POST",
       headers: { Authorization: `Bearer ${config.apiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ model: config.model, input: prompt, store: false }),
+      body: JSON.stringify({ model: config.model, input: prompt, store: false, max_output_tokens: maxOutputTokens }),
+      signal: AbortSignal.timeout(45_000),
     });
     if (!response.ok) throw new Error(`OpenAI request failed: ${response.status}`);
     return extractOpenAIText(await response.json());
@@ -164,7 +177,8 @@ export async function translateWithProvider(provider: Provider, text: string, ta
   const response = await fetch(`${config.baseUrl || "https://api.deepseek.com"}/chat/completions`, {
     method: "POST",
     headers: { Authorization: `Bearer ${config.apiKey}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ model: config.model, messages: [{ role: "user", content: prompt }] }),
+    body: JSON.stringify({ model: config.model, messages: [{ role: "user", content: prompt }], temperature: 0.2, max_tokens: maxOutputTokens }),
+    signal: AbortSignal.timeout(45_000),
   });
   if (!response.ok) throw new Error(`DeepSeek request failed: ${response.status}`);
   const data = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
