@@ -1,19 +1,35 @@
-import type { AnalysisReport, CustomerTask, ProgressItem } from "./types";
+import type { AnalysisReport, ConfirmationItem, CustomerTask, ProgressItem } from "./types";
 
 export const defaultProgress: ProgressItem[] = [
-  { id: "need", label: "确认产品需求", state: "done", locked: true },
-  { id: "spec", label: "确认规格与数量", state: "doing" },
-  { id: "quote", label: "完成报价", state: "done", locked: true },
-  { id: "trust", label: "解决质量与信任问题", state: "doing" },
-  { id: "logistics", label: "确认物流方案", state: "todo" },
-  { id: "payment", label: "确认付款方式", state: "todo" },
+  { id: "inquiry", label: "初次询盘与客户背调", state: "done", locked: true },
+  { id: "trust", label: "信任建立", state: "doing" },
+  { id: "match", label: "产品与订单匹配", state: "doing" },
+  { id: "decision", label: "决策推进", state: "todo" },
+  { id: "payment", label: "等待付款", state: "todo" },
+  { id: "won", label: "已成交", state: "todo" },
+  { id: "retention", label: "售后与复购", state: "todo" },
+];
+
+export const defaultConfirmations: ConfirmationItem[] = [
+  { id: "role", category: "客户角色", label: "客户角色与经验", status: "confirmed", evidence: "客户代表公司询问首批采购，并熟悉批次资料。", confidence: 0.82 },
+  { id: "seeding", category: "认知与经历", label: "是否需要产品种草", status: "na", evidence: "客户已有明确目标产品。", confidence: 0.76 },
+  { id: "education", category: "认知与经历", label: "是否需要基础知识科普", status: "unknown", evidence: "对话中尚未确认。", confidence: 0.54 },
+  { id: "medical", category: "认知与经历", label: "剂量、使用或医疗问题", status: "unknown", evidence: "尚未出现相关问题；如出现需进行合规提示。", confidence: 0.68 },
+  { id: "scammed", category: "认知与经历", label: "是否有被骗经历", status: "unknown", evidence: "客户表达付款安全顾虑，但没有明确说明经历。", confidence: 0.63 },
+  { id: "coa", category: "产品与信任", label: "COA 与产品一致性", status: "risk", evidence: "客户询问收到的产品是否对应同一批次 COA。", confidence: 0.96 },
+  { id: "packaging", category: "产品与信任", label: "产品包装", status: "unknown", evidence: "对话中尚未讨论包装。", confidence: 0.91 },
+  { id: "company", category: "产品与信任", label: "公司资料", status: "unknown", evidence: "销售介绍了公司背景，但客户未明确确认是否足够。", confidence: 0.72 },
+  { id: "feedback", category: "产品与信任", label: "其他客户反馈", status: "unknown", evidence: "尚未提供或讨论可验证反馈。", confidence: 0.88 },
+  { id: "logistics", category: "交易条件", label: "物流、清关和时效", status: "unknown", evidence: "尚未确认目的地和期望时效。", confidence: 0.92 },
+  { id: "payment_method", category: "交易条件", label: "支付方式与付款安全", status: "risk", evidence: "客户询问首次订单可获得什么付款保障。", confidence: 0.95 },
 ];
 
 export const demoReport: AnalysisReport = {
   summary:
     "客户正在评估首批采购，已经确认目标产品并收到报价。目前兴趣明确，但在继续推进前希望确认质量文件、批次稳定性和付款保障。对话没有明确拒绝信号，重点应从重复介绍产品转向降低首次合作风险。",
   profile: ["专业买家", "中度价格敏感", "决策谨慎", "有采购意向", "偏好简洁沟通"],
-  stage: "信任建立 / 异议处理",
+  stage: "产品与订单匹配",
+  parallelStages: ["初次询盘与客户背调", "信任建立"],
   stageReason: "客户已越过初步询价，连续追问 COA、批次和付款保障，说明核心障碍已从需求转为风险判断。",
   objections: [
     {
@@ -31,8 +47,7 @@ export const demoReport: AnalysisReport = {
       advice: "先解释可用付款路径和流程，再约定一个低风险的首单方案。",
     },
   ],
-  confirmed: ["目标产品已经确认", "客户已经收到初步报价", "客户接受继续沟通"],
-  unresolved: ["最终采购数量", "对应批次文件", "付款方式", "期望交付时间"],
+  confirmations: defaultConfirmations,
   improvements: [
     "上一轮回复介绍公司背景过多，没有直接回答批次对应问题。",
     "报价后没有用一个明确问题推动客户做下一步选择。",
@@ -85,7 +100,7 @@ export const initialTasks: CustomerTask[] = [
       lastMessageAt: "2026-08-30 08:10",
     },
     rawConversation: "Customer: Could you send your catalog and MOQ?",
-    report: { ...demoReport, stage: "首次询盘 / 需求确认", confidence: 0.79 },
+    report: { ...demoReport, stage: "初次询盘与客户背调", parallelStages: ["信任建立"], confidence: 0.79 },
     progress: defaultProgress.map((item, i) => ({ ...item, state: i === 0 ? "doing" : "todo", locked: false })),
     provider: "deepseek",
     model: "DeepSeek",
@@ -105,7 +120,7 @@ export const initialTasks: CustomerTask[] = [
       lastMessageAt: "2026-08-29 16:30",
     },
     rawConversation: "Customer: I will arrange the payment tomorrow.",
-    report: { ...demoReport, stage: "等待付款", confidence: 0.91 },
+    report: { ...demoReport, stage: "等待付款", parallelStages: [], confidence: 0.91 },
     progress: defaultProgress.map((item, i) => ({ ...item, state: i < 5 ? "done" : "doing" })),
     provider: "openai",
     model: "GPT",

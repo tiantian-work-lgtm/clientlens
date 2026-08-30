@@ -39,8 +39,8 @@ import {
   Zap,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { defaultProgress, demoReport, initialTasks } from "@/lib/demo-data";
-import type { CustomerTask, ProgressItem, Provider, SourceType } from "@/lib/types";
+import { defaultConfirmations, defaultProgress, demoReport, initialTasks } from "@/lib/demo-data";
+import type { ConfirmationItem, ConfirmationStatus, CustomerTask, ProgressItem, Provider, SalesStage, SourceType } from "@/lib/types";
 
 type View = "analysis" | "scripts" | "products" | "translate" | "settings";
 type ImportStep = "source" | SourceType;
@@ -59,11 +59,37 @@ const sourceMeta: Record<SourceType, { label: string; icon: typeof Cloud; color:
   excel: { label: "Excel", icon: FileSpreadsheet, color: "green" },
 };
 
+const salesStages: SalesStage[] = ["初次询盘与客户背调", "信任建立", "产品与订单匹配", "决策推进", "等待付款", "已成交", "售后与复购"];
+
+function normalizeStage(value?: string): SalesStage {
+  if (salesStages.includes(value as SalesStage)) return value as SalesStage;
+  if (value?.includes("付款")) return "等待付款";
+  if (value?.includes("信任") || value?.includes("异议")) return "信任建立";
+  if (value?.includes("成交")) return "已成交";
+  return "初次询盘与客户背调";
+}
+
+function normalizeTask(task: CustomerTask): CustomerTask {
+  const report = task.report as CustomerTask["report"] & { parallelStages?: SalesStage[]; confirmations?: ConfirmationItem[] };
+  const hasNewProgress = task.progress?.some((item) => item.id === "inquiry");
+  return {
+    ...task,
+    report: {
+      ...demoReport,
+      ...report,
+      stage: normalizeStage(report.stage),
+      parallelStages: report.parallelStages ?? [],
+      confirmations: report.confirmations?.length ? report.confirmations : defaultConfirmations,
+    },
+    progress: hasNewProgress ? task.progress : defaultProgress.map((item) => ({ ...item })),
+  };
+}
+
 const scriptRows = [
-  { title: "首次询盘 · 确认客户需求", stage: "需求确认", product: "通用", language: "EN", status: "已发布", used: 128 },
-  { title: "客户认为价格太高", stage: "异议处理", product: "通用", language: "EN", status: "已发布", used: 86 },
+  { title: "首次询盘 · 确认客户需求", stage: "初次询盘与客户背调", product: "通用", language: "EN", status: "已发布", used: 128 },
+  { title: "客户认为价格太高", stage: "决策推进", product: "通用", language: "EN", status: "已发布", used: 86 },
   { title: "解释批次与 COA 的对应关系", stage: "信任建立", product: "Product A", language: "EN", status: "已发布", used: 52 },
-  { title: "报价后 24 小时简短跟进", stage: "跟进", product: "通用", language: "EN", status: "草稿", used: 19 },
+  { title: "报价后 24 小时简短跟进", stage: "决策推进", product: "通用", language: "EN", status: "草稿", used: 19 },
   { title: "首次订单付款安全说明", stage: "等待付款", product: "通用", language: "EN", status: "审核中", used: 34 },
 ];
 
@@ -97,7 +123,7 @@ export default function Home() {
     const stored = localStorage.getItem("clientlens-tasks");
     if (stored) {
       try {
-        const parsed = JSON.parse(stored) as CustomerTask[];
+        const parsed = (JSON.parse(stored) as CustomerTask[]).map(normalizeTask);
         if (parsed.length) {
           setTasks(parsed);
           setActiveTaskId(parsed[0].id);
@@ -189,7 +215,7 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
         body: JSON.stringify({ conversation: activeTask.rawConversation, provider: activeTask.provider }),
       });
       const data = await response.json();
-      onUpdate({ ...activeTask, report: data.report ?? activeTask.report, status: "ready", updatedAt: "刚刚" });
+      onUpdate({ ...activeTask, report: data.report ? normalizeTask({ ...activeTask, report: data.report }).report : activeTask.report, status: "ready", updatedAt: "刚刚" });
     } catch {
       onUpdate({ ...activeTask, status: "failed" });
     } finally {
@@ -269,7 +295,8 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
               </div>
             </ReportCard>
             <ReportCard icon={Target} title="当前销售阶段" tone="cyan">
-              <div className="stage-chip">{activeTask.report.stage}</div>
+              <div className="stage-label"><small>主阶段</small><div className="stage-chip">{activeTask.report.stage}</div></div>
+              {!!activeTask.report.parallelStages.length && <div className="parallel-stages"><small>并行进行</small>{activeTask.report.parallelStages.map((stage) => <span key={stage}>{stage}</span>)}</div>}
               <p className="muted-copy">{activeTask.report.stageReason}</p>
             </ReportCard>
           </div>
@@ -285,14 +312,7 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
             </div>
           </ReportCard>
 
-          <div className="split-cards">
-            <ReportCard icon={CheckCircle2} title="已经确认" tone="green">
-              <ul className="check-list positive">{activeTask.report.confirmed.map((item) => <li key={item}><Check size={14} />{item}</li>)}</ul>
-            </ReportCard>
-            <ReportCard icon={CircleDashed} title="仍需解决" tone="orange">
-              <ul className="check-list">{activeTask.report.unresolved.map((item) => <li key={item}><CircleDashed size={14} />{item}</li>)}</ul>
-            </ReportCard>
-          </div>
+          <ConfirmationChecklist task={activeTask} onUpdate={onUpdate} />
 
           <ReportCard icon={Zap} title="本次沟通可改善" tone="amber">
             <div className="number-list">{activeTask.report.improvements.map((item, i) => <div key={item}><span>{i + 1}</span><p>{item}</p></div>)}</div>
@@ -314,6 +334,78 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
 
 function ReportCard({ icon: Icon, title, tone, featured, children }: React.PropsWithChildren<{ icon: typeof Sparkles; title: string; tone: string; featured?: boolean }>) {
   return <article className={`report-card ${featured ? "featured" : ""}`}><header><span className={`card-icon ${tone}`}><Icon size={17} /></span><h3>{title}</h3><button aria-label="更多"><MoreHorizontal size={18} /></button></header><div className="card-body">{children}</div></article>;
+}
+
+const confirmationState: Record<ConfirmationStatus, { label: string; className: string }> = {
+  confirmed: { label: "已确认", className: "confirmed" },
+  unknown: { label: "未确认", className: "unknown" },
+  risk: { label: "存在风险", className: "risk" },
+  na: { label: "不适用", className: "na" },
+};
+
+function ConfirmationChecklist({ task, onUpdate }: { task: CustomerTask; onUpdate: (task: CustomerTask) => void }) {
+  const [generating, setGenerating] = useState<string | null>(null);
+  const [result, setResult] = useState<{ id: string; mode: "hook" | "explain"; text: string } | null>(null);
+  const categories: ConfirmationItem["category"][] = ["客户角色", "认知与经历", "产品与信任", "交易条件"];
+  const completed = task.report.confirmations.filter((item) => item.status === "confirmed" || item.status === "na").length;
+
+  const cycleStatus = (item: ConfirmationItem) => {
+    const order: ConfirmationStatus[] = ["unknown", "confirmed", "risk", "na"];
+    const status = order[(order.indexOf(item.status) + 1) % order.length];
+    onUpdate({
+      ...task,
+      report: { ...task.report, confirmations: task.report.confirmations.map((current) => current.id === item.id ? { ...current, status } : current) },
+    });
+  };
+
+  const generate = async (item: ConfirmationItem, mode: "hook" | "explain") => {
+    setGenerating(`${item.id}-${mode}`);
+    setResult(null);
+    try {
+      const response = await fetch("/api/checklist-suggest", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ conversation: task.rawConversation, item: item.label, mode, provider: task.provider }),
+      });
+      const data = await response.json();
+      setResult({ id: item.id, mode, text: data.suggestion || data.error || "暂时无法生成建议。" });
+    } catch {
+      setResult({ id: item.id, mode, text: "生成失败，请稍后重试。" });
+    } finally {
+      setGenerating(null);
+    }
+  };
+
+  return (
+    <ReportCard icon={ListChecks} title={`客户确认清单 · ${completed}/${task.report.confirmations.length}`} tone="green">
+      <p className="checklist-intro">点击状态可人工切换。对未确认或存在风险的项目，可结合当前对话生成探询钩子或直接说明。</p>
+      <div className="confirmation-groups">
+        {categories.map((category) => {
+          const items = task.report.confirmations.filter((item) => item.category === category);
+          if (!items.length) return null;
+          return <section className="confirmation-group" key={category}>
+            <h4>{category}</h4>
+            {items.map((item) => {
+              const state = confirmationState[item.status];
+              const selectedResult = result?.id === item.id ? result : null;
+              return <div className="confirmation-row" key={item.id}>
+                <div className="confirmation-main">
+                  <button className={`confirmation-status ${state.className}`} onClick={() => cycleStatus(item)}>{item.status === "confirmed" && <Check size={12} />}{state.label}</button>
+                  <div><strong>{item.label}</strong><p>{item.evidence}</p></div>
+                  <span className="item-confidence">{Math.round(item.confidence * 100)}%</span>
+                </div>
+                {(item.status === "unknown" || item.status === "risk") && <div className="confirmation-actions">
+                  <button onClick={() => generate(item, "hook")} disabled={!!generating}><Sparkles size={12} />{generating === `${item.id}-hook` ? "生成中…" : "生成探询钩子"}</button>
+                  <button onClick={() => generate(item, "explain")} disabled={!!generating}><Bot size={12} />{generating === `${item.id}-explain` ? "生成中…" : "生成直接阐述"}</button>
+                </div>}
+                {selectedResult && <div className="generated-suggestion"><header><span>{selectedResult.mode === "hook" ? "探询钩子" : "直接阐述"}</span><button onClick={() => navigator.clipboard.writeText(selectedResult.text)}><Copy size={12} />复制</button></header><p>{selectedResult.text}</p></div>}
+              </div>;
+            })}
+          </section>;
+        })}
+      </div>
+    </ReportCard>
+  );
 }
 
 function CustomerPanel({ task, onUpdate, onAnalyze, analyzing }: { task: CustomerTask; onUpdate: (task: CustomerTask) => void; onAnalyze: () => void; analyzing: boolean }) {
@@ -345,7 +437,16 @@ function CustomerPanel({ task, onUpdate, onAnalyze, analyzing }: { task: Custome
           </dl>
         </PanelSection>
 
-        <PanelSection title="销售进度" action={<span className="progress-count">{done}/{task.progress.length}</span>}>
+        <PanelSection title="当前判断">
+          <div className="panel-stage"><small>主阶段</small><strong>{task.report.stage}</strong></div>
+          {!!task.report.parallelStages.length && <div className="panel-parallel"><small>并行</small>{task.report.parallelStages.map((stage) => <span key={stage}>{stage}</span>)}</div>}
+          <dl className="data-list compact panel-analysis-stats">
+            <div><dt>首要阻碍</dt><dd>{task.report.objections.find((item) => item.status !== "已解决")?.title || "暂无"}</dd></div>
+            <div><dt>判断置信度</dt><dd>{Math.round(task.report.confidence * 100)}%</dd></div>
+          </dl>
+        </PanelSection>
+
+        <PanelSection title="七阶段进度" action={<span className="progress-count">{done}/{task.progress.length}</span>}>
           <div className="progress-bar"><i style={{ width: `${done / task.progress.length * 100}%` }} /></div>
           <div className="progress-list">
             {task.progress.map((item) => (
@@ -363,7 +464,7 @@ function CustomerPanel({ task, onUpdate, onAnalyze, analyzing }: { task: Custome
             <div><dt>分析模型</dt><dd><span className={`provider-dot ${task.provider}`} />{task.model}</dd></div>
             <div><dt>数据来源</dt><dd>{sourceMeta[task.source].label}</dd></div>
             <div><dt>更新时间</dt><dd>{task.updatedAt}</dd></div>
-            <div><dt>报告版本</dt><dd>v1.3</dd></div>
+            <div><dt>报告版本</dt><dd>v2.0</dd></div>
           </dl>
         </PanelSection>
       </div>
@@ -402,7 +503,7 @@ function NewTaskModal({ onClose, onCreate }: { onClose: () => void; onCreate: (t
       updatedAt: "刚刚",
       customer: { name, country: "待识别", owner: "Tina", product: "待识别", channel: sourceMeta[source].label, lastMessageAt: new Date().toLocaleString("zh-CN") },
       rawConversation: conversation || "Customer: Please send me more information about your product and pricing.",
-      report: { ...demoReport, stage: "需求确认", confidence: 0.74 },
+      report: { ...demoReport, stage: "初次询盘与客户背调", parallelStages: ["信任建立"], confidence: 0.74 },
       progress: defaultProgress.map((item) => ({ ...item, state: "todo", locked: false })),
       provider: "openai",
       model: "GPT",
