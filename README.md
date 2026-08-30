@@ -19,6 +19,17 @@ pnpm dev
 
 打开 `http://localhost:3000`。
 
+## Docker 部署
+
+先创建 `.env.local`，然后运行：
+
+```bash
+docker compose up -d --build
+docker compose ps
+```
+
+应用仅绑定到服务器的 `127.0.0.1:3000`，应通过 Caddy 或其他反向代理对外提供 HTTPS。
+
 ## API 配置
 
 密钥只放在服务端 `.env.local`，不要使用 `NEXT_PUBLIC_` 前缀。模型调用实现位于 `lib/ai.ts`。未配置密钥时 `/api/analyze` 与 `/api/translate` 会返回演示结果，方便先验收界面。
