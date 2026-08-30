@@ -174,6 +174,15 @@ function normalizeReport(value: unknown, conversation = ""): CustomerTask["repor
       evidenceQuote,
       evidenceMessageId: evidenceMessage?.id || "",
       riskReason: status === "risk" ? stringValue(item.riskReason, evidence) : "",
+      seedingNeed: item.id === "seeding" && (item.seedingNeed === "需要种草" || item.seedingNeed === "无需种草") ? item.seedingNeed : fallback.seedingNeed,
+      seedingDirection: item.id === "seeding" ? stringValue(item.seedingDirection, fallback.seedingDirection || "") : "",
+      seedingPerformed: item.id === "seeding" && (item.seedingPerformed === "已种草" || item.seedingPerformed === "尚未种草" || item.seedingPerformed === "未确认") ? item.seedingPerformed : fallback.seedingPerformed,
+      seedingPerformedEvidenceMessageId: item.id === "seeding" ? stringValue(item.seedingPerformedEvidenceMessageId) : "",
+      seedingPerformedEvidenceQuote: item.id === "seeding" ? normalizeEvidenceQuote(item.seedingPerformedEvidenceQuote, conversation) : "",
+      seedingAccepted: item.id === "seeding" && (item.seedingAccepted === "客户明确肯定" || item.seedingAccepted === "客户未明确肯定" || item.seedingAccepted === "未确认") ? item.seedingAccepted : fallback.seedingAccepted,
+      seedingAcceptanceEvidenceMessageId: item.id === "seeding" ? stringValue(item.seedingAcceptanceEvidenceMessageId) : "",
+      seedingAcceptanceEvidenceQuote: item.id === "seeding" ? normalizeEvidenceQuote(item.seedingAcceptanceEvidenceQuote, conversation) : "",
+      seedingAdvice: item.id === "seeding" ? stringValue(item.seedingAdvice, fallback.seedingAdvice || "") : "",
       confidence: Number.isFinite(confidence) ? Math.min(1, Math.max(0, confidence)) : 0,
     };
   });
@@ -683,6 +692,15 @@ function ConfirmationChecklist({ task, onUpdate }: { task: CustomerTask; onUpdat
                   <div><strong>{item.label}</strong><p>{item.evidence}</p></div>
                   <span className="item-confidence">{Math.round(item.confidence * 100)}%</span>
                 </div>
+                {item.id === "seeding" && item.seedingNeed && <div className={`seeding-analysis ${item.seedingNeed === "需要种草" ? "needed" : "not-needed"}`}>
+                  <header><span>种草结论</span><strong>{item.seedingNeed}</strong></header>
+                  {item.seedingNeed === "需要种草" && <div className="seeding-detail-grid">
+                    <div><small>种草方向</small><p>{item.seedingDirection || "待确认客户关注的改善、期望或痛点。"}</p></div>
+                    <div><small>当前是否已种草</small><p>{item.seedingPerformed || "未确认"}</p>{item.seedingPerformedEvidenceQuote && <blockquote>“{item.seedingPerformedEvidenceQuote}”</blockquote>}</div>
+                    <div><small>是否获得客户肯定</small><p>{item.seedingAccepted || "未确认"}</p>{item.seedingAcceptanceEvidenceQuote && <blockquote>“{item.seedingAcceptanceEvidenceQuote}”</blockquote>}</div>
+                    <div className="seeding-advice"><small>建议</small><p>{item.seedingAdvice || "先确认客户希望改善的问题，再做针对性价值说明。"}</p></div>
+                  </div>}
+                </div>}
                 {(item.status === "unknown" || item.status === "risk") && <div className="confirmation-actions">
                   <button onClick={() => generate(item, "hook")} disabled={!!generating}><Sparkles size={12} />{generating === `${item.id}-hook` ? "生成中…" : "生成探询钩子"}</button>
                   <button onClick={() => generate(item, "explain")} disabled={!!generating}><Bot size={12} />{generating === `${item.id}-explain` ? "生成中…" : "生成直接阐述"}</button>

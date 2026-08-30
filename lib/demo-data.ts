@@ -26,7 +26,7 @@ export const defaultConfirmations: ConfirmationItem[] = [
 
 const demoConfirmations: ConfirmationItem[] = defaultConfirmations.map((item) => {
   if (item.id === "role") return { ...item, status: "confirmed", evidence: "客户代表公司询问首批采购，并熟悉批次资料。", confidence: 0.82 };
-  if (item.id === "seeding") return { ...item, status: "na", evidence: "客户已有明确目标产品。", confidence: 0.76 };
+  if (item.id === "seeding") return { ...item, status: "na", evidence: "客户已有明确目标产品，当前重点是核实批次资料和付款保障。", evidenceMessageId: "M00001", evidenceQuote: "Is the COA from the same batch I will receive?", seedingNeed: "无需种草", seedingDirection: "", seedingPerformed: "未确认", seedingPerformedEvidenceMessageId: "", seedingPerformedEvidenceQuote: "", seedingAccepted: "未确认", seedingAcceptanceEvidenceMessageId: "", seedingAcceptanceEvidenceQuote: "", seedingAdvice: "", confidence: 0.76 };
   if (item.id === "coa") return { ...item, status: "risk", evidence: "客户询问收到的产品是否对应同一批次 COA。", evidenceMessageId: "M00001", evidenceQuote: "Is the COA from the same batch I will receive?", riskReason: "客户尚未确认质量文件与实际交付批次一致，可能阻碍首次下单。", confidence: 0.96 };
   if (item.id === "payment_method") return { ...item, status: "risk", evidence: "客户询问首次订单可获得什么付款保障。", evidenceMessageId: "M00003", evidenceQuote: "What protection do I have for the first order?", riskReason: "客户对首次付款的资金安全缺乏信心，未解决前可能不会付款。", confidence: 0.95 };
   return { ...item };

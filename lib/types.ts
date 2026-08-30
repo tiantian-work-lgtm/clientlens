@@ -42,6 +42,15 @@ export interface ConfirmationItem {
   evidenceMessageId?: string;
   evidenceQuote?: string;
   riskReason?: string;
+  seedingNeed?: "需要种草" | "无需种草";
+  seedingDirection?: string;
+  seedingPerformed?: "已种草" | "尚未种草" | "未确认";
+  seedingPerformedEvidenceMessageId?: string;
+  seedingPerformedEvidenceQuote?: string;
+  seedingAccepted?: "客户明确肯定" | "客户未明确肯定" | "未确认";
+  seedingAcceptanceEvidenceMessageId?: string;
+  seedingAcceptanceEvidenceQuote?: string;
+  seedingAdvice?: string;
   confidence: number;
 }
 

@@ -49,7 +49,7 @@ const riskSchema = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["id", "category", "label", "status", "evidence", "evidenceMessageId", "evidenceQuote", "riskReason", "confidence"],
+        required: ["id", "category", "label", "status", "evidence", "evidenceMessageId", "evidenceQuote", "riskReason", "seedingNeed", "seedingDirection", "seedingPerformed", "seedingPerformedEvidenceMessageId", "seedingPerformedEvidenceQuote", "seedingAccepted", "seedingAcceptanceEvidenceMessageId", "seedingAcceptanceEvidenceQuote", "seedingAdvice", "confidence"],
         properties: {
           id: { type: "string" },
           category: { type: "string", enum: ["客户角色", "认知与经历", "产品与信任", "交易条件"] },
@@ -59,6 +59,15 @@ const riskSchema = {
           evidenceMessageId: { type: "string" },
           evidenceQuote: { type: "string" },
           riskReason: { type: "string" },
+          seedingNeed: { type: "string", enum: ["需要种草", "无需种草", ""] },
+          seedingDirection: { type: "string" },
+          seedingPerformed: { type: "string", enum: ["已种草", "尚未种草", "未确认", ""] },
+          seedingPerformedEvidenceMessageId: { type: "string" },
+          seedingPerformedEvidenceQuote: { type: "string" },
+          seedingAccepted: { type: "string", enum: ["客户明确肯定", "客户未明确肯定", "未确认", ""] },
+          seedingAcceptanceEvidenceMessageId: { type: "string" },
+          seedingAcceptanceEvidenceQuote: { type: "string" },
+          seedingAdvice: { type: "string" },
           confidence: { type: "number", minimum: 0, maximum: 1 },
         },
       },
@@ -82,7 +91,7 @@ const commonPrompt = `你是一名严谨的 B2B 销售对话分析师。判断�
 
 const modulePrompts: Record<AnalysisModule, string> = {
   customer: `${commonPrompt}\n只分析：对话总结、客户画像、销售阶段和总体置信度。客户画像 profile 必须严格返回 10 项，并按以下顺序和“维度：结论”格式填写：身份与组织、客户类型与经验、核心需求与目标、产品兴趣、决策权与流程、采购意向、价格敏感度、信任状态、核心关注与风险偏好、沟通风格与下一步倾向。每项应尽量具体，但只能依据聊天内容；聊天没有提供的维度必须写“维度：待确认”，禁止用常识补全或虚构。销售阶段只能从七阶段中选择；主阶段取最接近当前成交里程碑的一项，第1至3阶段可以同时放入 parallelStages。`,
-  risk: `${commonPrompt}\n只分析异议、犹豫点、风险和确认清单。JSON 根对象必须且只能包含 objections 和 confirmations。objections 每项必须完整包含 title、severity、status、evidence、evidenceMessageId、evidenceQuote、resolutionEvidenceMessageId、resolutionEvidenceQuote、resolutionReason、advice；没有原始聊天直接依据的判断不要放入 objections，绝不能返回“待确认异议1”等占位标题。evidence 用中文概括；evidenceMessageId 必须填写客户提出该异议的真实 M 编号；evidenceQuote 必须逐字摘录该编号消息的原文。必须按 M 编号顺序判断解决状态：①销售没有在后续消息正面回答核心问题、回答回避问题，或客户后来再次追问同一问题，status=未解决；②销售在后续消息正面回答，且此后客户没有再追问同一问题，但客户也没有明确表示认可，status=未追问-基本解决；③销售正面回答后，客户在更晚的消息中明确肯定、接受或赞同该答案，status=客户肯定-完全解决。普通礼貌致谢、话题切换、沉默和问题发生前的肯定都不能算完全解决。基本解决时 resolutionEvidenceMessageId/Quote 必须引用异议之后销售的直接回答；完全解决时必须引用销售回答之后客户明确肯定的原文；未解决时这两个字段返回空字符串。resolutionReason 用中文说明为何符合该状态。confirmations 每项必须完整包含 id、category、label、status、evidence、evidenceMessageId、evidenceQuote、riskReason、confidence，并覆盖且只覆盖以下 11 项及括号内 id：客户角色与经验(role)、是否需要产品种草(seeding)、是否需要基础知识科普(education)、剂量/使用/医疗问题(medical)、是否有被骗经历(scammed)、COA与产品一致性(coa)、产品包装(packaging)、公司资料(company)、其他客户反馈(feedback)、物流清关和时效(logistics)、支付方式与付款安全(payment_method)。只有明确顾虑、冲突、负面信号或成交阻碍才能标记 risk，仅仅没谈到必须标记 unknown；无直接依据时 evidenceMessageId 和 evidenceQuote 都返回空字符串。`,
+  risk: `${commonPrompt}\n只分析异议、犹豫点、风险和确认清单。JSON 根对象必须且只能包含 objections 和 confirmations。objections 每项必须完整包含 title、severity、status、evidence、evidenceMessageId、evidenceQuote、resolutionEvidenceMessageId、resolutionEvidenceQuote、resolutionReason、advice；没有原始聊天直接依据的判断不要放入 objections，绝不能返回“待确认异议1”等占位标题。evidence 用中文概括；evidenceMessageId 必须填写客户提出该异议的真实 M 编号；evidenceQuote 必须逐字摘录该编号消息的原文。必须按 M 编号顺序判断解决状态：①销售没有在后续消息正面回答核心问题、回答回避问题，或客户后来再次追问同一问题，status=未解决；②销售在后续消息正面回答，且此后客户没有再追问同一问题，但客户也没有明确表示认可，status=未追问-基本解决；③销售正面回答后，客户在更晚的消息中明确肯定、接受或赞同该答案，status=客户肯定-完全解决。普通礼貌致谢、话题切换、沉默和问题发生前的肯定都不能算完全解决。基本解决时 resolutionEvidenceMessageId/Quote 必须引用异议之后销售的直接回答；完全解决时必须引用销售回答之后客户明确肯定的原文；未解决时这两个字段返回空字符串。resolutionReason 用中文说明为何符合该状态。confirmations 每项还必须包含完整种草字段，并覆盖且只覆盖以下 11 项及括号内 id：客户角色与经验(role)、是否需要产品种草(seeding)、是否需要基础知识科普(education)、剂量/使用/医疗问题(medical)、是否有被骗经历(scammed)、COA与产品一致性(coa)、产品包装(packaging)、公司资料(company)、其他客户反馈(feedback)、物流清关和时效(logistics)、支付方式与付款安全(payment_method)。非 seeding 项的全部 seeding 字段返回空字符串。seeding 项必须在“需要种草”和“无需种草”中二选一，并引用最相关的客户原文：客户仍在探索方案、不清楚产品与自身目标的关系、需要建立改善预期或痛点价值时判为需要种草；客户已明确目标产品并表现出足够认知、主要只核实价格/文件/交易条件时判为无需种草。若需要种草，seedingDirection 必须具体写客户关注的改善、期望或痛点；seedingPerformed 判断销售是否已经围绕该方向完成价值阐述，只有已种草时才填写 seedingPerformedEvidenceMessageId/Quote 并逐字引用销售原话，否则两字段为空；seedingAccepted 只有客户在种草内容之后明确肯定、认可或表现出购买兴趣时才可填客户明确肯定，此时 seedingAcceptanceEvidenceMessageId/Quote 必须逐字引用该客户后续原话，否则两字段为空；沉默、礼貌致谢不算肯定；seedingAdvice 给出下一步具体建议。只有明确顾虑、冲突、负面信号或成交阻碍才能标记 risk，仅仅没谈到必须标记 unknown；无直接依据时 evidenceMessageId 和 evidenceQuote 都返回空字符串。`,
   action: `${commonPrompt}\n只分析本次沟通可改善之处、下一步行动和建议回复。建议必须具体可执行；suggestedReply 沿用客户语言，suggestedReplyTranslation 返回自然简体中文翻译。`,
 };
 
@@ -259,6 +268,15 @@ function normalizeRiskResult(value: AnalysisModuleResult, messages: ParsedConver
       evidenceMessageId: item?.evidenceMessageId || "",
       evidenceQuote: item?.evidenceQuote || "",
       riskReason: verifiedRisk ? item?.riskReason?.trim() || item?.evidence?.trim() || "对话中存在明确顾虑。" : "",
+      seedingNeed: item?.id === "seeding" && (item.seedingNeed === "需要种草" || item.seedingNeed === "无需种草") ? item.seedingNeed : undefined,
+      seedingDirection: item?.id === "seeding" ? item.seedingDirection?.trim() || "" : "",
+      seedingPerformed: item?.id === "seeding" && (item.seedingPerformed === "已种草" || item.seedingPerformed === "尚未种草" || item.seedingPerformed === "未确认") ? item.seedingPerformed : undefined,
+      seedingPerformedEvidenceMessageId: item?.id === "seeding" ? item.seedingPerformedEvidenceMessageId || "" : "",
+      seedingPerformedEvidenceQuote: item?.id === "seeding" ? item.seedingPerformedEvidenceQuote || "" : "",
+      seedingAccepted: item?.id === "seeding" && (item.seedingAccepted === "客户明确肯定" || item.seedingAccepted === "客户未明确肯定" || item.seedingAccepted === "未确认") ? item.seedingAccepted : undefined,
+      seedingAcceptanceEvidenceMessageId: item?.id === "seeding" ? item.seedingAcceptanceEvidenceMessageId || "" : "",
+      seedingAcceptanceEvidenceQuote: item?.id === "seeding" ? item.seedingAcceptanceEvidenceQuote || "" : "",
+      seedingAdvice: item?.id === "seeding" ? item.seedingAdvice?.trim() || "" : "",
       confidence: Number.isFinite(confidence) ? Math.min(1, Math.max(0, confidence)) : 0,
     } satisfies ConfirmationItem;
   });
@@ -286,6 +304,17 @@ function validateModuleResult(module: AnalysisModule, value: AnalysisModuleResul
     if (result.objections.some((item) => !resolutionEvidenceIsValid(messages, item.evidenceMessageId, item.resolutionEvidenceMessageId, item.resolutionEvidenceQuote, item.status))) throw new Error("风险模块解决状态与消息顺序不一致");
     if (result.confirmations.some((item) => !item.label?.trim() || !Number.isFinite(item.confidence))) throw new Error("风险模块确认清单字段不完整");
     if (result.confirmations.some((item) => item.status === "risk" && !hasVerifiedEvidence(messageById, item.evidenceMessageId, item.evidenceQuote))) throw new Error("风险项缺少可核验的原始聊天依据");
+    const seeding = result.confirmations.find((item) => item.id === "seeding");
+    if (!seeding || (seeding.seedingNeed !== "需要种草" && seeding.seedingNeed !== "无需种草")) throw new Error("种草分析缺少明确结论");
+    const seedingEvidenceMessage = messageById.get(seeding.evidenceMessageId || "");
+    if (seedingEvidenceMessage?.role !== "customer" || !hasVerifiedEvidence(messageById, seeding.evidenceMessageId, seeding.evidenceQuote)) throw new Error("种草分析缺少可核验的客户原文");
+    if (seeding.seedingNeed === "需要种草" && (!seeding.seedingDirection?.trim() || !seeding.seedingPerformed || !seeding.seedingAccepted || !seeding.seedingAdvice?.trim())) throw new Error("需要种草时必须完整返回方向、执行、肯定与建议");
+    const performedMessage = messageById.get(seeding.seedingPerformedEvidenceMessageId || "");
+    if (seeding.seedingPerformed === "已种草" && (performedMessage?.role !== "sales" || !hasVerifiedEvidence(messageById, seeding.seedingPerformedEvidenceMessageId, seeding.seedingPerformedEvidenceQuote))) throw new Error("已种草结论缺少可核验的销售原文");
+    const acceptanceMessage = messageById.get(seeding.seedingAcceptanceEvidenceMessageId || "");
+    const performedIndex = messages.findIndex((message) => message.id === seeding.seedingPerformedEvidenceMessageId);
+    const acceptanceIndex = messages.findIndex((message) => message.id === seeding.seedingAcceptanceEvidenceMessageId);
+    if (seeding.seedingAccepted === "客户明确肯定" && (acceptanceMessage?.role !== "customer" || performedIndex < 0 || acceptanceIndex <= performedIndex || !hasVerifiedEvidence(messageById, seeding.seedingAcceptanceEvidenceMessageId, seeding.seedingAcceptanceEvidenceQuote))) throw new Error("客户肯定结论缺少种草之后的可核验原文");
   }
   return value;
 }
