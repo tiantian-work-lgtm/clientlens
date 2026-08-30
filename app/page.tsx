@@ -38,7 +38,7 @@ import {
   Zap,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { defaultConfirmations, defaultProgress, demoReport, initialTasks } from "@/lib/demo-data";
+import { defaultConfirmations, defaultProgress, emptyReport, initialTasks } from "@/lib/demo-data";
 import type { ConfirmationItem, ConfirmationStatus, CustomerTask, ProgressItem, SalesStage, SourceType } from "@/lib/types";
 import SettingsManager from "@/app/components/settings-manager";
 
@@ -79,23 +79,32 @@ function stringList(value: unknown, fallback: string[] = []) {
   return [...fallback];
 }
 
-function normalizeReport(value: unknown): CustomerTask["report"] {
+function normalizeEvidenceQuote(value: unknown, conversation: string) {
+  const candidate = stringValue(value).replace(/^[\s"'“”‘’]+|[\s"'“”‘’]+$/g, "").trim();
+  if (candidate.length < 4) return "";
+  const normalize = (text: string) => text.normalize("NFKC").replace(/\s+/g, " ").trim().toLocaleLowerCase();
+  return normalize(conversation).includes(normalize(candidate)) ? candidate : "";
+}
+
+function normalizeReport(value: unknown, conversation = ""): CustomerTask["report"] {
   const report = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
-  const profile = stringList(report.profile, demoReport.profile);
+  const profile = stringList(report.profile);
   const parallelStages = stringList(report.parallelStages)
     .map((stage) => normalizeStage(stage))
     .filter((stage, index, items) => items.indexOf(stage) === index);
-  const rawObjections = Array.isArray(report.objections) ? report.objections : demoReport.objections;
+  const rawObjections = Array.isArray(report.objections) ? report.objections : [];
   const objections = rawObjections.flatMap((value, index) => {
     if (!value || typeof value !== "object" || Array.isArray(value)) return [];
     const item = value as Record<string, unknown>;
+    const verifiedEvidence = normalizeEvidenceQuote(item.evidence, conversation);
+    if (!verifiedEvidence) return [];
     const severity: "高" | "中" | "低" = item.severity === "高" || item.severity === "中" || item.severity === "低" ? item.severity : "中";
     const status: "待解决" | "处理中" | "已解决" = item.status === "待解决" || item.status === "处理中" || item.status === "已解决" ? item.status : "待解决";
     return [{
       title: stringValue(item.title, `待确认异议 ${index + 1}`),
       severity,
       status,
-      evidence: stringValue(item.evidence, "对话中暂无直接证据"),
+      evidence: verifiedEvidence,
       advice: stringValue(item.advice, "需要结合原始对话进一步确认。"),
     }];
   });
@@ -104,32 +113,34 @@ function normalizeReport(value: unknown): CustomerTask["report"] {
     const raw = rawConfirmations.find((value) => value && typeof value === "object" && !Array.isArray(value) && (value as Record<string, unknown>).id === fallback.id);
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { ...fallback };
     const item = raw as Record<string, unknown>;
-    const status = item.status === "confirmed" || item.status === "unknown" || item.status === "risk" || item.status === "na" ? item.status : fallback.status;
+    const requestedStatus = item.status === "confirmed" || item.status === "unknown" || item.status === "risk" || item.status === "na" ? item.status : fallback.status;
     const confidence = Number(item.confidence);
-    const evidence = stringValue(item.evidence, fallback.evidence);
+    const evidenceQuote = normalizeEvidenceQuote(item.evidenceQuote, conversation);
+    const status = requestedStatus === "risk" && !evidenceQuote ? "unknown" : requestedStatus;
+    const evidence = requestedStatus === "risk" && !evidenceQuote ? fallback.evidence : stringValue(item.evidence, fallback.evidence);
     return {
       ...fallback,
       status,
       evidence,
-      evidenceQuote: stringValue(item.evidenceQuote, fallback.evidenceQuote || ""),
+      evidenceQuote,
       riskReason: status === "risk" ? stringValue(item.riskReason, evidence) : "",
-      confidence: Number.isFinite(confidence) ? Math.min(1, Math.max(0, confidence)) : fallback.confidence,
+      confidence: Number.isFinite(confidence) ? Math.min(1, Math.max(0, confidence)) : 0,
     };
   });
   const confidence = Number(report.confidence);
   return {
-    summary: stringValue(report.summary, demoReport.summary),
+    summary: stringValue(report.summary, "AI 未返回有效的对话总结。"),
     profile,
     stage: normalizeStage(stringValue(report.stage)),
     parallelStages,
-    stageReason: stringValue(report.stageReason, demoReport.stageReason),
+    stageReason: stringValue(report.stageReason, "当前聊天记录不足以支持更具体的阶段判断。"),
     objections,
     confirmations,
-    improvements: stringList(report.improvements, demoReport.improvements),
-    nextActions: stringList(report.nextActions, demoReport.nextActions),
-    suggestedReply: stringValue(report.suggestedReply, demoReport.suggestedReply),
-    suggestedReplyTranslation: stringValue(report.suggestedReplyTranslation, demoReport.suggestedReplyTranslation),
-    confidence: Number.isFinite(confidence) ? Math.min(1, Math.max(0, confidence)) : demoReport.confidence,
+    improvements: stringList(report.improvements),
+    nextActions: stringList(report.nextActions),
+    suggestedReply: stringValue(report.suggestedReply),
+    suggestedReplyTranslation: stringValue(report.suggestedReplyTranslation),
+    confidence: Number.isFinite(confidence) ? Math.min(1, Math.max(0, confidence)) : 0,
   };
 }
 
@@ -137,7 +148,7 @@ function normalizeTask(task: CustomerTask): CustomerTask {
   const hasNewProgress = task.progress?.some((item) => item.id === "inquiry");
   return {
     ...task,
-    report: normalizeReport(task.report),
+    report: normalizeReport(task.report, task.rawConversation),
     progress: hasNewProgress ? task.progress : defaultProgress.map((item) => ({ ...item })),
   };
 }
@@ -755,7 +766,7 @@ function NewTaskModal({ onClose, onCreate, onUpdate }: { onClose: () => void; on
         lastMessageAt: selectedCustomer?.lastMessageAt || new Date().toLocaleString("zh-CN"),
       },
       rawConversation: conversation,
-      report: { ...demoReport, confidence: 0 },
+      report: { ...emptyReport, confirmations: defaultConfirmations.map((item) => ({ ...item })) },
       progress: defaultProgress.map((item) => ({ ...item, state: "todo", locked: false })),
       provider: "deepseek",
       model: "AI",
@@ -797,7 +808,7 @@ function NewTaskModal({ onClose, onCreate, onUpdate }: { onClose: () => void; on
         analysisStep: undefined,
         analysisError: undefined,
         rawConversation: importedConversation,
-        report: analysis.report || demoReport,
+        report: analysis.report || emptyReport,
         provider,
         model: provider === "openai" ? "GPT" : "DeepSeek",
       }));

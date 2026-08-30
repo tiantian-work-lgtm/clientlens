@@ -11,18 +11,41 @@ export const defaultProgress: ProgressItem[] = [
 ];
 
 export const defaultConfirmations: ConfirmationItem[] = [
-  { id: "role", category: "客户角色", label: "客户角色与经验", status: "confirmed", evidence: "客户代表公司询问首批采购，并熟悉批次资料。", confidence: 0.82 },
-  { id: "seeding", category: "认知与经历", label: "是否需要产品种草", status: "na", evidence: "客户已有明确目标产品。", confidence: 0.76 },
-  { id: "education", category: "认知与经历", label: "是否需要基础知识科普", status: "unknown", evidence: "对话中尚未确认。", confidence: 0.54 },
-  { id: "medical", category: "认知与经历", label: "剂量、使用或医疗问题", status: "unknown", evidence: "尚未出现相关问题；如出现需进行合规提示。", confidence: 0.68 },
-  { id: "scammed", category: "认知与经历", label: "是否有被骗经历", status: "unknown", evidence: "客户表达付款安全顾虑，但没有明确说明经历。", confidence: 0.63 },
-  { id: "coa", category: "产品与信任", label: "COA 与产品一致性", status: "risk", evidence: "客户询问收到的产品是否对应同一批次 COA。", evidenceQuote: "Customer: Is the COA from the same batch I will receive?", riskReason: "客户尚未确认质量文件与实际交付批次一致，可能阻碍首次下单。", confidence: 0.96 },
-  { id: "packaging", category: "产品与信任", label: "产品包装", status: "unknown", evidence: "对话中尚未讨论包装。", confidence: 0.91 },
-  { id: "company", category: "产品与信任", label: "公司资料", status: "unknown", evidence: "销售介绍了公司背景，但客户未明确确认是否足够。", confidence: 0.72 },
-  { id: "feedback", category: "产品与信任", label: "其他客户反馈", status: "unknown", evidence: "尚未提供或讨论可验证反馈。", confidence: 0.88 },
-  { id: "logistics", category: "交易条件", label: "物流、清关和时效", status: "unknown", evidence: "尚未确认目的地和期望时效。", confidence: 0.92 },
-  { id: "payment_method", category: "交易条件", label: "支付方式与付款安全", status: "risk", evidence: "客户询问首次订单可获得什么付款保障。", evidenceQuote: "Customer: What protection do I have for the first order?", riskReason: "客户对首次付款的资金安全缺乏信心，未解决前可能不会付款。", confidence: 0.95 },
+  { id: "role", category: "客户角色", label: "客户角色与经验", status: "unknown", evidence: "对话中尚未确认。", confidence: 0 },
+  { id: "seeding", category: "认知与经历", label: "是否需要产品种草", status: "unknown", evidence: "对话中尚未确认。", confidence: 0 },
+  { id: "education", category: "认知与经历", label: "是否需要基础知识科普", status: "unknown", evidence: "对话中尚未确认。", confidence: 0 },
+  { id: "medical", category: "认知与经历", label: "剂量、使用或医疗问题", status: "unknown", evidence: "对话中尚未确认。", confidence: 0 },
+  { id: "scammed", category: "认知与经历", label: "是否有被骗经历", status: "unknown", evidence: "对话中尚未确认。", confidence: 0 },
+  { id: "coa", category: "产品与信任", label: "COA 与产品一致性", status: "unknown", evidence: "对话中尚未确认。", confidence: 0 },
+  { id: "packaging", category: "产品与信任", label: "产品包装", status: "unknown", evidence: "对话中尚未确认。", confidence: 0 },
+  { id: "company", category: "产品与信任", label: "公司资料", status: "unknown", evidence: "对话中尚未确认。", confidence: 0 },
+  { id: "feedback", category: "产品与信任", label: "其他客户反馈", status: "unknown", evidence: "对话中尚未确认。", confidence: 0 },
+  { id: "logistics", category: "交易条件", label: "物流、清关和时效", status: "unknown", evidence: "对话中尚未确认。", confidence: 0 },
+  { id: "payment_method", category: "交易条件", label: "支付方式与付款安全", status: "unknown", evidence: "对话中尚未确认。", confidence: 0 },
 ];
+
+const demoConfirmations: ConfirmationItem[] = defaultConfirmations.map((item) => {
+  if (item.id === "role") return { ...item, status: "confirmed", evidence: "客户代表公司询问首批采购，并熟悉批次资料。", confidence: 0.82 };
+  if (item.id === "seeding") return { ...item, status: "na", evidence: "客户已有明确目标产品。", confidence: 0.76 };
+  if (item.id === "coa") return { ...item, status: "risk", evidence: "客户询问收到的产品是否对应同一批次 COA。", evidenceQuote: "Customer: Is the COA from the same batch I will receive?", riskReason: "客户尚未确认质量文件与实际交付批次一致，可能阻碍首次下单。", confidence: 0.96 };
+  if (item.id === "payment_method") return { ...item, status: "risk", evidence: "客户询问首次订单可获得什么付款保障。", evidenceQuote: "Customer: What protection do I have for the first order?", riskReason: "客户对首次付款的资金安全缺乏信心，未解决前可能不会付款。", confidence: 0.95 };
+  return { ...item };
+});
+
+export const emptyReport: AnalysisReport = {
+  summary: "等待 AI 完成对话分析。",
+  profile: [],
+  stage: "初次询盘与客户背调",
+  parallelStages: [],
+  stageReason: "当前尚无足够信息判断销售阶段。",
+  objections: [],
+  confirmations: defaultConfirmations,
+  improvements: [],
+  nextActions: [],
+  suggestedReply: "",
+  suggestedReplyTranslation: "",
+  confidence: 0,
+};
 
 export const demoReport: AnalysisReport = {
   summary:
@@ -47,7 +70,7 @@ export const demoReport: AnalysisReport = {
       advice: "先解释可用付款路径和流程，再约定一个低风险的首单方案。",
     },
   ],
-  confirmations: defaultConfirmations,
+  confirmations: demoConfirmations,
   improvements: [
     "上一轮回复介绍公司背景过多，没有直接回答批次对应问题。",
     "报价后没有用一个明确问题推动客户做下一步选择。",
