@@ -419,6 +419,64 @@ function moduleSchema(module: AnalysisModule) {
 }
 
 const confirmationIds = ["role", "seeding", "medical", "scammed", "coa", "packaging", "company", "feedback", "logistics", "payment_method"];
+
+function deepSeekJsonExample(module: AnalysisModule): Record<string, unknown> {
+  if (module === "customer") return {
+    summary: "根据完整对话生成的中文总结",
+    profile: ["有原文依据的画像标签一", "有原文依据的画像标签二", "有原文依据的画像标签三"],
+    stage: "初次询盘与客户背调",
+    parallelStages: ["信任建立"],
+    stageReason: "根据客户真实表达说明阶段判断依据",
+    confidence: 0.8,
+  };
+  if (module === "psychology") return {
+    emotionProfile: {
+      currentEmotion: "使用限定语描述当前情绪",
+      emotionTrend: "描述对话中的情绪变化",
+      personalityTraits: ["有原文依据的沟通性格倾向"],
+      communicationStyle: "描述沟通方式",
+      decisionStyle: "描述决策方式",
+      sensitivities: ["有原文依据的敏感点"],
+      psychologicalState: "作非临床、有限定语的心理研判",
+      coreMotivations: ["可能的核心驱动力"],
+      trustNeeds: ["建立信任所需条件"],
+      defensePatterns: ["对话中可观察的防御或回避模式"],
+      pressureResponse: "描述面对催促或不确定性时可能的反应",
+      evidence: [{ messageId: "M00001", quote: "必须替换成该编号消息中的客户逐字原文", interpretation: "说明该原文如何支持判断" }],
+      advice: ["尊重客户自主决定的可执行沟通建议"],
+      confidence: 0.8,
+    },
+  };
+  if (module === "objections") return { objections: [] };
+  if (module === "checklist") return {
+    confirmations: confirmationIds.map((id) => ({
+      id,
+      status: "unknown",
+      evidence: "对话中尚未确认",
+      evidenceMessageId: "",
+      evidenceQuote: "",
+      riskReason: "",
+      conclusion: id === "seeding" ? "无需种草" : id === "medical" ? "无需提供建议" : id === "scammed" ? "无被骗经历" : "未确认",
+      detail: "",
+      source: "未提及",
+      handling: "未确认",
+      handlingEvidenceMessageId: "",
+      handlingEvidenceQuote: "",
+      reaction: "未确认",
+      reactionEvidenceMessageId: "",
+      reactionEvidenceQuote: "",
+      advice: "根据真实聊天给出该项目的下一步建议",
+      confidence: 0.5,
+    })),
+  };
+  return {
+    improvements: ["结合真实对话指出一项可改善之处"],
+    nextActions: ["结合当前进度给出一项明确行动"],
+    suggestedReply: "A natural reply in the customer's language.",
+    suggestedReplyTranslation: "上一条建议回复的自然简体中文翻译。",
+  };
+}
+
 const confirmationDefinitions: Array<Pick<ConfirmationItem, "id" | "category" | "label">> = [
   { id: "role", category: "客户角色", label: "客户角色与经验" },
   { id: "seeding", category: "认知与经历", label: "是否需要产品种草" },
@@ -943,9 +1001,10 @@ async function requestModuleOnce(config: RuntimeProviderConfig, provider: Provid
   }
   const tokens = module === "checklist" ? 4200 : module === "psychology" ? 2600 : module === "customer" ? 2200 : module === "objections" ? 2800 : 2400;
   const schema = JSON.stringify(moduleSchema(module));
+  const example = JSON.stringify(deepSeekJsonExample(module));
   return requestDeepSeekJson<AnalysisModuleResult>(config, [{
     role: "system",
-    content: `${instruction}\n必须严格按照下面的 JSON Schema 返回根对象，字段名、嵌套层级和枚举值不可改名或遗漏；没有内容的数组返回 []，没有证据的字符串返回空字符串。只输出一个可由 JSON.parse 解析的 JSON 对象，不输出 Markdown。\nJSON Schema:\n${schema}`,
+    content: `${instruction}\n必须严格按照下面的 JSON Schema 返回根对象，字段名、嵌套层级和枚举值不可改名或遗漏；没有内容的数组返回 []，没有证据的字符串返回空字符串。只输出一个可由 JSON.parse 解析的 JSON 对象，不输出 Markdown。\nJSON Schema:\n${schema}\n合法 JSON 格式示例：\n${example}\n示例中的文字和 M00001 仅用于展示结构，绝不是当前客户的事实或证据，必须根据本次真实聊天替换；无法在原文中核验的内容不得照抄。`,
   }, { role: "user", content: input }], tokens);
 }
 
