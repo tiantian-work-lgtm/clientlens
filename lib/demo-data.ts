@@ -40,7 +40,7 @@ const demoConfirmations: ConfirmationItem[] = defaultConfirmations.map((item) =>
 export const emptyReport: AnalysisReport = {
   summary: "等待 AI 完成对话分析。",
   profile: [],
-  emotionProfile: { currentEmotion: "待分析", emotionTrend: "待分析", personalityTraits: ["信息不足"], communicationStyle: "待分析", decisionStyle: "待分析", sensitivities: ["信息不足"], psychologicalState: "待分析", coreMotivations: ["信息不足"], trustNeeds: ["信息不足"], defensePatterns: ["信息不足"], pressureResponse: "待分析", evidence: [], advice: ["等待更多客户对话后再判断。"], confidence: 0 },
+  emotionProfile: { currentEmotion: "待分析", emotionTrend: "待分析", personalityTraits: ["信息不足"], decisionStyle: "待分析", sensitivities: ["信息不足"], psychologicalState: "待分析", coreMotivations: ["信息不足"], trustNeeds: ["信息不足"], defensePatterns: ["信息不足"], pressureResponse: "待分析", evidence: [], advice: ["等待更多客户对话后再判断。"], confidence: 0 },
   stage: "初次询盘与客户背调",
   parallelStages: [],
   stageReason: "当前尚无足够信息判断销售阶段。",
@@ -72,7 +72,6 @@ export const demoReport: AnalysisReport = {
     currentEmotion: "谨慎且存在首单不安全感，但仍保持明确兴趣",
     emotionTrend: "从产品了解逐渐转向对批次一致性和付款保障的审慎核验",
     personalityTraits: ["证据导向", "风险敏感", "表达直接", "决策谨慎"],
-    communicationStyle: "使用简短直接的问题逐项核验关键风险，不喜欢泛泛介绍",
     decisionStyle: "倾向先获得可验证资料和风险保障，再决定是否推进首单",
     sensitivities: ["答非所问", "不可核验的宣传", "首单付款风险", "文件与实物不一致"],
     psychologicalState: "从当前表达看，客户处于有兴趣但主动控制风险的审慎状态；并非拒绝，而是在等待足够证据降低首次合作的不确定性。",

@@ -126,7 +126,6 @@ function normalizeReport(value: unknown, conversation = ""): CustomerTask["repor
     currentEmotion: stringValue(rawEmotionProfile.currentEmotion, "信息不足，暂无法判断当前情绪"),
     emotionTrend: stringValue(rawEmotionProfile.emotionTrend, "信息不足，暂无法判断情绪变化"),
     personalityTraits: stringList(rawEmotionProfile.personalityTraits, ["信息不足"]).slice(0, 5),
-    communicationStyle: stringValue(rawEmotionProfile.communicationStyle, "信息不足，暂无法判断沟通方式"),
     decisionStyle: stringValue(rawEmotionProfile.decisionStyle, "信息不足，暂无法判断决策方式"),
     sensitivities: stringList(rawEmotionProfile.sensitivities, ["信息不足"]).slice(0, 5),
     psychologicalState: stringValue(rawEmotionProfile.psychologicalState, "信息不足，暂无法进行沟通心理研判"),
@@ -709,7 +708,6 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
             <div className="emotion-columns">
               <div><small>沟通性格倾向</small><div className="emotion-tags">{activeTask.report.emotionProfile.personalityTraits.map((item) => <span key={item}>{item}</span>)}</div></div>
               <div><small>敏感点</small><div className="emotion-tags sensitivity-tags">{activeTask.report.emotionProfile.sensitivities.map((item) => <span key={item}>{item}</span>)}</div></div>
-              <div><small>沟通方式</small><p>{activeTask.report.emotionProfile.communicationStyle}</p></div>
               <div><small>决策方式</small><p>{activeTask.report.emotionProfile.decisionStyle}</p></div>
             </div>
             <div className="psychology-panel">

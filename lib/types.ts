@@ -29,7 +29,6 @@ export interface CustomerEmotionProfile {
   currentEmotion: string;
   emotionTrend: string;
   personalityTraits: string[];
-  communicationStyle: string;
   decisionStyle: string;
   sensitivities: string[];
   psychologicalState: string;
