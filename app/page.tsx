@@ -349,28 +349,31 @@ function normalizeReport(value: unknown, conversation = ""): CustomerTask["repor
   };
 }
 
-const analysisModules: AnalysisModule[] = ["customer", "risk", "action"];
-const analysisModuleLabels: Record<AnalysisModule, string> = { customer: "客户、情绪与阶段", risk: "异议与风险", action: "行动与回复" };
+const analysisModules: AnalysisModule[] = ["customer", "psychology", "objections", "checklist", "action"];
+const analysisModuleLabels: Record<AnalysisModule, string> = { customer: "总结、画像与阶段", psychology: "情绪、性格与心理", objections: "异议与解决状态", checklist: "客户确认清单", action: "行动与回复" };
 
 function mergeAnalysisModule(report: CustomerTask["report"], module: AnalysisModule, result: unknown, conversation: string) {
   const value = result && typeof result === "object" ? result as Record<string, unknown> : {};
-  if (module === "customer") return normalizeReport({ ...report, summary: value.summary, profile: value.profile, emotionProfile: value.emotionProfile, stage: value.stage, parallelStages: value.parallelStages, stageReason: value.stageReason, confidence: value.confidence }, conversation);
-  if (module === "risk") return normalizeReport({ ...report, objections: value.objections, confirmations: value.confirmations }, conversation);
+  if (module === "customer") return normalizeReport({ ...report, summary: value.summary, profile: value.profile, stage: value.stage, parallelStages: value.parallelStages, stageReason: value.stageReason, confidence: value.confidence }, conversation);
+  if (module === "psychology") return normalizeReport({ ...report, emotionProfile: value.emotionProfile }, conversation);
+  if (module === "objections") return normalizeReport({ ...report, objections: value.objections }, conversation);
+  if (module === "checklist") return normalizeReport({ ...report, confirmations: value.confirmations }, conversation);
   return normalizeReport({ ...report, improvements: value.improvements, nextActions: value.nextActions, suggestedReply: value.suggestedReply, suggestedReplyTranslation: value.suggestedReplyTranslation }, conversation);
 }
 
 async function analyzeConcurrently(task: CustomerTask, conversation: string, onUpdate: (task: CustomerTask) => void, requestedModules: AnalysisModule[] = analysisModules) {
-  const resettingRisk = requestedModules.includes("risk");
+  const resettingObjections = requestedModules.includes("objections");
+  const resettingChecklist = requestedModules.includes("checklist");
   // 风险模块开始时先清空旧结果，避免失败时继续展示旧版本占位或过期判断。
-  let report: CustomerTask["report"] = resettingRisk ? {
+  let report: CustomerTask["report"] = resettingObjections || resettingChecklist ? {
     ...task.report,
-    objections: [],
-    confirmations: defaultConfirmations.map((item) => ({ ...item })),
+    objections: resettingObjections ? [] : task.report.objections,
+    confirmations: resettingChecklist ? defaultConfirmations.map((item) => ({ ...item })) : task.report.confirmations,
   } : task.report;
   let provider: Provider = task.provider;
   let completed = 0;
   let succeeded = 0;
-  let states = { customer: "pending", risk: "pending", action: "pending", ...(task.analysisModules ?? {}) } as Record<AnalysisModule, AnalysisModuleStatus>;
+  let states = { customer: "pending", psychology: "pending", objections: "pending", checklist: "pending", action: "pending", ...(task.analysisModules ?? {}) } as Record<AnalysisModule, AnalysisModuleStatus>;
   for (const module of requestedModules) states[module] = "analyzing";
   let errors: Partial<Record<AnalysisModule, string>> = { ...(task.analysisModuleErrors ?? {}) };
   for (const module of requestedModules) delete errors[module];
@@ -409,9 +412,27 @@ async function analyzeConcurrently(task: CustomerTask, conversation: string, onU
 
 function normalizeTask(task: CustomerTask): CustomerTask {
   const hasNewProgress = task.progress?.some((item) => item.id === "inquiry");
+  const rawStates = task.analysisModules as unknown as Record<string, AnalysisModuleStatus> | undefined;
+  const rawErrors = task.analysisModuleErrors as unknown as Record<string, string> | undefined;
+  const normalizedStates = rawStates ? {
+    customer: rawStates.customer ?? "pending",
+    psychology: rawStates.psychology ?? rawStates.customer ?? "pending",
+    objections: rawStates.objections ?? rawStates.risk ?? "pending",
+    checklist: rawStates.checklist ?? rawStates.risk ?? "pending",
+    action: rawStates.action ?? "pending",
+  } satisfies Record<AnalysisModule, AnalysisModuleStatus> : undefined;
+  const normalizedErrors: Partial<Record<AnalysisModule, string>> | undefined = rawErrors ? {
+    ...(rawErrors.customer ? { customer: rawErrors.customer } : {}),
+    ...(rawErrors.psychology ? { psychology: rawErrors.psychology } : {}),
+    ...(rawErrors.objections || rawErrors.risk ? { objections: rawErrors.objections || rawErrors.risk } : {}),
+    ...(rawErrors.checklist || rawErrors.risk ? { checklist: rawErrors.checklist || rawErrors.risk } : {}),
+    ...(rawErrors.action ? { action: rawErrors.action } : {}),
+  } : undefined;
   return {
     ...task,
     report: normalizeReport(task.report, task.rawConversation),
+    analysisModules: normalizedStates,
+    analysisModuleErrors: normalizedErrors,
     progress: hasNewProgress ? task.progress : defaultProgress.map((item) => ({ ...item })),
   };
 }
@@ -674,7 +695,9 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
               return <div key={`${label}-${index}`}><small>{label}</small><strong className={detail === "待确认" ? "unknown" : ""}>{detail}</strong></div>;
             })}</div>
           </ReportCard>
+          </>}
 
+          {moduleVisible("psychology") && <>
           <ReportCard icon={UsersRound} title="客户情绪、沟通性格与心理研判" tone="cyan">
             <div className="emotion-headline">
               <div><small>当前情绪</small><strong>{activeTask.report.emotionProfile.currentEmotion}</strong></div>
@@ -710,7 +733,7 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
           </ReportCard>
           </>}
 
-          {moduleVisible("risk") && <>
+          {moduleVisible("objections") && <>
           <ReportCard icon={CircleAlert} title={`主要异议与犹豫点 · ${activeTask.report.objections.length}`} tone="orange">
             <div className="objection-list">
               {!activeTask.report.objections.length && <div className="empty-objections"><CheckCircle2 size={15} />暂未识别到具有原始聊天依据的明确异议</div>}
@@ -731,7 +754,9 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
           </ReportCard>
 
           <DeepHesitationCard task={activeTask} onUpdate={onUpdate} onLocate={openRawChat} />
+          </>}
 
+          {moduleVisible("checklist") && <>
           <ConfirmationChecklist task={activeTask} onUpdate={onUpdate} />
           </>}
 
@@ -774,7 +799,7 @@ function AnalysisLoading({ task }: { task: CustomerTask }) {
 }
 
 function AnalysisModuleProgress({ task, compact = false }: { task: CustomerTask; compact?: boolean }) {
-  const states = task.analysisModules ?? { customer: "analyzing", risk: "analyzing", action: "analyzing" };
+  const states = task.analysisModules ?? { customer: "analyzing", psychology: "analyzing", objections: "analyzing", checklist: "analyzing", action: "analyzing" };
   return <div className={`analysis-steps ${compact ? "compact" : ""}`}>
     {analysisModules.map((module) => {
       const state = states[module];

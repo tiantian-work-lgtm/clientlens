@@ -11,7 +11,7 @@ export type SalesStage =
   | "已成交"
   | "售后与复购";
 export type ConfirmationStatus = "confirmed" | "unknown" | "risk" | "na";
-export type AnalysisModule = "customer" | "risk" | "action";
+export type AnalysisModule = "customer" | "psychology" | "objections" | "checklist" | "action";
 export type AnalysisModuleStatus = "pending" | "analyzing" | "done" | "failed";
 
 export interface Evidence {

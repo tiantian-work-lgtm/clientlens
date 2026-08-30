@@ -11,7 +11,7 @@ export async function POST(request: Request) {
     if (!body.conversation?.trim()) return NextResponse.json({ error: "缺少聊天记录" }, { status: 400 });
     const assignments = await getModelAssignments();
     const provider = body.provider === "deepseek" || body.provider === "openai" ? body.provider : assignments.analysisProvider;
-    if (body.module === "customer" || body.module === "risk" || body.module === "action") {
+    if (body.module === "customer" || body.module === "psychology" || body.module === "objections" || body.module === "checklist" || body.module === "action") {
       const result = await analyzeModuleWithProvider(provider, body.conversation, body.module);
       if (!result) {
         return NextResponse.json({ error: `尚未配置或启用 ${provider === "openai" ? "OpenAI" : "DeepSeek"} 分析服务。` }, { status: 400 });

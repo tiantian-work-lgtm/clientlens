@@ -236,7 +236,7 @@ const hesitationSchema = {
 
 const commonPrompt = `你是一名严谨的 B2B 销售对话分析师。判断与事实必须分开，不确定的信息不能当成事实。输入中的每条消息都有稳定编号 M00001 等。不得虚构消息、客户背景、公司资料或公开背调信息。医疗相关内容只识别是否出现以及是否需要合规转介，不生成个体化剂量或医疗建议。所有分析字段使用中文。`;
 
-const modulePrompts: Record<AnalysisModule, string> = {
+const legacyModulePrompts = {
   customer: `${commonPrompt}\n只分析：对话总结、客户画像、客户情绪、沟通性格与非临床心理研判、销售阶段和总体置信度。客户画像 profile 必须严格返回 10 项，并按以下顺序和“维度：结论”格式填写：身份与组织、客户类型与经验、核心需求与目标、产品兴趣、决策权与流程、采购意向、价格敏感度、信任状态、核心关注与风险偏好、沟通风格与下一步倾向。每项应尽量具体，但只能依据聊天内容；聊天没有提供的维度必须写“维度：待确认”，禁止用常识补全或虚构。emotionProfile 只依据对话进行沟通场景下的心理研判，不得诊断精神疾病、人格障碍或贴 MBTI 等标签，也不得把短期状态写成永久人格。currentEmotion 写当前情绪，emotionTrend 写变化；personalityTraits 写有限定语的沟通性格倾向；communicationStyle 和 decisionStyle 写沟通与决策方式；sensitivities 写容易产生防御的沟通点；psychologicalState 写当前心理状态及不确定性；coreMotivations 写推动其行动的核心动机；trustNeeds 写建立信任所需条件；defensePatterns 写受到压力或不确定性时可观察到的防御或回避模式；pressureResponse 写客户面对催促、风险或信息过载时可能的反应。所有心理判断必须使用“可能、倾向、从当前表达看”等措辞，并由 evidence 中真实客户原文支持；不得推断创伤、家庭、疾病、隐私属性或操纵弱点。证据不足时写信息不足并降低 confidence；advice 提供尊重自主决定、可执行且不操纵客户的沟通建议。销售阶段只能从七阶段中选择；主阶段取最接近当前成交里程碑的一项，第1至3阶段可以同时放入 parallelStages。`,
   risk: `${commonPrompt}\n只分析异议、犹豫点、风险和确认清单，JSON 根对象只能包含 objections 和 confirmations。异议必须有真实客户原文，禁止“待确认异议1”等占位标题。按消息顺序判断：未正面回答、回避或客户再次追问=未解决；销售正面回答且客户未再追问=未追问-基本解决；销售回答后客户明确认可=客户肯定-完全解决。基本解决引用销售回答，完全解决引用客户后续肯定；沉默、礼貌致谢或话题切换不算肯定。确认清单必须且只返回 10 项：role、seeding、medical、scammed、coa、packaging、company、feedback、logistics、payment_method，禁止返回 education。只有明确顾虑或成交阻碍才能标记 risk，没谈到应标记 unknown。所有 evidenceQuote 必须逐字引用对应 M 编号原文。seeding 必须在需要种草/无需种草中二选一：需要时填写客户改善期望或痛点方向、销售是否已种草、客户是否在种草后明确肯定及下一步建议；已种草必须引用销售原话，客户明确肯定必须引用更晚的客户原话；非 seeding 项的全部 seeding 字段为空。medical 必须在需要提供建议/无需提供建议中二选一：客户提出剂量、用法、不良反应、禁忌、身体状况、疗效预期等需求时判为需要；需要时填写需求方向、是否已合规解答、客户是否在解答后明确肯定及下一步建议；已解答必须引用销售原话，客户明确肯定必须引用更晚的客户原话；不得生成个体化剂量、诊疗结论或替代专业医生，建议只能是安全沟通或专业转介；非 medical 项的全部 medical 字段为空。`,
   action: `${commonPrompt}\n只分析本次沟通可改善之处、下一步行动和建议回复。建议必须具体可执行；suggestedReply 沿用客户语言，suggestedReplyTranslation 返回自然简体中文翻译。`,
@@ -250,19 +250,98 @@ const feedbackPromptAddon = `\nfeedback（其他客户反馈）指用于增强�
 const logisticsPromptAddon = `\nlogistics（物流、清关和时效）必须返回完整判断。范围包括发货方式、承运渠道、运输时效、轨迹查询、目的国清关、税费、延误和异常处理。logisticsMentionSource 只能是客户主动询问、销售主动提出或未提及；前两种必须分别用 logisticsMentionEvidenceMessageId/Quote 引用客户或销售原话。logisticsAnswered 判断销售是否针对客户实际关心点给出具体且不过度承诺的说明；已解答必须用 logisticsAnswerEvidenceMessageId/Quote 引用销售原话。logisticsCustomerReaction 只能是客户满意、存在异议、客户未明确表态或未确认。客户满意必须引用销售解答之后明确表示认可或接受的客户原话；沉默、礼貌致谢或转移话题不算满意。存在异议必须引用客户关于价格、时效、清关、税费、渠道或风险的真实质疑，可发生在解答前或解答后。logisticsAdvice 必须针对尚未回答的物流要素或客户异议给出下一步建议，不得承诺无法保证的时效或清关结果。未提及时相关证据字段为空。非 logistics 项的全部 logistics 专属字段返回空字符串。`;
 const paymentPromptAddon = `\npayment_method（支付方式与付款安全）必须返回完整判断。范围包括可用支付渠道、手续费、币种、到账、退款、拒付、首单资金安全和付款保障。paymentMentionSource 只能是客户主动询问、销售主动提出或未提及；前两种必须分别用 paymentMentionEvidenceMessageId/Quote 引用客户或销售原话。paymentCustomerReaction 只能是客户明确肯定、存在异议、客户未明确表态或未确认。客户明确肯定必须引用支付信息提出之后，客户明确接受某种支付方式或认可付款安排的原话；沉默、礼貌致谢和转移话题不算肯定。存在异议必须引用客户对安全、保障、费用、退款、到账或支付渠道的真实顾虑；单纯询问“支持哪些付款方式”不自动算异议。paymentAdvice 必须针对客户尚未确认的支付要素或真实异议给出下一步建议，不得虚构保障、平台规则或承诺绝对安全。未提及时相关证据字段为空。非 payment_method 项的全部 payment 专属字段返回空字符串。`;
 
+const profileSchema = {
+  type: "object", additionalProperties: false,
+  required: ["summary", "profile", "stage", "parallelStages", "stageReason", "confidence"],
+  properties: {
+    summary: customerSchema.properties.summary,
+    profile: customerSchema.properties.profile,
+    stage: customerSchema.properties.stage,
+    parallelStages: customerSchema.properties.parallelStages,
+    stageReason: customerSchema.properties.stageReason,
+    confidence: customerSchema.properties.confidence,
+  },
+};
+
+const psychologySchema = {
+  type: "object", additionalProperties: false, required: ["emotionProfile"],
+  properties: { emotionProfile: customerSchema.properties.emotionProfile },
+};
+
+const objectionsSchema = {
+  type: "object", additionalProperties: false, required: ["objections"],
+  properties: { objections: riskSchema.properties.objections },
+};
+
+const checklistSchema = {
+  type: "object", additionalProperties: false, required: ["confirmations"],
+  properties: {
+    confirmations: {
+      type: "array", minItems: 10, maxItems: 10,
+      items: {
+        type: "object", additionalProperties: false,
+        required: ["id", "status", "evidence", "evidenceMessageId", "evidenceQuote", "riskReason", "conclusion", "detail", "source", "handling", "handlingEvidenceMessageId", "handlingEvidenceQuote", "reaction", "reactionEvidenceMessageId", "reactionEvidenceQuote", "advice", "confidence"],
+        properties: {
+          id: { type: "string", enum: ["role", "seeding", "medical", "scammed", "coa", "packaging", "company", "feedback", "logistics", "payment_method"] },
+          status: { type: "string", enum: ["confirmed", "unknown", "risk", "na"] },
+          evidence: { type: "string" }, evidenceMessageId: { type: "string" }, evidenceQuote: { type: "string" }, riskReason: { type: "string" },
+          conclusion: { type: "string" }, detail: { type: "string" },
+          source: { type: "string", enum: ["客户主动询问", "销售主动提出", "未提及", "不适用"] },
+          handling: { type: "string", enum: ["已处理", "尚未处理", "未确认", "不适用"] },
+          handlingEvidenceMessageId: { type: "string" }, handlingEvidenceQuote: { type: "string" },
+          reaction: { type: "string", enum: ["客户明确肯定", "客户满意", "存在异议", "客户未明确表态", "未确认", "不适用"] },
+          reactionEvidenceMessageId: { type: "string" }, reactionEvidenceQuote: { type: "string" },
+          advice: { type: "string" }, confidence: { type: "number", minimum: 0, maximum: 1 },
+        },
+      },
+    },
+  },
+};
+
+const analysisPrompts: Record<AnalysisModule, string> = {
+  customer: `${commonPrompt}\n只返回对话总结、10维客户画像和销售阶段。profile 严格按“身份与组织、客户类型与经验、核心需求与目标、产品兴趣、决策权与流程、采购意向、价格敏感度、信任状态、核心关注与风险偏好、沟通风格与下一步倾向”的顺序，以“维度：结论”返回10项；未知写待确认。stage 只能使用规定七阶段，第一至三阶段可并行。`,
+  psychology: `${commonPrompt}\n只返回 emotionProfile。依据客户真实原文分析当前情绪、变化、沟通性格倾向、敏感点、沟通和决策方式，并作非临床心理研判：当前心理状态、核心驱动力、信任需求、防御或回避模式、压力反应。使用“可能、倾向”等限定语，不诊断疾病或人格障碍，不推断隐私；evidence 只引用客户消息的真实 M 编号和逐字原文，证据不足就明确说明并降低 confidence。`,
+  objections: `${commonPrompt}\n只返回 objections。仅保留有客户逐字原文证据的明确异议或犹豫，禁止占位标题。未正面回答或客户再次追问=未解决；销售正面回答且客户未再追问=未追问-基本解决；销售回答后客户明确认可=客户肯定-完全解决。解决证据必须发生在异议之后；沉默、礼貌致谢和话题切换不算肯定。`,
+  checklist: `${commonPrompt}\n只返回 confirmations，必须且只按顺序返回 role、seeding、medical、scammed、coa、packaging、company、feedback、logistics、payment_method 共10项。每项只使用统一精简字段：conclusion 是该项结论，detail 是方向或具体说明，source 是谁提出，handling 是销售是否处理，reaction 是客户反应，advice 是下一步建议。seeding 结论只能“需要种草/无需种草”；medical 只能“需要提供建议/无需提供建议”；scammed 只能“有被骗经历/无被骗经历”。其他项目 conclusion 简洁概括。已处理必须引用销售原文；客户明确肯定、满意或异议必须引用客户原文并符合消息顺序。未提及的字段使用未提及、未确认或不适用，不得虚构证据。只有真实成交障碍才标 risk。`,
+  action: legacyModulePrompts.action,
+};
+
 export interface CustomerModuleResult {
   summary: string;
   profile: string[];
-  emotionProfile: CustomerEmotionProfile;
   stage: SalesStage;
   parallelStages: SalesStage[];
   stageReason: string;
   confidence: number;
 }
 
-export interface RiskModuleResult { objections: Objection[]; confirmations: ConfirmationItem[] }
+export interface PsychologyModuleResult { emotionProfile: CustomerEmotionProfile }
+export interface ObjectionsModuleResult { objections: Objection[] }
+export interface ChecklistModuleResult { confirmations: ConfirmationItem[] }
+interface RiskModuleResult { objections: Objection[]; confirmations: ConfirmationItem[] }
 export interface ActionModuleResult { improvements: string[]; nextActions: string[]; suggestedReply: string; suggestedReplyTranslation: string }
-export type AnalysisModuleResult = CustomerModuleResult | RiskModuleResult | ActionModuleResult;
+export type AnalysisModuleResult = CustomerModuleResult | PsychologyModuleResult | ObjectionsModuleResult | ChecklistModuleResult | ActionModuleResult;
+
+interface ChecklistModelItem {
+  id: string;
+  status: ConfirmationItem["status"];
+  evidence: string;
+  evidenceMessageId: string;
+  evidenceQuote: string;
+  riskReason: string;
+  conclusion: string;
+  detail: string;
+  source: "客户主动询问" | "销售主动提出" | "未提及" | "不适用";
+  handling: "已处理" | "尚未处理" | "未确认" | "不适用";
+  handlingEvidenceMessageId: string;
+  handlingEvidenceQuote: string;
+  reaction: "客户明确肯定" | "客户满意" | "存在异议" | "客户未明确表态" | "未确认" | "不适用";
+  reactionEvidenceMessageId: string;
+  reactionEvidenceQuote: string;
+  advice: string;
+  confidence: number;
+}
+interface ChecklistModelResult { confirmations: ChecklistModelItem[] }
 
 function extractOpenAIText(payload: unknown): string {
   const data = payload as { output_text?: string; output?: Array<{ content?: Array<{ type?: string; text?: string }> }> };
@@ -332,7 +411,11 @@ async function requestOpenAIJson<T>(config: RuntimeProviderConfig, schema: Recor
 }
 
 function moduleSchema(module: AnalysisModule) {
-  return module === "customer" ? customerSchema : module === "risk" ? riskSchema : actionSchema;
+  if (module === "customer") return profileSchema;
+  if (module === "psychology") return psychologySchema;
+  if (module === "objections") return objectionsSchema;
+  if (module === "checklist") return checklistSchema;
+  return actionSchema;
 }
 
 const confirmationIds = ["role", "seeding", "medical", "scammed", "coa", "packaging", "company", "feedback", "logistics", "payment_method"];
@@ -411,7 +494,7 @@ function normalizeRiskResult(value: AnalysisModuleResult, messages: ParsedConver
     } satisfies Objection];
   });
   const rawConfirmations = Array.isArray(raw.confirmations) ? raw.confirmations : [];
-  const confirmations = confirmationDefinitions.map((definition) => {
+  const confirmations: ConfirmationItem[] = confirmationDefinitions.map((definition): ConfirmationItem => {
     const item = rawConfirmations.find((candidate) => candidate?.id === definition.id);
     const requestedStatus = item?.status === "confirmed" || item?.status === "unknown" || item?.status === "risk" || item?.status === "na" ? item.status : "unknown";
     const verifiedRisk = requestedStatus === "risk" && hasVerifiedEvidence(messageById, item?.evidenceMessageId, item?.evidenceQuote);
@@ -513,10 +596,114 @@ function normalizeRiskResult(value: AnalysisModuleResult, messages: ParsedConver
   return { objections, confirmations };
 }
 
-function validateModuleResult(module: AnalysisModule, value: AnalysisModuleResult, messages: ParsedConversationMessage[] = []) {
+function cleanStringArray(value: unknown, fallback: string[] = ["信息不足"]) {
+  const values = Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && Boolean(item.trim())).map((item) => item.trim()) : [];
+  return values.length ? values.slice(0, 5) : fallback;
+}
+
+function normalizeCustomerResult(value: unknown): CustomerModuleResult {
+  const raw = value && typeof value === "object" ? value as Partial<CustomerModuleResult> : {};
+  const profile = profileDimensions.map((dimension, index) => {
+    const candidate = Array.isArray(raw.profile) ? raw.profile[index] : "";
+    return typeof candidate === "string" && new RegExp(`^${dimension}[：:]`).test(candidate.trim()) ? candidate.trim() : `${dimension}：待确认`;
+  });
+  const confidence = Number(raw.confidence);
+  return {
+    summary: raw.summary?.trim() || "当前对话信息不足，建议结合原始聊天人工核对。",
+    profile,
+    stage: stages.includes(raw.stage || "") ? raw.stage as SalesStage : "初次询盘与客户背调",
+    parallelStages: Array.isArray(raw.parallelStages) ? raw.parallelStages.filter((stage): stage is SalesStage => stages.includes(stage)).slice(0, 3) : [],
+    stageReason: raw.stageReason?.trim() || "当前信息不足，暂按初次询盘阶段处理。",
+    confidence: Number.isFinite(confidence) ? Math.min(1, Math.max(0, confidence)) : 0.25,
+  };
+}
+
+function normalizePsychologyResult(value: unknown, messages: ParsedConversationMessage[]): PsychologyModuleResult {
+  const rawRoot = value && typeof value === "object" ? value as Partial<PsychologyModuleResult> : {};
+  const raw = rawRoot.emotionProfile && typeof rawRoot.emotionProfile === "object" ? rawRoot.emotionProfile as Partial<CustomerEmotionProfile> : {};
+  const customerMessages = new Map(messages.filter((message) => message.role === "customer").map((message) => [message.id, message]));
+  const evidence = (Array.isArray(raw.evidence) ? raw.evidence : []).filter((item) => item?.interpretation?.trim() && hasVerifiedEvidence(customerMessages, item.messageId, item.quote)).slice(0, 5);
+  const confidence = Number(raw.confidence);
+  return { emotionProfile: {
+    currentEmotion: raw.currentEmotion?.trim() || "信息不足，暂无法判断当前情绪",
+    emotionTrend: raw.emotionTrend?.trim() || "信息不足，暂无法判断情绪变化",
+    personalityTraits: cleanStringArray(raw.personalityTraits),
+    communicationStyle: raw.communicationStyle?.trim() || "信息不足，暂无法判断沟通方式",
+    decisionStyle: raw.decisionStyle?.trim() || "信息不足，暂无法判断决策方式",
+    sensitivities: cleanStringArray(raw.sensitivities),
+    psychologicalState: raw.psychologicalState?.trim() || "信息不足，暂无法进行沟通心理研判",
+    coreMotivations: cleanStringArray(raw.coreMotivations),
+    trustNeeds: cleanStringArray(raw.trustNeeds),
+    defensePatterns: cleanStringArray(raw.defensePatterns),
+    pressureResponse: raw.pressureResponse?.trim() || "信息不足，暂无法判断压力下的沟通反应",
+    evidence,
+    advice: cleanStringArray(raw.advice, ["继续观察客户表达，并通过开放式问题确认其真实关注点。"]),
+    confidence: evidence.length && Number.isFinite(confidence) ? Math.min(1, Math.max(0, confidence)) : Math.min(Number.isFinite(confidence) ? confidence : 0.2, 0.35),
+  } };
+}
+
+function normalizeObjectionsResult(value: unknown, messages: ParsedConversationMessage[]): ObjectionsModuleResult {
+  const raw = value && typeof value === "object" ? value as Partial<ObjectionsModuleResult> : {};
+  return { objections: normalizeRiskResult({ objections: Array.isArray(raw.objections) ? raw.objections : [], confirmations: [] } as unknown as AnalysisModuleResult, messages).objections };
+}
+
+function normalizeChecklistResult(value: unknown, messages: ParsedConversationMessage[]): ChecklistModuleResult {
+  const raw = value && typeof value === "object" ? value as Partial<ChecklistModelResult> : {};
+  const rawItems = Array.isArray(raw.confirmations) ? raw.confirmations : [];
+  const messageById = new Map(messages.map((message) => [message.id, message]));
+  const confirmations: ConfirmationItem[] = confirmationDefinitions.map((definition): ConfirmationItem => {
+    const item = rawItems.find((candidate) => candidate?.id === definition.id);
+    const evidenceMessage = item ? messageById.get(item.evidenceMessageId || "") : undefined;
+    const coreEvidenceValid = Boolean(item && hasVerifiedEvidence(messageById, item.evidenceMessageId, item.evidenceQuote));
+    const handlingMessage = item ? messageById.get(item.handlingEvidenceMessageId || "") : undefined;
+    const handlingValid = Boolean(item && handlingMessage?.role === "sales" && hasVerifiedEvidence(messageById, item.handlingEvidenceMessageId, item.handlingEvidenceQuote));
+    const reactionMessage = item ? messageById.get(item.reactionEvidenceMessageId || "") : undefined;
+    const reactionValid = Boolean(item && reactionMessage?.role === "customer" && hasVerifiedEvidence(messageById, item.reactionEvidenceMessageId, item.reactionEvidenceQuote));
+    const handlingIndex = item ? messages.findIndex((message) => message.id === item.handlingEvidenceMessageId) : -1;
+    const reactionIndex = item ? messages.findIndex((message) => message.id === item.reactionEvidenceMessageId) : -1;
+    const reactionAfterHandling = reactionValid && (handlingIndex < 0 || reactionIndex > handlingIndex);
+    const source = item?.source === "客户主动询问" && coreEvidenceValid && evidenceMessage?.role === "customer" ? "客户主动询问"
+      : item?.source === "销售主动提出" && coreEvidenceValid && evidenceMessage?.role === "sales" ? "销售主动提出" : "未提及";
+    const status = item?.status === "risk" && !coreEvidenceValid ? "unknown" : item?.status === "confirmed" || item?.status === "risk" || item?.status === "na" ? item.status : "unknown";
+    const confidence = Number(item?.confidence);
+    const base: ConfirmationItem = {
+      ...definition, status,
+      evidence: item?.evidence?.trim() || "对话中尚未确认。",
+      evidenceMessageId: coreEvidenceValid ? item?.evidenceMessageId || "" : "",
+      evidenceQuote: coreEvidenceValid ? item?.evidenceQuote || "" : "",
+      riskReason: status === "risk" ? item?.riskReason?.trim() || item?.evidence?.trim() || "对话中存在明确顾虑。" : "",
+      confidence: Number.isFinite(confidence) ? Math.min(1, Math.max(0, confidence)) : 0.25,
+    };
+    const advice = item?.advice?.trim() || "结合当前对话确认该项信息后再推进。";
+    if (definition.id === "seeding") {
+      const need = item?.conclusion === "需要种草" && coreEvidenceValid && evidenceMessage?.role === "customer" ? "需要种草" : "无需种草";
+      return { ...base, seedingNeed: need, seedingDirection: need === "需要种草" ? item?.detail?.trim() || "待确认客户关注的改善、期望或痛点。" : "", seedingPerformed: item?.handling === "已处理" && handlingValid ? "已种草" : item?.handling === "尚未处理" ? "尚未种草" : "未确认", seedingPerformedEvidenceMessageId: handlingValid ? item?.handlingEvidenceMessageId : "", seedingPerformedEvidenceQuote: handlingValid ? item?.handlingEvidenceQuote : "", seedingAccepted: item?.reaction === "客户明确肯定" && reactionAfterHandling ? "客户明确肯定" : reactionValid ? "客户未明确肯定" : "未确认", seedingAcceptanceEvidenceMessageId: reactionAfterHandling ? item?.reactionEvidenceMessageId : "", seedingAcceptanceEvidenceQuote: reactionAfterHandling ? item?.reactionEvidenceQuote : "", seedingAdvice: advice };
+    }
+    if (definition.id === "medical") {
+      const need = item?.conclusion === "需要提供建议" && coreEvidenceValid && evidenceMessage?.role === "customer" ? "需要提供建议" : "无需提供建议";
+      return { ...base, medicalNeed: need, medicalDirection: need === "需要提供建议" ? item?.detail?.trim() || "待确认具体需求方向。" : "", medicalAnswered: item?.handling === "已处理" && handlingValid ? "已解答" : item?.handling === "尚未处理" ? "尚未解答" : "未确认", medicalAnswerEvidenceMessageId: handlingValid ? item?.handlingEvidenceMessageId : "", medicalAnswerEvidenceQuote: handlingValid ? item?.handlingEvidenceQuote : "", medicalAccepted: item?.reaction === "客户明确肯定" && reactionAfterHandling ? "客户明确肯定" : reactionValid ? "客户未明确肯定" : "未确认", medicalAcceptanceEvidenceMessageId: reactionAfterHandling ? item?.reactionEvidenceMessageId : "", medicalAcceptanceEvidenceQuote: reactionAfterHandling ? item?.reactionEvidenceQuote : "", medicalAdvice: advice };
+    }
+    if (definition.id === "scammed") {
+      const hasExperience = item?.conclusion === "有被骗经历" && coreEvidenceValid && evidenceMessage?.role === "customer";
+      return { ...base, scamExperienceStatus: hasExperience ? "有被骗经历" : "无被骗经历", scamExperienceSummary: hasExperience ? item?.detail?.trim() || item?.evidence?.trim() || "客户提及过往不良经历。" : "", scamAddressed: item?.handling === "已处理" && handlingValid ? "已回应" : item?.handling === "尚未处理" ? "尚未回应" : "未确认", scamResponseEvidenceMessageId: handlingValid ? item?.handlingEvidenceMessageId : "", scamResponseEvidenceQuote: handlingValid ? item?.handlingEvidenceQuote : "", scamAccepted: item?.reaction === "客户明确肯定" && reactionAfterHandling ? "客户明确肯定" : reactionValid ? "客户未明确肯定" : "未确认", scamAcceptanceEvidenceMessageId: reactionAfterHandling ? item?.reactionEvidenceMessageId : "", scamAcceptanceEvidenceQuote: reactionAfterHandling ? item?.reactionEvidenceQuote : "", scamAdvice: advice };
+    }
+    const handled = item?.handling === "已处理" && handlingValid;
+    const accepted = item?.reaction === "客户明确肯定" && reactionAfterHandling ? "客户明确肯定" : reactionValid ? "客户未明确肯定" : "未确认";
+    if (definition.id === "coa") return { ...base, coaMentionSource: source, coaMentionEvidenceMessageId: coreEvidenceValid ? item?.evidenceMessageId : "", coaMentionEvidenceQuote: coreEvidenceValid ? item?.evidenceQuote : "", coaExplained: handled ? "已说明" : source === "未提及" ? "未确认" : "尚未说明", coaExplanationEvidenceMessageId: handlingValid ? item?.handlingEvidenceMessageId : "", coaExplanationEvidenceQuote: handlingValid ? item?.handlingEvidenceQuote : "", coaAccepted: accepted, coaAcceptanceEvidenceMessageId: reactionAfterHandling ? item?.reactionEvidenceMessageId : "", coaAcceptanceEvidenceQuote: reactionAfterHandling ? item?.reactionEvidenceQuote : "", coaAdvice: advice };
+    if (definition.id === "packaging") return { ...base, packagingMentionSource: source, packagingMentionEvidenceMessageId: coreEvidenceValid ? item?.evidenceMessageId : "", packagingMentionEvidenceQuote: coreEvidenceValid ? item?.evidenceQuote : "", packagingExplained: handled ? "已说明" : source === "未提及" ? "未确认" : "尚未说明", packagingExplanationEvidenceMessageId: handlingValid ? item?.handlingEvidenceMessageId : "", packagingExplanationEvidenceQuote: handlingValid ? item?.handlingEvidenceQuote : "", packagingAccepted: accepted, packagingAcceptanceEvidenceMessageId: reactionAfterHandling ? item?.reactionEvidenceMessageId : "", packagingAcceptanceEvidenceQuote: reactionAfterHandling ? item?.reactionEvidenceQuote : "", packagingAdvice: advice };
+    if (definition.id === "company") return { ...base, companyMentionSource: source, companyMentionEvidenceMessageId: coreEvidenceValid ? item?.evidenceMessageId : "", companyMentionEvidenceQuote: coreEvidenceValid ? item?.evidenceQuote : "", companyExplained: handled ? "已说明" : source === "未提及" ? "未确认" : "尚未说明", companyExplanationEvidenceMessageId: handlingValid ? item?.handlingEvidenceMessageId : "", companyExplanationEvidenceQuote: handlingValid ? item?.handlingEvidenceQuote : "", companyAccepted: accepted, companyAcceptanceEvidenceMessageId: reactionAfterHandling ? item?.reactionEvidenceMessageId : "", companyAcceptanceEvidenceQuote: reactionAfterHandling ? item?.reactionEvidenceQuote : "", companyAdvice: advice };
+    if (definition.id === "feedback") return { ...base, feedbackMentionSource: source, feedbackMentionEvidenceMessageId: coreEvidenceValid ? item?.evidenceMessageId : "", feedbackMentionEvidenceQuote: coreEvidenceValid ? item?.evidenceQuote : "", feedbackAnswered: handled ? "已解答" : source === "未提及" ? "未确认" : "尚未解答", feedbackAnswerEvidenceMessageId: handlingValid ? item?.handlingEvidenceMessageId : "", feedbackAnswerEvidenceQuote: handlingValid ? item?.handlingEvidenceQuote : "", feedbackAccepted: accepted, feedbackAcceptanceEvidenceMessageId: reactionAfterHandling ? item?.reactionEvidenceMessageId : "", feedbackAcceptanceEvidenceQuote: reactionAfterHandling ? item?.reactionEvidenceQuote : "", feedbackAdvice: advice };
+    if (definition.id === "logistics") return { ...base, logisticsMentionSource: source, logisticsMentionEvidenceMessageId: coreEvidenceValid ? item?.evidenceMessageId : "", logisticsMentionEvidenceQuote: coreEvidenceValid ? item?.evidenceQuote : "", logisticsAnswered: handled ? "已解答" : source === "未提及" ? "未确认" : "尚未解答", logisticsAnswerEvidenceMessageId: handlingValid ? item?.handlingEvidenceMessageId : "", logisticsAnswerEvidenceQuote: handlingValid ? item?.handlingEvidenceQuote : "", logisticsCustomerReaction: item?.reaction === "客户满意" && reactionAfterHandling ? "客户满意" : item?.reaction === "存在异议" && reactionValid ? "存在异议" : reactionValid ? "客户未明确表态" : "未确认", logisticsReactionEvidenceMessageId: reactionValid ? item?.reactionEvidenceMessageId : "", logisticsReactionEvidenceQuote: reactionValid ? item?.reactionEvidenceQuote : "", logisticsAdvice: advice };
+    if (definition.id === "payment_method") return { ...base, paymentMentionSource: source, paymentMentionEvidenceMessageId: coreEvidenceValid ? item?.evidenceMessageId : "", paymentMentionEvidenceQuote: coreEvidenceValid ? item?.evidenceQuote : "", paymentCustomerReaction: item?.reaction === "客户明确肯定" && reactionAfterHandling ? "客户明确肯定" : item?.reaction === "存在异议" && reactionValid ? "存在异议" : reactionValid ? "客户未明确表态" : "未确认", paymentReactionEvidenceMessageId: reactionValid ? item?.reactionEvidenceMessageId : "", paymentReactionEvidenceQuote: reactionValid ? item?.reactionEvidenceQuote : "", paymentAdvice: advice };
+    return base;
+  });
+  return { confirmations };
+}
+
+function validateLegacyModuleResult(module: "customer" | "risk" | "action", value: AnalysisModuleResult, messages: ParsedConversationMessage[] = []) {
   if (!value || typeof value !== "object") throw new Error(`${module} 模块返回空结果`);
   if (module === "customer") {
-    const result = value as CustomerModuleResult;
+    const result = value as CustomerModuleResult & PsychologyModuleResult;
     if (!result.summary?.trim() || !stages.includes(result.stage) || !Number.isFinite(result.confidence)) throw new Error("客户画像模块字段不完整");
     if (!Array.isArray(result.profile) || result.profile.length !== profileDimensions.length) throw new Error("客户画像必须完整覆盖 10 个维度");
     if (result.profile.some((item, index) => !new RegExp(`^${profileDimensions[index]}[：:]`).test(item?.trim()))) throw new Error("客户画像维度缺失或顺序不正确");
@@ -662,12 +849,26 @@ function validateModuleResult(module: AnalysisModule, value: AnalysisModuleResul
   return value;
 }
 
+function normalizeModuleResult(module: AnalysisModule, value: unknown, messages: ParsedConversationMessage[]): AnalysisModuleResult {
+  if (module === "customer") return normalizeCustomerResult(value);
+  if (module === "psychology") return normalizePsychologyResult(value, messages);
+  if (module === "objections") return normalizeObjectionsResult(value, messages);
+  if (module === "checklist") return normalizeChecklistResult(value, messages);
+  const raw = value && typeof value === "object" ? value as Partial<ActionModuleResult> : {};
+  return {
+    improvements: cleanStringArray(raw.improvements, ["继续结合客户原话检查本次沟通是否直接回答了问题。"]),
+    nextActions: cleanStringArray(raw.nextActions, ["先确认客户当前最关心的问题，再推进一个明确的下一步。"]),
+    suggestedReply: raw.suggestedReply?.trim() || "Could you tell me which point you would like to confirm first?",
+    suggestedReplyTranslation: raw.suggestedReplyTranslation?.trim() || "您可以告诉我，您想先确认哪一点吗？",
+  };
+}
+
 async function requestModuleOnce(config: RuntimeProviderConfig, provider: Provider, module: AnalysisModule, input: string, merge = false): Promise<AnalysisModuleResult> {
-  const instruction = `${modulePrompts[module]}${module === "risk" ? `${scamPromptAddon}${coaPromptAddon}${packagingPromptAddon}${companyPromptAddon}${feedbackPromptAddon}${logisticsPromptAddon}${paymentPromptAddon}` : ""}${merge ? "\n下面是分段分析结果，请去重并合并为一个最终结果。消息编号与原文必须原样保留。" : ""}`;
+  const instruction = `${analysisPrompts[module]}${merge ? "\n下面是分段分析结果，请去重并合并为一个最终结果。消息编号与原文必须原样保留。" : ""}`;
   if (provider === "openai") {
     return requestOpenAIJson<AnalysisModuleResult>(config, moduleSchema(module), `customer_${module}_analysis`, instruction, input);
   }
-  const tokens = module === "risk" ? 5000 : module === "customer" ? 2400 : 2800;
+  const tokens = module === "checklist" ? 4200 : module === "psychology" ? 2600 : module === "customer" ? 2200 : module === "objections" ? 2800 : 2400;
   return requestDeepSeekJson<AnalysisModuleResult>(config, [{ role: "system", content: `${instruction}\n只输出符合字段要求的合法 JSON。` }, { role: "user", content: input }], tokens);
 }
 
@@ -683,14 +884,12 @@ export async function analyzeModuleWithProvider(provider: Provider, conversation
       const retryPrefix = attempt ? "上一次结果未通过字段或原文核验。请严格补全所有必填字段；无法找到直接原文的异议必须删除，不得用占位内容代替。\n\n" : "";
       for (const chunk of chunks) {
         const rawResult = await requestModuleOnce(config, provider, module, `${retryPrefix}${chunk}`);
-        const result = module === "risk" && attempt > 0 ? normalizeRiskResult(rawResult, messages) : rawResult;
-        chunkResults.push(validateModuleResult(module, result, messages));
+        chunkResults.push(normalizeModuleResult(module, rawResult, messages));
       }
       const result = chunkResults.length === 1
         ? chunkResults[0]
         : await requestModuleOnce(config, provider, module, JSON.stringify(chunkResults), true);
-      const normalizedResult = module === "risk" && attempt > 0 ? normalizeRiskResult(result, messages) : result;
-      return validateModuleResult(module, normalizedResult, messages);
+      return normalizeModuleResult(module, result, messages);
     } catch (error) {
       lastError = error;
     }
@@ -701,14 +900,18 @@ export async function analyzeModuleWithProvider(provider: Provider, conversation
 export async function analyzeWithProvider(provider: Provider, conversation: string): Promise<AnalysisReport | null> {
   const results = await Promise.all([
     analyzeModuleWithProvider(provider, conversation, "customer"),
-    analyzeModuleWithProvider(provider, conversation, "risk"),
+    analyzeModuleWithProvider(provider, conversation, "psychology"),
+    analyzeModuleWithProvider(provider, conversation, "objections"),
+    analyzeModuleWithProvider(provider, conversation, "checklist"),
     analyzeModuleWithProvider(provider, conversation, "action"),
   ]);
   if (results.some((result) => !result)) return null;
   const customer = results[0] as CustomerModuleResult;
-  const risk = results[1] as RiskModuleResult;
-  const action = results[2] as ActionModuleResult;
-  return { ...customer, ...risk, ...action };
+  const psychology = results[1] as PsychologyModuleResult;
+  const objections = results[2] as ObjectionsModuleResult;
+  const checklist = results[3] as ChecklistModuleResult;
+  const action = results[4] as ActionModuleResult;
+  return { ...customer, ...psychology, ...objections, ...checklist, ...action };
 }
 
 type HesitationModelResult = Omit<HesitationAnalysis, "analyzedAt">;
