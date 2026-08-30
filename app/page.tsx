@@ -253,6 +253,8 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
   const [draftName, setDraftName] = useState("");
   const [showRaw, setShowRaw] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [syncError, setSyncError] = useState("");
   const isAnalyzing = analyzing || activeTask.status === "analyzing";
   const filtered = tasks.filter((task) => task.name.toLowerCase().includes(taskSearch.toLowerCase()));
 
@@ -279,6 +281,31 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
       onUpdate({ ...activeTask, status: "failed", analysisStep: undefined, analysisError: error instanceof Error ? error.message : "AI 分析失败" });
     } finally {
       setAnalyzing(false);
+    }
+  };
+
+  const syncLatestMessages = async () => {
+    if (activeTask.source !== "salesmartly" || !activeTask.customer.externalId) return;
+    setSyncing(true);
+    setSyncError("");
+    try {
+      const response = await fetch(`/api/salesmartly/messages?chatUserId=${encodeURIComponent(activeTask.customer.externalId)}`, { cache: "no-store" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "同步聊天记录失败");
+      const conversation = typeof data.conversation === "string" ? data.conversation.trim() : "";
+      if (!conversation) throw new Error("SaleSmartly 暂无可同步的聊天记录");
+      const changed = conversation !== activeTask.rawConversation.trim();
+      onUpdate({
+        ...activeTask,
+        rawConversation: conversation,
+        name: `${activeTask.customer.name} · ${Number(data.messageCount ?? 0)} 条消息`,
+        status: changed ? "stale" : activeTask.status,
+        updatedAt: changed ? "刚刚" : activeTask.updatedAt,
+      });
+    } catch (error) {
+      setSyncError(error instanceof Error ? error.message : "同步聊天记录失败");
+    } finally {
+      setSyncing(false);
     }
   };
 
@@ -323,6 +350,7 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
             <h1>客户分析报告</h1>
           </div>
           <div className="toolbar-actions">
+            {activeTask.source === "salesmartly" && <button className="secondary-button" onClick={() => void syncLatestMessages()} disabled={syncing || isAnalyzing}><Cloud size={16} className={syncing ? "spin" : ""} />{syncing ? "同步中…" : "同步最新消息"}</button>}
             <button className="secondary-button" onClick={() => setShowRaw(true)}><FileText size={16} />原始聊天</button>
             <button className="secondary-button"><Upload size={16} />导出</button>
             <button className="primary-button" onClick={reanalyze} disabled={isAnalyzing}><RefreshCw size={16} className={isAnalyzing ? "spin" : ""} />{isAnalyzing ? "分析中…" : "重新分析"}</button>
@@ -332,6 +360,7 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
         {activeTask.status === "stale" && (
           <div className="stale-banner"><CircleAlert size={17} /><div><strong>发现新的聊天消息</strong><span>当前报告基于旧记录，建议同步并重新分析。</span></div><button onClick={reanalyze}>立即更新</button></div>
         )}
+        {syncError && <div className="sync-error-banner"><CircleAlert size={16} /><span>{syncError}</span><button onClick={() => setSyncError("")}><X size={14} /></button></div>}
 
         {activeTask.status === "analyzing" ? (
           <AnalysisLoading task={activeTask} />
@@ -561,7 +590,6 @@ function CustomerPanel({ task, onUpdate, onAnalyze, analyzing }: { task: Custome
         </PanelSection>
       </div>
       <div className="panel-actions">
-        {task.source === "salesmartly" && <button className="secondary-button wide"><Cloud size={16} />同步最新消息</button>}
         <button className="primary-button wide" onClick={onAnalyze} disabled={analyzing}><RefreshCw size={16} className={analyzing ? "spin" : ""} />{analyzing ? "正在分析" : "重新分析"}</button>
       </div>
     </aside>
