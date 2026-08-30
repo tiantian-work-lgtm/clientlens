@@ -70,18 +70,72 @@ function normalizeStage(value?: string): SalesStage {
   return "初次询盘与客户背调";
 }
 
+function stringValue(value: unknown, fallback = "") {
+  return typeof value === "string" && value.trim() ? value.trim() : fallback;
+}
+
+function stringList(value: unknown, fallback: string[] = []) {
+  if (Array.isArray(value)) return value.filter((item): item is string => typeof item === "string" && Boolean(item.trim())).map((item) => item.trim());
+  if (typeof value === "string" && value.trim()) return value.split(/[，,；;\n]/).map((item) => item.trim()).filter(Boolean);
+  return [...fallback];
+}
+
+function normalizeReport(value: unknown): CustomerTask["report"] {
+  const report = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  const profile = stringList(report.profile, demoReport.profile);
+  const parallelStages = stringList(report.parallelStages)
+    .map((stage) => normalizeStage(stage))
+    .filter((stage, index, items) => items.indexOf(stage) === index);
+  const rawObjections = Array.isArray(report.objections) ? report.objections : demoReport.objections;
+  const objections = rawObjections.flatMap((value, index) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+    const item = value as Record<string, unknown>;
+    const severity: "高" | "中" | "低" = item.severity === "高" || item.severity === "中" || item.severity === "低" ? item.severity : "中";
+    const status: "待解决" | "处理中" | "已解决" = item.status === "待解决" || item.status === "处理中" || item.status === "已解决" ? item.status : "待解决";
+    return [{
+      title: stringValue(item.title, `待确认异议 ${index + 1}`),
+      severity,
+      status,
+      evidence: stringValue(item.evidence, "对话中暂无直接证据"),
+      advice: stringValue(item.advice, "需要结合原始对话进一步确认。"),
+    }];
+  });
+  const rawConfirmations = Array.isArray(report.confirmations) ? report.confirmations : [];
+  const confirmations = defaultConfirmations.map((fallback) => {
+    const raw = rawConfirmations.find((value) => value && typeof value === "object" && !Array.isArray(value) && (value as Record<string, unknown>).id === fallback.id);
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { ...fallback };
+    const item = raw as Record<string, unknown>;
+    const status = item.status === "confirmed" || item.status === "unknown" || item.status === "risk" || item.status === "na" ? item.status : fallback.status;
+    const confidence = Number(item.confidence);
+    return {
+      ...fallback,
+      status,
+      evidence: stringValue(item.evidence, fallback.evidence),
+      confidence: Number.isFinite(confidence) ? Math.min(1, Math.max(0, confidence)) : fallback.confidence,
+    };
+  });
+  const confidence = Number(report.confidence);
+  return {
+    summary: stringValue(report.summary, demoReport.summary),
+    profile,
+    stage: normalizeStage(stringValue(report.stage)),
+    parallelStages,
+    stageReason: stringValue(report.stageReason, demoReport.stageReason),
+    objections,
+    confirmations,
+    improvements: stringList(report.improvements, demoReport.improvements),
+    nextActions: stringList(report.nextActions, demoReport.nextActions),
+    suggestedReply: stringValue(report.suggestedReply, demoReport.suggestedReply),
+    suggestedReplyTranslation: stringValue(report.suggestedReplyTranslation, demoReport.suggestedReplyTranslation),
+    confidence: Number.isFinite(confidence) ? Math.min(1, Math.max(0, confidence)) : demoReport.confidence,
+  };
+}
+
 function normalizeTask(task: CustomerTask): CustomerTask {
-  const report = task.report as CustomerTask["report"] & { parallelStages?: SalesStage[]; confirmations?: ConfirmationItem[] };
   const hasNewProgress = task.progress?.some((item) => item.id === "inquiry");
   return {
     ...task,
-    report: {
-      ...demoReport,
-      ...report,
-      stage: normalizeStage(report.stage),
-      parallelStages: report.parallelStages ?? [],
-      confirmations: report.confirmations?.length ? report.confirmations : defaultConfirmations,
-    },
+    report: normalizeReport(task.report),
     progress: hasNewProgress ? task.progress : defaultProgress.map((item) => ({ ...item })),
   };
 }
@@ -568,7 +622,7 @@ function NewTaskModal({ onClose, onCreate }: { onClose: () => void; onCreate: (t
     if (!analysisResponse.ok) throw new Error(analysis.error || "AI 分析失败");
     const name = source === "salesmartly" ? selectedCustomer?.name || "SaleSmartly 客户" : customerName || "新客户";
     const provider = analysis.provider === "deepseek" ? "deepseek" : "openai";
-    onCreate({
+    onCreate(normalizeTask({
       id: `task-${Date.now()}`,
       name: `${name} · ${source === "salesmartly" ? `${importedMessageCount} 条消息` : "新分析"}`,
       source,
@@ -580,7 +634,7 @@ function NewTaskModal({ onClose, onCreate }: { onClose: () => void; onCreate: (t
       progress: defaultProgress.map((item) => ({ ...item, state: "todo", locked: false })),
       provider,
       model: provider === "openai" ? "GPT" : "DeepSeek",
-    });
+    }));
     } catch (error) {
       setSourceError(error instanceof Error ? error.message : "创建分析任务失败");
     } finally { setCreating(false); }
