@@ -221,6 +221,16 @@ function normalizeReport(value: unknown, conversation = ""): CustomerTask["repor
       packagingAcceptanceEvidenceMessageId: item.id === "packaging" ? stringValue(item.packagingAcceptanceEvidenceMessageId) : "",
       packagingAcceptanceEvidenceQuote: item.id === "packaging" ? normalizeEvidenceQuote(item.packagingAcceptanceEvidenceQuote, conversation) : "",
       packagingAdvice: item.id === "packaging" ? stringValue(item.packagingAdvice, fallback.packagingAdvice || "") : "",
+      companyMentionSource: item.id === "company" && (item.companyMentionSource === "客户主动询问" || item.companyMentionSource === "销售主动提出" || item.companyMentionSource === "未提及") ? item.companyMentionSource : fallback.companyMentionSource,
+      companyMentionEvidenceMessageId: item.id === "company" ? stringValue(item.companyMentionEvidenceMessageId) : "",
+      companyMentionEvidenceQuote: item.id === "company" ? normalizeEvidenceQuote(item.companyMentionEvidenceQuote, conversation) : "",
+      companyExplained: item.id === "company" && (item.companyExplained === "已说明" || item.companyExplained === "尚未说明" || item.companyExplained === "未确认") ? item.companyExplained : fallback.companyExplained,
+      companyExplanationEvidenceMessageId: item.id === "company" ? stringValue(item.companyExplanationEvidenceMessageId) : "",
+      companyExplanationEvidenceQuote: item.id === "company" ? normalizeEvidenceQuote(item.companyExplanationEvidenceQuote, conversation) : "",
+      companyAccepted: item.id === "company" && (item.companyAccepted === "客户明确肯定" || item.companyAccepted === "客户未明确肯定" || item.companyAccepted === "未确认") ? item.companyAccepted : fallback.companyAccepted,
+      companyAcceptanceEvidenceMessageId: item.id === "company" ? stringValue(item.companyAcceptanceEvidenceMessageId) : "",
+      companyAcceptanceEvidenceQuote: item.id === "company" ? normalizeEvidenceQuote(item.companyAcceptanceEvidenceQuote, conversation) : "",
+      companyAdvice: item.id === "company" ? stringValue(item.companyAdvice, fallback.companyAdvice || "") : "",
       confidence: Number.isFinite(confidence) ? Math.min(1, Math.max(0, confidence)) : 0,
     };
   });
@@ -773,6 +783,15 @@ function ConfirmationChecklist({ task, onUpdate }: { task: CustomerTask; onUpdat
                     <div><small>是否已经说明</small><p>{item.packagingExplained || "未确认"}</p>{item.packagingExplanationEvidenceQuote && <blockquote>“{item.packagingExplanationEvidenceQuote}”</blockquote>}</div>
                     <div><small>是否获得客户肯定</small><p>{item.packagingAccepted || "未确认"}</p>{item.packagingAcceptanceEvidenceQuote && <blockquote>“{item.packagingAcceptanceEvidenceQuote}”</blockquote>}</div>
                     <div className="seeding-advice"><small>建议</small><p>{item.packagingAdvice || "根据当前对话判断是否需要主动说明包装规格、标签、隐私性和运输防护。"}</p></div>
+                  </div>
+                </div>}
+                {item.id === "company" && item.companyMentionSource && <div className={`seeding-analysis company-analysis ${item.companyMentionSource === "未提及" ? "not-needed" : "needed"}`}>
+                  <header><span>公司资料判断</span><strong>{item.companyMentionSource}</strong></header>
+                  <div className="seeding-detail-grid company-detail-grid">
+                    <div><small>由谁提出</small><p>{item.companyMentionSource}</p>{item.companyMentionEvidenceQuote && <blockquote>“{item.companyMentionEvidenceQuote}”</blockquote>}</div>
+                    <div><small>是否已经说明</small><p>{item.companyExplained || "未确认"}</p>{item.companyExplanationEvidenceQuote && <blockquote>“{item.companyExplanationEvidenceQuote}”</blockquote>}</div>
+                    <div><small>是否获得客户肯定</small><p>{item.companyAccepted || "未确认"}</p>{item.companyAcceptanceEvidenceQuote && <blockquote>“{item.companyAcceptanceEvidenceQuote}”</blockquote>}</div>
+                    <div className="seeding-advice"><small>建议</small><p>{item.companyAdvice || "根据客户最想核验的内容，提供真实、具体且可验证的公司资料。"}</p></div>
                   </div>
                 </div>}
                 {(item.status === "unknown" || item.status === "risk") && <div className="confirmation-actions">

@@ -89,6 +89,16 @@ export interface ConfirmationItem {
   packagingAcceptanceEvidenceMessageId?: string;
   packagingAcceptanceEvidenceQuote?: string;
   packagingAdvice?: string;
+  companyMentionSource?: "客户主动询问" | "销售主动提出" | "未提及";
+  companyMentionEvidenceMessageId?: string;
+  companyMentionEvidenceQuote?: string;
+  companyExplained?: "已说明" | "尚未说明" | "未确认";
+  companyExplanationEvidenceMessageId?: string;
+  companyExplanationEvidenceQuote?: string;
+  companyAccepted?: "客户明确肯定" | "客户未明确肯定" | "未确认";
+  companyAcceptanceEvidenceMessageId?: string;
+  companyAcceptanceEvidenceQuote?: string;
+  companyAdvice?: string;
   confidence: number;
 }
 

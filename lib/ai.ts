@@ -49,7 +49,7 @@ const riskSchema = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["id", "category", "label", "status", "evidence", "evidenceMessageId", "evidenceQuote", "riskReason", "seedingNeed", "seedingDirection", "seedingPerformed", "seedingPerformedEvidenceMessageId", "seedingPerformedEvidenceQuote", "seedingAccepted", "seedingAcceptanceEvidenceMessageId", "seedingAcceptanceEvidenceQuote", "seedingAdvice", "medicalNeed", "medicalDirection", "medicalAnswered", "medicalAnswerEvidenceMessageId", "medicalAnswerEvidenceQuote", "medicalAccepted", "medicalAcceptanceEvidenceMessageId", "medicalAcceptanceEvidenceQuote", "medicalAdvice", "scamExperienceStatus", "scamExperienceSummary", "scamAddressed", "scamResponseEvidenceMessageId", "scamResponseEvidenceQuote", "scamAccepted", "scamAcceptanceEvidenceMessageId", "scamAcceptanceEvidenceQuote", "scamAdvice", "coaMentionSource", "coaMentionEvidenceMessageId", "coaMentionEvidenceQuote", "coaExplained", "coaExplanationEvidenceMessageId", "coaExplanationEvidenceQuote", "coaAccepted", "coaAcceptanceEvidenceMessageId", "coaAcceptanceEvidenceQuote", "coaAdvice", "packagingMentionSource", "packagingMentionEvidenceMessageId", "packagingMentionEvidenceQuote", "packagingExplained", "packagingExplanationEvidenceMessageId", "packagingExplanationEvidenceQuote", "packagingAccepted", "packagingAcceptanceEvidenceMessageId", "packagingAcceptanceEvidenceQuote", "packagingAdvice", "confidence"],
+        required: ["id", "category", "label", "status", "evidence", "evidenceMessageId", "evidenceQuote", "riskReason", "seedingNeed", "seedingDirection", "seedingPerformed", "seedingPerformedEvidenceMessageId", "seedingPerformedEvidenceQuote", "seedingAccepted", "seedingAcceptanceEvidenceMessageId", "seedingAcceptanceEvidenceQuote", "seedingAdvice", "medicalNeed", "medicalDirection", "medicalAnswered", "medicalAnswerEvidenceMessageId", "medicalAnswerEvidenceQuote", "medicalAccepted", "medicalAcceptanceEvidenceMessageId", "medicalAcceptanceEvidenceQuote", "medicalAdvice", "scamExperienceStatus", "scamExperienceSummary", "scamAddressed", "scamResponseEvidenceMessageId", "scamResponseEvidenceQuote", "scamAccepted", "scamAcceptanceEvidenceMessageId", "scamAcceptanceEvidenceQuote", "scamAdvice", "coaMentionSource", "coaMentionEvidenceMessageId", "coaMentionEvidenceQuote", "coaExplained", "coaExplanationEvidenceMessageId", "coaExplanationEvidenceQuote", "coaAccepted", "coaAcceptanceEvidenceMessageId", "coaAcceptanceEvidenceQuote", "coaAdvice", "packagingMentionSource", "packagingMentionEvidenceMessageId", "packagingMentionEvidenceQuote", "packagingExplained", "packagingExplanationEvidenceMessageId", "packagingExplanationEvidenceQuote", "packagingAccepted", "packagingAcceptanceEvidenceMessageId", "packagingAcceptanceEvidenceQuote", "packagingAdvice", "companyMentionSource", "companyMentionEvidenceMessageId", "companyMentionEvidenceQuote", "companyExplained", "companyExplanationEvidenceMessageId", "companyExplanationEvidenceQuote", "companyAccepted", "companyAcceptanceEvidenceMessageId", "companyAcceptanceEvidenceQuote", "companyAdvice", "confidence"],
         properties: {
           id: { type: "string" },
           category: { type: "string", enum: ["客户角色", "认知与经历", "产品与信任", "交易条件"] },
@@ -106,6 +106,16 @@ const riskSchema = {
           packagingAcceptanceEvidenceMessageId: { type: "string" },
           packagingAcceptanceEvidenceQuote: { type: "string" },
           packagingAdvice: { type: "string" },
+          companyMentionSource: { type: "string", enum: ["客户主动询问", "销售主动提出", "未提及", ""] },
+          companyMentionEvidenceMessageId: { type: "string" },
+          companyMentionEvidenceQuote: { type: "string" },
+          companyExplained: { type: "string", enum: ["已说明", "尚未说明", "未确认", ""] },
+          companyExplanationEvidenceMessageId: { type: "string" },
+          companyExplanationEvidenceQuote: { type: "string" },
+          companyAccepted: { type: "string", enum: ["客户明确肯定", "客户未明确肯定", "未确认", ""] },
+          companyAcceptanceEvidenceMessageId: { type: "string" },
+          companyAcceptanceEvidenceQuote: { type: "string" },
+          companyAdvice: { type: "string" },
           confidence: { type: "number", minimum: 0, maximum: 1 },
         },
       },
@@ -136,6 +146,7 @@ const modulePrompts: Record<AnalysisModule, string> = {
 const scamPromptAddon = `\nscammed（是否有被骗经历）必须在“有被骗经历”和“无被骗经历”中二选一。“无被骗经历”仅表示当前聊天未发现相关表述，不得写成已核实的终身事实。有被骗经历时必须用 evidenceMessageId/Quote 引用客户原话，scamExperienceSummary 概括被骗方式、损失或造成的不信任；scamAddressed 判断销售是否针对该经历回应，已回应时 scamResponseEvidenceMessageId/Quote 必须引用销售原话；scamAccepted 只有客户在回应之后明确认可、接受或信任改善时才可填客户明确肯定，并引用更晚的客户原话；scamAdvice 给出建立信任和降低首次合作风险的具体建议。无被骗经历时这些明细字段返回空字符串。非 scammed 项的全部 scam 字段返回空字符串。`;
 const coaPromptAddon = `\ncoa（COA 与产品一致性）必须返回完整四项判断。coaMentionSource 只能是客户主动询问、销售主动提出或未提及；前两种必须分别用 coaMentionEvidenceMessageId/Quote 引用客户或销售原话。coaExplained 判断销售是否已明确说明 COA、批次与实际交付产品的对应关系；已说明必须用 coaExplanationEvidenceMessageId/Quote 引用销售原话。coaAccepted 只有客户在说明之后明确认可、理解或确认接受时才可填客户明确肯定，并用 coaAcceptanceEvidenceMessageId/Quote 引用更晚的客户原话；沉默、礼貌致谢和转移话题不算。coaAdvice 必须结合当前缺口给出具体下一步建议。未提及时相关证据字段为空。非 coa 项的全部 coa 专属字段返回空字符串。`;
 const packagingPromptAddon = `\npackaging（产品包装）必须返回完整四项判断。packagingMentionSource 只能是客户主动询问、销售主动提出或未提及；前两种必须分别用 packagingMentionEvidenceMessageId/Quote 引用客户或销售原话。packagingExplained 判断销售是否已明确说明包装形式、规格、标签、隐私性或运输防护等客户关心的包装信息；已说明必须用 packagingExplanationEvidenceMessageId/Quote 引用销售原话。packagingAccepted 只有客户在说明之后明确认可、理解或确认接受时才可填客户明确肯定，并用 packagingAcceptanceEvidenceMessageId/Quote 引用更晚的客户原话；沉默、礼貌致谢和转移话题不算。packagingAdvice 必须结合当前缺口给出具体下一步建议。未提及时相关证据字段为空。非 packaging 项的全部 packaging 专属字段返回空字符串。`;
+const companyPromptAddon = `\ncompany（公司资料）必须返回完整四项判断。companyMentionSource 只能是客户主动询问、销售主动提出或未提及；前两种必须分别用 companyMentionEvidenceMessageId/Quote 引用客户或销售原话。companyExplained 判断销售是否已提供客户关心且可核验的公司资料，例如公司主体、所在地、生产或办公信息、官网、资质证书或联系方式；只有“多年经验”“实力强”等笼统宣传不能单独算已说明。已说明必须用 companyExplanationEvidenceMessageId/Quote 引用销售原话。companyAccepted 只有客户在说明之后明确认可、理解或确认资料足够时才可填客户明确肯定，并用 companyAcceptanceEvidenceMessageId/Quote 引用更晚的客户原话；沉默、礼貌致谢和转移话题不算。companyAdvice 必须结合当前缺口给出具体下一步建议，不得虚构公司资料。未提及时相关证据字段为空。非 company 项的全部 company 专属字段返回空字符串。`;
 
 export interface CustomerModuleResult {
   summary: string;
@@ -356,6 +367,16 @@ function normalizeRiskResult(value: AnalysisModuleResult, messages: ParsedConver
       packagingAcceptanceEvidenceMessageId: item?.id === "packaging" ? item.packagingAcceptanceEvidenceMessageId || "" : "",
       packagingAcceptanceEvidenceQuote: item?.id === "packaging" ? item.packagingAcceptanceEvidenceQuote || "" : "",
       packagingAdvice: item?.id === "packaging" ? item.packagingAdvice?.trim() || "" : "",
+      companyMentionSource: item?.id === "company" && (item.companyMentionSource === "客户主动询问" || item.companyMentionSource === "销售主动提出" || item.companyMentionSource === "未提及") ? item.companyMentionSource : undefined,
+      companyMentionEvidenceMessageId: item?.id === "company" ? item.companyMentionEvidenceMessageId || "" : "",
+      companyMentionEvidenceQuote: item?.id === "company" ? item.companyMentionEvidenceQuote || "" : "",
+      companyExplained: item?.id === "company" && (item.companyExplained === "已说明" || item.companyExplained === "尚未说明" || item.companyExplained === "未确认") ? item.companyExplained : undefined,
+      companyExplanationEvidenceMessageId: item?.id === "company" ? item.companyExplanationEvidenceMessageId || "" : "",
+      companyExplanationEvidenceQuote: item?.id === "company" ? item.companyExplanationEvidenceQuote || "" : "",
+      companyAccepted: item?.id === "company" && (item.companyAccepted === "客户明确肯定" || item.companyAccepted === "客户未明确肯定" || item.companyAccepted === "未确认") ? item.companyAccepted : undefined,
+      companyAcceptanceEvidenceMessageId: item?.id === "company" ? item.companyAcceptanceEvidenceMessageId || "" : "",
+      companyAcceptanceEvidenceQuote: item?.id === "company" ? item.companyAcceptanceEvidenceQuote || "" : "",
+      companyAdvice: item?.id === "company" ? item.companyAdvice?.trim() || "" : "",
       confidence: Number.isFinite(confidence) ? Math.min(1, Math.max(0, confidence)) : 0,
     } satisfies ConfirmationItem;
   });
@@ -446,12 +467,26 @@ function validateModuleResult(module: AnalysisModule, value: AnalysisModuleResul
     const packagingAcceptanceMessage = messageById.get(packaging.packagingAcceptanceEvidenceMessageId || "");
     const packagingAcceptanceIndex = messages.findIndex((message) => message.id === packaging.packagingAcceptanceEvidenceMessageId);
     if (packaging.packagingAccepted === "客户明确肯定" && (packagingAcceptanceMessage?.role !== "customer" || packagingExplanationIndex < 0 || packagingAcceptanceIndex <= packagingExplanationIndex || !hasVerifiedEvidence(messageById, packaging.packagingAcceptanceEvidenceMessageId, packaging.packagingAcceptanceEvidenceQuote))) throw new Error("产品包装客户肯定缺少说明之后的客户原文");
+    const company = result.confirmations.find((item) => item.id === "company");
+    if (!company || !company.companyAdvice?.trim() || (company.companyMentionSource !== "客户主动询问" && company.companyMentionSource !== "销售主动提出" && company.companyMentionSource !== "未提及")) throw new Error("公司资料分析缺少来源判断或建议");
+    if (!company.companyExplained || !company.companyAccepted) throw new Error("公司资料分析缺少说明或客户肯定判断");
+    const companyMentionMessage = messageById.get(company.companyMentionEvidenceMessageId || "");
+    if (company.companyMentionSource !== "未提及" && (companyMentionMessage?.role !== (company.companyMentionSource === "客户主动询问" ? "customer" : "sales") || !hasVerifiedEvidence(messageById, company.companyMentionEvidenceMessageId, company.companyMentionEvidenceQuote))) throw new Error("公司资料提及来源缺少对应角色的原文");
+    const companyExplanationMessage = messageById.get(company.companyExplanationEvidenceMessageId || "");
+    if (company.companyExplained === "已说明" && (companyExplanationMessage?.role !== "sales" || !hasVerifiedEvidence(messageById, company.companyExplanationEvidenceMessageId, company.companyExplanationEvidenceQuote))) throw new Error("公司资料已说明结论缺少销售原文");
+    const companyMentionIndex = messages.findIndex((message) => message.id === company.companyMentionEvidenceMessageId);
+    const companyExplanationIndex = messages.findIndex((message) => message.id === company.companyExplanationEvidenceMessageId);
+    if (company.companyMentionSource === "客户主动询问" && company.companyExplained === "已说明" && companyExplanationIndex <= companyMentionIndex) throw new Error("公司资料说明必须发生在客户询问之后");
+    if (company.companyMentionSource === "未提及" && (company.companyExplained === "已说明" || company.companyAccepted === "客户明确肯定")) throw new Error("未提及公司资料时不能判断为已说明或客户明确肯定");
+    const companyAcceptanceMessage = messageById.get(company.companyAcceptanceEvidenceMessageId || "");
+    const companyAcceptanceIndex = messages.findIndex((message) => message.id === company.companyAcceptanceEvidenceMessageId);
+    if (company.companyAccepted === "客户明确肯定" && (companyAcceptanceMessage?.role !== "customer" || companyExplanationIndex < 0 || companyAcceptanceIndex <= companyExplanationIndex || !hasVerifiedEvidence(messageById, company.companyAcceptanceEvidenceMessageId, company.companyAcceptanceEvidenceQuote))) throw new Error("公司资料客户肯定缺少说明之后的客户原文");
   }
   return value;
 }
 
 async function requestModuleOnce(config: RuntimeProviderConfig, provider: Provider, module: AnalysisModule, input: string, merge = false): Promise<AnalysisModuleResult> {
-  const instruction = `${modulePrompts[module]}${module === "risk" ? `${scamPromptAddon}${coaPromptAddon}${packagingPromptAddon}` : ""}${merge ? "\n下面是分段分析结果，请去重并合并为一个最终结果。消息编号与原文必须原样保留。" : ""}`;
+  const instruction = `${modulePrompts[module]}${module === "risk" ? `${scamPromptAddon}${coaPromptAddon}${packagingPromptAddon}${companyPromptAddon}` : ""}${merge ? "\n下面是分段分析结果，请去重并合并为一个最终结果。消息编号与原文必须原样保留。" : ""}`;
   if (provider === "openai") {
     return requestOpenAIJson<AnalysisModuleResult>(config, moduleSchema(module), `customer_${module}_analysis`, instruction, input);
   }
