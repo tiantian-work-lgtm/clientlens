@@ -1,4 +1,20 @@
 services:
+  db:
+    image: postgres:17-alpine
+    container_name: clientlens-db
+    restart: unless-stopped
+    env_file:
+      - .env.local
+    volumes:
+      - clientlens_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    security_opt:
+      - no-new-privileges:true
+
   app:
     build:
       context: .
@@ -8,6 +24,9 @@ services:
     init: true
     env_file:
       - .env.local
+    depends_on:
+      db:
+        condition: service_healthy
     environment:
       NODE_ENV: production
       PORT: 3000
@@ -26,3 +45,6 @@ services:
       start_period: 20s
     security_opt:
       - no-new-privileges:true
+
+volumes:
+  clientlens_postgres_data:

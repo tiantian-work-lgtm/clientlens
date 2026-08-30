@@ -40,7 +40,8 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { defaultConfirmations, defaultProgress, demoReport, initialTasks } from "@/lib/demo-data";
-import type { ConfirmationItem, ConfirmationStatus, CustomerTask, ProgressItem, Provider, SalesStage, SourceType } from "@/lib/types";
+import type { ConfirmationItem, ConfirmationStatus, CustomerTask, ProgressItem, SalesStage, SourceType } from "@/lib/types";
+import SettingsManager from "@/app/components/settings-manager";
 
 type View = "analysis" | "scripts" | "products" | "translate" | "settings";
 type ImportStep = "source" | SourceType;
@@ -212,10 +213,11 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
       const response = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ conversation: activeTask.rawConversation, provider: activeTask.provider }),
+        body: JSON.stringify({ conversation: activeTask.rawConversation }),
       });
       const data = await response.json();
-      onUpdate({ ...activeTask, report: data.report ? normalizeTask({ ...activeTask, report: data.report }).report : activeTask.report, status: "ready", updatedAt: "刚刚" });
+      const provider = data.provider === "deepseek" ? "deepseek" : "openai";
+      onUpdate({ ...activeTask, provider, model: provider === "openai" ? "GPT" : "DeepSeek", report: data.report ? normalizeTask({ ...activeTask, report: data.report }).report : activeTask.report, status: "ready", updatedAt: "刚刚" });
     } catch {
       onUpdate({ ...activeTask, status: "failed" });
     } finally {
@@ -579,31 +581,5 @@ function TranslateView() {
 }
 
 function SettingsView() {
-  const [saved, setSaved] = useState(false);
-  const [analysisProvider, setAnalysisProvider] = useState<Provider>("openai");
-  const [translationProvider, setTranslationProvider] = useState<Provider>("deepseek");
-  const [connections, setConnections] = useState({ openai: false, deepseek: false, salesmartly: false });
-  useEffect(() => {
-    fetch("/api/status").then((response) => response.json()).then(setConnections).catch(() => undefined);
-  }, []);
-  return <section className="page-view settings-page">
-    <div className="page-header"><div><span className="eyebrow">CONFIGURATION</span><h1>系统设置</h1><p>配置模型、功能分配和外部数据连接。</p></div><button className="primary-button" onClick={() => { setSaved(true); setTimeout(() => setSaved(false), 1800); }}>{saved ? <Check size={17} /> : <Settings size={17} />}{saved ? "已保存" : "保存设置"}</button></div>
-    <div className="settings-layout"><aside><button className="active"><Bot size={16} />大模型设置</button><button><Link2 size={16} />SaleSmartly</button><button><ListChecks size={16} />分析模板</button><button><ShieldCheck size={16} />数据与安全</button></aside><div className="settings-content">
-      <div className="settings-title"><h2>大模型服务</h2><p>密钥仅由服务端加密保存，不会发送到浏览器。</p></div>
-      <div className="provider-grid">
-        <ProviderCard name="OpenAI GPT" icon={<Sparkles size={20} />} className="openai-card" model="gpt-5.6-terra" hint="Responses API · Structured Outputs" configured={connections.openai} />
-        <ProviderCard name="DeepSeek" icon={<Zap size={20} />} className="deepseek-card" model="deepseek-v4-flash" hint="Chat Completions · JSON Output" configured={connections.deepseek} />
-      </div>
-      <section className="setting-card"><header><div className="setting-icon"><Bot size={18} /></div><div><h3>功能模型分配</h3><p>不同任务可以分别选择模型，以平衡质量、速度和成本。</p></div></header><div className="assignment-table"><div><span>客户分析</span><small>总结、阶段、异议和下一步建议</small><ProviderSelect value={analysisProvider} onChange={setAnalysisProvider} /></div><div><span>AI 翻译</span><small>商务翻译和术语保护</small><ProviderSelect value={translationProvider} onChange={setTranslationProvider} /></div><div><span>知识库整理</span><small>提取标签和整理内容</small><ProviderSelect value={analysisProvider} onChange={setAnalysisProvider} /></div></div></section>
-      <section className="setting-card integration-card"><header><div className="setting-icon blue"><Cloud size={18} /></div><div><h3>SaleSmartly 连接</h3><p>同步客户资料和聊天记录。</p></div><span className={connections.salesmartly ? "connected" : "not-connected"}>{connections.salesmartly ? <CheckCircle2 size={14} /> : <CircleDashed size={14} />}{connections.salesmartly ? "已配置" : "待配置"}</span></header><div className="form-grid"><label>API Key<input type="password" value={connections.salesmartly ? "••••••••••••••••" : ""} placeholder="在服务端环境变量中配置" readOnly /></label><label>同步频率<select defaultValue="15"><option value="15">每 15 分钟</option><option value="30">每 30 分钟</option><option value="60">每小时</option></select></label></div><div className="integration-footer"><span>{connections.salesmartly ? "服务端凭据已就绪" : "当前使用演示客户列表"}</span><button className="secondary-button"><RefreshCw size={15} />测试连接</button></div></section>
-    </div></div>
-  </section>;
-}
-
-function ProviderCard({ name, icon, className, model, hint, configured }: { name: string; icon: React.ReactNode; className: string; model: string; hint: string; configured: boolean }) {
-  return <section className={`provider-card ${className}`}><header><span>{icon}</span><div><h3>{name}</h3><p>{hint}</p></div><span className={configured ? "connected" : "not-connected"}>{configured ? <CheckCircle2 size={14} /> : <CircleDashed size={14} />}{configured ? "已配置" : "待配置"}</span></header><label>API Key<div className="secret-input"><input type="password" value={configured ? "••••••••••••••••••••" : ""} placeholder="在服务端环境变量中配置" readOnly /><LockKeyhole size={15} /></div></label><label>默认模型<select defaultValue={model}><option value={model}>{model}</option><option value="custom">手动填写模型 ID</option></select></label><footer><span>配置来自服务端环境变量</span><button>测试连接</button></footer></section>;
-}
-
-function ProviderSelect({ value, onChange }: { value: Provider; onChange: (value: Provider) => void }) {
-  return <select value={value} onChange={(e) => onChange(e.target.value as Provider)}><option value="openai">OpenAI GPT</option><option value="deepseek">DeepSeek</option></select>;
+  return <SettingsManager />;
 }

@@ -1,4 +1,5 @@
 import type { AnalysisReport, Provider } from "./types";
+import { getRuntimeProviderConfig } from "./provider-config";
 
 const analysisSchema = {
   type: "object",
@@ -66,14 +67,14 @@ function extractOpenAIText(payload: unknown): string {
 }
 
 export async function analyzeWithProvider(provider: Provider, conversation: string): Promise<AnalysisReport | null> {
+  const config = await getRuntimeProviderConfig(provider);
+  if (!config) return null;
   if (provider === "openai") {
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) return null;
-    const response = await fetch("https://api.openai.com/v1/responses", {
+    const response = await fetch(`${config.baseUrl || "https://api.openai.com"}/v1/responses`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      headers: { Authorization: `Bearer ${config.apiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: process.env.OPENAI_MODEL || "gpt-5.6-terra",
+        model: config.model,
         instructions: systemPrompt,
         input: conversation,
         store: false,
@@ -85,13 +86,11 @@ export async function analyzeWithProvider(provider: Provider, conversation: stri
     return JSON.parse(text) as AnalysisReport;
   }
 
-  const apiKey = process.env.DEEPSEEK_API_KEY;
-  if (!apiKey) return null;
-  const response = await fetch("https://api.deepseek.com/chat/completions", {
+  const response = await fetch(`${config.baseUrl || "https://api.deepseek.com"}/chat/completions`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+    headers: { Authorization: `Bearer ${config.apiKey}`, "Content-Type": "application/json" },
     body: JSON.stringify({
-      model: process.env.DEEPSEEK_MODEL || "deepseek-v4-flash",
+      model: config.model,
       messages: [
         { role: "system", content: `${systemPrompt}\n只输出合法 JSON，并严格使用指定字段。字段：summary, profile, stage, parallelStages, stageReason, objections, confirmations, improvements, nextActions, suggestedReply, suggestedReplyTranslation, confidence。` },
         { role: "user", content: conversation },
@@ -127,23 +126,21 @@ export async function generateChecklistSuggestion(provider: Provider, conversati
     ? `根据当前对话，生成一句自然、不审问客户的探询钩子，用于确认“${item}”。`
     : `根据当前对话，生成一段简短、可信、可直接发送的说明，用于阐述“${item}”。不得虚构公司、产品或客户反馈。`;
   const prompt = `${systemPrompt}\n${instruction}\n沿用客户使用的语言生成 text，并为其提供自然简体中文翻译 translation。只输出包含 text 和 translation 的合法 JSON。\n\n对话：\n${conversation}`;
+  const config = await getRuntimeProviderConfig(provider);
+  if (!config) return null;
   if (provider === "openai") {
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) return null;
-    const response = await fetch("https://api.openai.com/v1/responses", {
+    const response = await fetch(`${config.baseUrl || "https://api.openai.com"}/v1/responses`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ model: process.env.OPENAI_MODEL || "gpt-5.6-terra", input: prompt, store: false, text: { format: { type: "json_schema", name: "bilingual_suggestion", strict: true, schema: bilingualSchema } } }),
+      headers: { Authorization: `Bearer ${config.apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ model: config.model, input: prompt, store: false, text: { format: { type: "json_schema", name: "bilingual_suggestion", strict: true, schema: bilingualSchema } } }),
     });
     if (!response.ok) throw new Error(`OpenAI request failed: ${response.status}`);
     return JSON.parse(extractOpenAIText(await response.json())) as BilingualSuggestion;
   }
-  const apiKey = process.env.DEEPSEEK_API_KEY;
-  if (!apiKey) return null;
-  const response = await fetch("https://api.deepseek.com/chat/completions", {
+  const response = await fetch(`${config.baseUrl || "https://api.deepseek.com"}/chat/completions`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ model: process.env.DEEPSEEK_MODEL || "deepseek-v4-flash", messages: [{ role: "user", content: prompt }], response_format: { type: "json_object" } }),
+    headers: { Authorization: `Bearer ${config.apiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ model: config.model, messages: [{ role: "user", content: prompt }], response_format: { type: "json_object" } }),
   });
   if (!response.ok) throw new Error(`DeepSeek request failed: ${response.status}`);
   const data = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
@@ -153,23 +150,21 @@ export async function generateChecklistSuggestion(provider: Provider, conversati
 
 export async function translateWithProvider(provider: Provider, text: string, targetLanguage: string): Promise<string | null> {
   const prompt = `Translate the following text into ${targetLanguage}. Preserve product names, numbers, units, links and paragraph breaks. Use natural professional business language. Return only the translation.\n\n${text}`;
+  const config = await getRuntimeProviderConfig(provider);
+  if (!config) return null;
   if (provider === "openai") {
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) return null;
-    const response = await fetch("https://api.openai.com/v1/responses", {
+    const response = await fetch(`${config.baseUrl || "https://api.openai.com"}/v1/responses`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ model: process.env.OPENAI_MODEL || "gpt-5.6-terra", input: prompt, store: false }),
+      headers: { Authorization: `Bearer ${config.apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ model: config.model, input: prompt, store: false }),
     });
     if (!response.ok) throw new Error(`OpenAI request failed: ${response.status}`);
     return extractOpenAIText(await response.json());
   }
-  const apiKey = process.env.DEEPSEEK_API_KEY;
-  if (!apiKey) return null;
-  const response = await fetch("https://api.deepseek.com/chat/completions", {
+  const response = await fetch(`${config.baseUrl || "https://api.deepseek.com"}/chat/completions`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ model: process.env.DEEPSEEK_MODEL || "deepseek-v4-flash", messages: [{ role: "user", content: prompt }] }),
+    headers: { Authorization: `Bearer ${config.apiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ model: config.model, messages: [{ role: "user", content: prompt }] }),
   });
   if (!response.ok) throw new Error(`DeepSeek request failed: ${response.status}`);
   const data = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
