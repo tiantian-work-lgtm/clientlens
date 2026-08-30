@@ -241,6 +241,16 @@ function normalizeReport(value: unknown, conversation = ""): CustomerTask["repor
       feedbackAcceptanceEvidenceMessageId: item.id === "feedback" ? stringValue(item.feedbackAcceptanceEvidenceMessageId) : "",
       feedbackAcceptanceEvidenceQuote: item.id === "feedback" ? normalizeEvidenceQuote(item.feedbackAcceptanceEvidenceQuote, conversation) : "",
       feedbackAdvice: item.id === "feedback" ? stringValue(item.feedbackAdvice, fallback.feedbackAdvice || "") : "",
+      logisticsMentionSource: item.id === "logistics" && (item.logisticsMentionSource === "客户主动询问" || item.logisticsMentionSource === "销售主动提出" || item.logisticsMentionSource === "未提及") ? item.logisticsMentionSource : fallback.logisticsMentionSource,
+      logisticsMentionEvidenceMessageId: item.id === "logistics" ? stringValue(item.logisticsMentionEvidenceMessageId) : "",
+      logisticsMentionEvidenceQuote: item.id === "logistics" ? normalizeEvidenceQuote(item.logisticsMentionEvidenceQuote, conversation) : "",
+      logisticsAnswered: item.id === "logistics" && (item.logisticsAnswered === "已解答" || item.logisticsAnswered === "尚未解答" || item.logisticsAnswered === "未确认") ? item.logisticsAnswered : fallback.logisticsAnswered,
+      logisticsAnswerEvidenceMessageId: item.id === "logistics" ? stringValue(item.logisticsAnswerEvidenceMessageId) : "",
+      logisticsAnswerEvidenceQuote: item.id === "logistics" ? normalizeEvidenceQuote(item.logisticsAnswerEvidenceQuote, conversation) : "",
+      logisticsCustomerReaction: item.id === "logistics" && (item.logisticsCustomerReaction === "客户满意" || item.logisticsCustomerReaction === "存在异议" || item.logisticsCustomerReaction === "客户未明确表态" || item.logisticsCustomerReaction === "未确认") ? item.logisticsCustomerReaction : fallback.logisticsCustomerReaction,
+      logisticsReactionEvidenceMessageId: item.id === "logistics" ? stringValue(item.logisticsReactionEvidenceMessageId) : "",
+      logisticsReactionEvidenceQuote: item.id === "logistics" ? normalizeEvidenceQuote(item.logisticsReactionEvidenceQuote, conversation) : "",
+      logisticsAdvice: item.id === "logistics" ? stringValue(item.logisticsAdvice, fallback.logisticsAdvice || "") : "",
       confidence: Number.isFinite(confidence) ? Math.min(1, Math.max(0, confidence)) : 0,
     };
   });
@@ -811,6 +821,15 @@ function ConfirmationChecklist({ task, onUpdate }: { task: CustomerTask; onUpdat
                     <div><small>是否已经解答</small><p>{item.feedbackAnswered || "未确认"}</p>{item.feedbackAnswerEvidenceQuote && <blockquote>“{item.feedbackAnswerEvidenceQuote}”</blockquote>}</div>
                     <div><small>是否获得客户肯定</small><p>{item.feedbackAccepted || "未确认"}</p>{item.feedbackAcceptanceEvidenceQuote && <blockquote>“{item.feedbackAcceptanceEvidenceQuote}”</blockquote>}</div>
                     <div className="seeding-advice"><small>建议</small><p>{item.feedbackAdvice || "结合客户的国家和信任顾虑，提供真实、相关且已脱敏的客户反馈或物流参考。"}</p></div>
+                  </div>
+                </div>}
+                {item.id === "logistics" && item.logisticsMentionSource && <div className={`seeding-analysis logistics-analysis ${item.logisticsMentionSource === "未提及" ? "not-needed" : "needed"}`}>
+                  <header><span>物流判断</span><strong>{item.logisticsMentionSource}</strong></header>
+                  <div className="seeding-detail-grid logistics-detail-grid">
+                    <div><small>由谁提出</small><p>{item.logisticsMentionSource}</p>{item.logisticsMentionEvidenceQuote && <blockquote>“{item.logisticsMentionEvidenceQuote}”</blockquote>}</div>
+                    <div><small>是否已经解答</small><p>{item.logisticsAnswered || "未确认"}</p>{item.logisticsAnswerEvidenceQuote && <blockquote>“{item.logisticsAnswerEvidenceQuote}”</blockquote>}</div>
+                    <div><small>客户是否满意或存在异议</small><p>{item.logisticsCustomerReaction || "未确认"}</p>{item.logisticsReactionEvidenceQuote && <blockquote>“{item.logisticsReactionEvidenceQuote}”</blockquote>}</div>
+                    <div className="seeding-advice"><small>建议</small><p>{item.logisticsAdvice || "结合目的国家，明确渠道、参考时效、清关边界和异常处理方式。"}</p></div>
                   </div>
                 </div>}
                 {(item.status === "unknown" || item.status === "risk") && <div className="confirmation-actions">

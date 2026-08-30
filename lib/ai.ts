@@ -49,7 +49,7 @@ const riskSchema = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["id", "category", "label", "status", "evidence", "evidenceMessageId", "evidenceQuote", "riskReason", "seedingNeed", "seedingDirection", "seedingPerformed", "seedingPerformedEvidenceMessageId", "seedingPerformedEvidenceQuote", "seedingAccepted", "seedingAcceptanceEvidenceMessageId", "seedingAcceptanceEvidenceQuote", "seedingAdvice", "medicalNeed", "medicalDirection", "medicalAnswered", "medicalAnswerEvidenceMessageId", "medicalAnswerEvidenceQuote", "medicalAccepted", "medicalAcceptanceEvidenceMessageId", "medicalAcceptanceEvidenceQuote", "medicalAdvice", "scamExperienceStatus", "scamExperienceSummary", "scamAddressed", "scamResponseEvidenceMessageId", "scamResponseEvidenceQuote", "scamAccepted", "scamAcceptanceEvidenceMessageId", "scamAcceptanceEvidenceQuote", "scamAdvice", "coaMentionSource", "coaMentionEvidenceMessageId", "coaMentionEvidenceQuote", "coaExplained", "coaExplanationEvidenceMessageId", "coaExplanationEvidenceQuote", "coaAccepted", "coaAcceptanceEvidenceMessageId", "coaAcceptanceEvidenceQuote", "coaAdvice", "packagingMentionSource", "packagingMentionEvidenceMessageId", "packagingMentionEvidenceQuote", "packagingExplained", "packagingExplanationEvidenceMessageId", "packagingExplanationEvidenceQuote", "packagingAccepted", "packagingAcceptanceEvidenceMessageId", "packagingAcceptanceEvidenceQuote", "packagingAdvice", "companyMentionSource", "companyMentionEvidenceMessageId", "companyMentionEvidenceQuote", "companyExplained", "companyExplanationEvidenceMessageId", "companyExplanationEvidenceQuote", "companyAccepted", "companyAcceptanceEvidenceMessageId", "companyAcceptanceEvidenceQuote", "companyAdvice", "feedbackMentionSource", "feedbackMentionEvidenceMessageId", "feedbackMentionEvidenceQuote", "feedbackAnswered", "feedbackAnswerEvidenceMessageId", "feedbackAnswerEvidenceQuote", "feedbackAccepted", "feedbackAcceptanceEvidenceMessageId", "feedbackAcceptanceEvidenceQuote", "feedbackAdvice", "confidence"],
+        required: ["id", "category", "label", "status", "evidence", "evidenceMessageId", "evidenceQuote", "riskReason", "seedingNeed", "seedingDirection", "seedingPerformed", "seedingPerformedEvidenceMessageId", "seedingPerformedEvidenceQuote", "seedingAccepted", "seedingAcceptanceEvidenceMessageId", "seedingAcceptanceEvidenceQuote", "seedingAdvice", "medicalNeed", "medicalDirection", "medicalAnswered", "medicalAnswerEvidenceMessageId", "medicalAnswerEvidenceQuote", "medicalAccepted", "medicalAcceptanceEvidenceMessageId", "medicalAcceptanceEvidenceQuote", "medicalAdvice", "scamExperienceStatus", "scamExperienceSummary", "scamAddressed", "scamResponseEvidenceMessageId", "scamResponseEvidenceQuote", "scamAccepted", "scamAcceptanceEvidenceMessageId", "scamAcceptanceEvidenceQuote", "scamAdvice", "coaMentionSource", "coaMentionEvidenceMessageId", "coaMentionEvidenceQuote", "coaExplained", "coaExplanationEvidenceMessageId", "coaExplanationEvidenceQuote", "coaAccepted", "coaAcceptanceEvidenceMessageId", "coaAcceptanceEvidenceQuote", "coaAdvice", "packagingMentionSource", "packagingMentionEvidenceMessageId", "packagingMentionEvidenceQuote", "packagingExplained", "packagingExplanationEvidenceMessageId", "packagingExplanationEvidenceQuote", "packagingAccepted", "packagingAcceptanceEvidenceMessageId", "packagingAcceptanceEvidenceQuote", "packagingAdvice", "companyMentionSource", "companyMentionEvidenceMessageId", "companyMentionEvidenceQuote", "companyExplained", "companyExplanationEvidenceMessageId", "companyExplanationEvidenceQuote", "companyAccepted", "companyAcceptanceEvidenceMessageId", "companyAcceptanceEvidenceQuote", "companyAdvice", "feedbackMentionSource", "feedbackMentionEvidenceMessageId", "feedbackMentionEvidenceQuote", "feedbackAnswered", "feedbackAnswerEvidenceMessageId", "feedbackAnswerEvidenceQuote", "feedbackAccepted", "feedbackAcceptanceEvidenceMessageId", "feedbackAcceptanceEvidenceQuote", "feedbackAdvice", "logisticsMentionSource", "logisticsMentionEvidenceMessageId", "logisticsMentionEvidenceQuote", "logisticsAnswered", "logisticsAnswerEvidenceMessageId", "logisticsAnswerEvidenceQuote", "logisticsCustomerReaction", "logisticsReactionEvidenceMessageId", "logisticsReactionEvidenceQuote", "logisticsAdvice", "confidence"],
         properties: {
           id: { type: "string" },
           category: { type: "string", enum: ["客户角色", "认知与经历", "产品与信任", "交易条件"] },
@@ -126,6 +126,16 @@ const riskSchema = {
           feedbackAcceptanceEvidenceMessageId: { type: "string" },
           feedbackAcceptanceEvidenceQuote: { type: "string" },
           feedbackAdvice: { type: "string" },
+          logisticsMentionSource: { type: "string", enum: ["客户主动询问", "销售主动提出", "未提及", ""] },
+          logisticsMentionEvidenceMessageId: { type: "string" },
+          logisticsMentionEvidenceQuote: { type: "string" },
+          logisticsAnswered: { type: "string", enum: ["已解答", "尚未解答", "未确认", ""] },
+          logisticsAnswerEvidenceMessageId: { type: "string" },
+          logisticsAnswerEvidenceQuote: { type: "string" },
+          logisticsCustomerReaction: { type: "string", enum: ["客户满意", "存在异议", "客户未明确表态", "未确认", ""] },
+          logisticsReactionEvidenceMessageId: { type: "string" },
+          logisticsReactionEvidenceQuote: { type: "string" },
+          logisticsAdvice: { type: "string" },
           confidence: { type: "number", minimum: 0, maximum: 1 },
         },
       },
@@ -158,6 +168,7 @@ const coaPromptAddon = `\ncoa（COA 与产品一致性）必须返回完整四�
 const packagingPromptAddon = `\npackaging（产品包装）必须返回完整四项判断。packagingMentionSource 只能是客户主动询问、销售主动提出或未提及；前两种必须分别用 packagingMentionEvidenceMessageId/Quote 引用客户或销售原话。packagingExplained 判断销售是否已明确说明包装形式、规格、标签、隐私性或运输防护等客户关心的包装信息；已说明必须用 packagingExplanationEvidenceMessageId/Quote 引用销售原话。packagingAccepted 只有客户在说明之后明确认可、理解或确认接受时才可填客户明确肯定，并用 packagingAcceptanceEvidenceMessageId/Quote 引用更晚的客户原话；沉默、礼貌致谢和转移话题不算。packagingAdvice 必须结合当前缺口给出具体下一步建议。未提及时相关证据字段为空。非 packaging 项的全部 packaging 专属字段返回空字符串。`;
 const companyPromptAddon = `\ncompany（公司资料）必须返回完整四项判断。companyMentionSource 只能是客户主动询问、销售主动提出或未提及；前两种必须分别用 companyMentionEvidenceMessageId/Quote 引用客户或销售原话。companyExplained 判断销售是否已提供客户关心且可核验的公司资料，例如公司主体、所在地、生产或办公信息、官网、资质证书或联系方式；只有“多年经验”“实力强”等笼统宣传不能单独算已说明。已说明必须用 companyExplanationEvidenceMessageId/Quote 引用销售原话。companyAccepted 只有客户在说明之后明确认可、理解或确认资料足够时才可填客户明确肯定，并用 companyAcceptanceEvidenceMessageId/Quote 引用更晚的客户原话；沉默、礼貌致谢和转移话题不算。companyAdvice 必须结合当前缺口给出具体下一步建议，不得虚构公司资料。未提及时相关证据字段为空。非 company 项的全部 company 专属字段返回空字符串。`;
 const feedbackPromptAddon = `\nfeedback（其他客户反馈）指用于增强信任的真实社会证明，包括物流签收或时效参考、其他客户返图、真实聊天反馈、评价和相似客户案例。必须返回完整四项判断。feedbackMentionSource 只能是客户主动询问、销售主动提出或未提及；前两种必须分别用 feedbackMentionEvidenceMessageId/Quote 引用客户或销售原话。feedbackAnswered 判断销售是否已针对客户关心点提供具体反馈或案例；只说“很多客户满意”“我们口碑很好”等空泛宣传不能单独算已解答。已解答必须用 feedbackAnswerEvidenceMessageId/Quote 引用销售原话。feedbackAccepted 只有客户在解答之后明确认可、信任增强或确认该参考有帮助时才可填客户明确肯定，并用 feedbackAcceptanceEvidenceMessageId/Quote 引用更晚的客户原话；沉默、礼貌致谢和转移话题不算。feedbackAdvice 必须结合客户所在国家、关注点或信任缺口建议最相关的证明类型，同时提醒保护其他客户隐私，不得虚构案例或反馈。未提及时相关证据字段为空。非 feedback 项的全部 feedback 专属字段返回空字符串。`;
+const logisticsPromptAddon = `\nlogistics（物流、清关和时效）必须返回完整判断。范围包括发货方式、承运渠道、运输时效、轨迹查询、目的国清关、税费、延误和异常处理。logisticsMentionSource 只能是客户主动询问、销售主动提出或未提及；前两种必须分别用 logisticsMentionEvidenceMessageId/Quote 引用客户或销售原话。logisticsAnswered 判断销售是否针对客户实际关心点给出具体且不过度承诺的说明；已解答必须用 logisticsAnswerEvidenceMessageId/Quote 引用销售原话。logisticsCustomerReaction 只能是客户满意、存在异议、客户未明确表态或未确认。客户满意必须引用销售解答之后明确表示认可或接受的客户原话；沉默、礼貌致谢或转移话题不算满意。存在异议必须引用客户关于价格、时效、清关、税费、渠道或风险的真实质疑，可发生在解答前或解答后。logisticsAdvice 必须针对尚未回答的物流要素或客户异议给出下一步建议，不得承诺无法保证的时效或清关结果。未提及时相关证据字段为空。非 logistics 项的全部 logistics 专属字段返回空字符串。`;
 
 export interface CustomerModuleResult {
   summary: string;
@@ -398,6 +409,16 @@ function normalizeRiskResult(value: AnalysisModuleResult, messages: ParsedConver
       feedbackAcceptanceEvidenceMessageId: item?.id === "feedback" ? item.feedbackAcceptanceEvidenceMessageId || "" : "",
       feedbackAcceptanceEvidenceQuote: item?.id === "feedback" ? item.feedbackAcceptanceEvidenceQuote || "" : "",
       feedbackAdvice: item?.id === "feedback" ? item.feedbackAdvice?.trim() || "" : "",
+      logisticsMentionSource: item?.id === "logistics" && (item.logisticsMentionSource === "客户主动询问" || item.logisticsMentionSource === "销售主动提出" || item.logisticsMentionSource === "未提及") ? item.logisticsMentionSource : undefined,
+      logisticsMentionEvidenceMessageId: item?.id === "logistics" ? item.logisticsMentionEvidenceMessageId || "" : "",
+      logisticsMentionEvidenceQuote: item?.id === "logistics" ? item.logisticsMentionEvidenceQuote || "" : "",
+      logisticsAnswered: item?.id === "logistics" && (item.logisticsAnswered === "已解答" || item.logisticsAnswered === "尚未解答" || item.logisticsAnswered === "未确认") ? item.logisticsAnswered : undefined,
+      logisticsAnswerEvidenceMessageId: item?.id === "logistics" ? item.logisticsAnswerEvidenceMessageId || "" : "",
+      logisticsAnswerEvidenceQuote: item?.id === "logistics" ? item.logisticsAnswerEvidenceQuote || "" : "",
+      logisticsCustomerReaction: item?.id === "logistics" && (item.logisticsCustomerReaction === "客户满意" || item.logisticsCustomerReaction === "存在异议" || item.logisticsCustomerReaction === "客户未明确表态" || item.logisticsCustomerReaction === "未确认") ? item.logisticsCustomerReaction : undefined,
+      logisticsReactionEvidenceMessageId: item?.id === "logistics" ? item.logisticsReactionEvidenceMessageId || "" : "",
+      logisticsReactionEvidenceQuote: item?.id === "logistics" ? item.logisticsReactionEvidenceQuote || "" : "",
+      logisticsAdvice: item?.id === "logistics" ? item.logisticsAdvice?.trim() || "" : "",
       confidence: Number.isFinite(confidence) ? Math.min(1, Math.max(0, confidence)) : 0,
     } satisfies ConfirmationItem;
   });
@@ -516,12 +537,27 @@ function validateModuleResult(module: AnalysisModule, value: AnalysisModuleResul
     const feedbackAcceptanceMessage = messageById.get(feedback.feedbackAcceptanceEvidenceMessageId || "");
     const feedbackAcceptanceIndex = messages.findIndex((message) => message.id === feedback.feedbackAcceptanceEvidenceMessageId);
     if (feedback.feedbackAccepted === "客户明确肯定" && (feedbackAcceptanceMessage?.role !== "customer" || feedbackAnswerIndex < 0 || feedbackAcceptanceIndex <= feedbackAnswerIndex || !hasVerifiedEvidence(messageById, feedback.feedbackAcceptanceEvidenceMessageId, feedback.feedbackAcceptanceEvidenceQuote))) throw new Error("其他客户反馈的客户肯定缺少解答之后的客户原文");
+    const logistics = result.confirmations.find((item) => item.id === "logistics");
+    if (!logistics || !logistics.logisticsAdvice?.trim() || (logistics.logisticsMentionSource !== "客户主动询问" && logistics.logisticsMentionSource !== "销售主动提出" && logistics.logisticsMentionSource !== "未提及")) throw new Error("物流清关分析缺少来源判断或建议");
+    if (!logistics.logisticsAnswered || !logistics.logisticsCustomerReaction) throw new Error("物流清关分析缺少解答或客户反应判断");
+    const logisticsMentionMessage = messageById.get(logistics.logisticsMentionEvidenceMessageId || "");
+    if (logistics.logisticsMentionSource !== "未提及" && (logisticsMentionMessage?.role !== (logistics.logisticsMentionSource === "客户主动询问" ? "customer" : "sales") || !hasVerifiedEvidence(messageById, logistics.logisticsMentionEvidenceMessageId, logistics.logisticsMentionEvidenceQuote))) throw new Error("物流清关提及来源缺少对应角色的原文");
+    const logisticsAnswerMessage = messageById.get(logistics.logisticsAnswerEvidenceMessageId || "");
+    if (logistics.logisticsAnswered === "已解答" && (logisticsAnswerMessage?.role !== "sales" || !hasVerifiedEvidence(messageById, logistics.logisticsAnswerEvidenceMessageId, logistics.logisticsAnswerEvidenceQuote))) throw new Error("物流清关已解答结论缺少销售原文");
+    const logisticsMentionIndex = messages.findIndex((message) => message.id === logistics.logisticsMentionEvidenceMessageId);
+    const logisticsAnswerIndex = messages.findIndex((message) => message.id === logistics.logisticsAnswerEvidenceMessageId);
+    if (logistics.logisticsMentionSource === "客户主动询问" && logistics.logisticsAnswered === "已解答" && logisticsAnswerIndex <= logisticsMentionIndex) throw new Error("物流清关解答必须发生在客户询问之后");
+    if (logistics.logisticsMentionSource === "未提及" && (logistics.logisticsAnswered === "已解答" || logistics.logisticsCustomerReaction === "客户满意" || logistics.logisticsCustomerReaction === "存在异议")) throw new Error("未提及物流清关时不能判断为已解答、满意或存在异议");
+    const logisticsReactionMessage = messageById.get(logistics.logisticsReactionEvidenceMessageId || "");
+    const logisticsReactionIndex = messages.findIndex((message) => message.id === logistics.logisticsReactionEvidenceMessageId);
+    if ((logistics.logisticsCustomerReaction === "客户满意" || logistics.logisticsCustomerReaction === "存在异议") && (logisticsReactionMessage?.role !== "customer" || !hasVerifiedEvidence(messageById, logistics.logisticsReactionEvidenceMessageId, logistics.logisticsReactionEvidenceQuote))) throw new Error("物流清关客户反应缺少客户原文");
+    if (logistics.logisticsCustomerReaction === "客户满意" && (logisticsAnswerIndex < 0 || logisticsReactionIndex <= logisticsAnswerIndex)) throw new Error("物流清关客户满意必须有解答之后的客户原文");
   }
   return value;
 }
 
 async function requestModuleOnce(config: RuntimeProviderConfig, provider: Provider, module: AnalysisModule, input: string, merge = false): Promise<AnalysisModuleResult> {
-  const instruction = `${modulePrompts[module]}${module === "risk" ? `${scamPromptAddon}${coaPromptAddon}${packagingPromptAddon}${companyPromptAddon}${feedbackPromptAddon}` : ""}${merge ? "\n下面是分段分析结果，请去重并合并为一个最终结果。消息编号与原文必须原样保留。" : ""}`;
+  const instruction = `${modulePrompts[module]}${module === "risk" ? `${scamPromptAddon}${coaPromptAddon}${packagingPromptAddon}${companyPromptAddon}${feedbackPromptAddon}${logisticsPromptAddon}` : ""}${merge ? "\n下面是分段分析结果，请去重并合并为一个最终结果。消息编号与原文必须原样保留。" : ""}`;
   if (provider === "openai") {
     return requestOpenAIJson<AnalysisModuleResult>(config, moduleSchema(module), `customer_${module}_analysis`, instruction, input);
   }

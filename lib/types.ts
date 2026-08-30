@@ -109,6 +109,16 @@ export interface ConfirmationItem {
   feedbackAcceptanceEvidenceMessageId?: string;
   feedbackAcceptanceEvidenceQuote?: string;
   feedbackAdvice?: string;
+  logisticsMentionSource?: "客户主动询问" | "销售主动提出" | "未提及";
+  logisticsMentionEvidenceMessageId?: string;
+  logisticsMentionEvidenceQuote?: string;
+  logisticsAnswered?: "已解答" | "尚未解答" | "未确认";
+  logisticsAnswerEvidenceMessageId?: string;
+  logisticsAnswerEvidenceQuote?: string;
+  logisticsCustomerReaction?: "客户满意" | "存在异议" | "客户未明确表态" | "未确认";
+  logisticsReactionEvidenceMessageId?: string;
+  logisticsReactionEvidenceQuote?: string;
+  logisticsAdvice?: string;
   confidence: number;
 }
 
