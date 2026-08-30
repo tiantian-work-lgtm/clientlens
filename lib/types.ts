@@ -14,6 +14,27 @@ export type ConfirmationStatus = "confirmed" | "unknown" | "risk" | "na";
 export type AnalysisModule = "customer" | "psychology" | "objections" | "checklist" | "action";
 export type AnalysisModuleStatus = "pending" | "analyzing" | "done" | "failed";
 
+export interface ImportPreviewMessage {
+  id: string;
+  role: "customer" | "sales" | "unknown" | "system";
+  sender: string;
+  time: string;
+  content: string;
+  sourceRef: string;
+  confidence: number;
+  conversationKey: string;
+  customerName: string;
+}
+
+export interface ImportPreview {
+  messages: ImportPreviewMessage[];
+  detectedCustomers: string[];
+  detectedConversations: string[];
+  mappingSummary: string[];
+  warnings: string[];
+  overallConfidence: number;
+}
+
 export interface Evidence {
   quote: string;
   time?: string;
