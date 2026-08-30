@@ -215,3 +215,46 @@ export async function translateWithProvider(
   const data = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
   return data.choices?.[0]?.message?.content ?? null;
 }
+
+export async function translateConversationWithProvider(provider: Provider, texts: string[]): Promise<string[] | null> {
+  const config = await getRuntimeProviderConfig(provider);
+  if (!config) return null;
+  const prompt = `Translate every item in the following JSON array into natural Simplified Chinese. Preserve product names, numbers, units and links. Return a JSON object with one field named translations. translations must be an array with exactly ${texts.length} strings in the same order. Do not merge, omit or add items.\n\n${JSON.stringify(texts)}`;
+  if (provider === "openai") {
+    const response = await fetch(`${config.baseUrl || "https://api.openai.com"}/v1/responses`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${config.apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: config.model,
+        input: prompt,
+        store: false,
+        text: {
+          format: {
+            type: "json_schema",
+            name: "conversation_translation",
+            strict: true,
+            schema: {
+              type: "object",
+              additionalProperties: false,
+              required: ["translations"],
+              properties: { translations: { type: "array", items: { type: "string" } } },
+            },
+          },
+        },
+      }),
+      signal: AbortSignal.timeout(90_000),
+    });
+    if (!response.ok) throw new Error(`OpenAI request failed: ${response.status}`);
+    const data = parseJsonContent<{ translations?: unknown }>(extractOpenAIText(await response.json()));
+    return normalizeTranslations(data.translations, texts.length);
+  }
+  const data = await requestDeepSeekJson<{ translations?: unknown }>(config, [{ role: "user", content: prompt }], Math.min(8000, Math.max(1200, texts.join("").length * 2)));
+  return normalizeTranslations(data.translations, texts.length);
+}
+
+function normalizeTranslations(value: unknown, expectedLength: number) {
+  if (!Array.isArray(value)) throw new Error("AI 未返回翻译数组");
+  const translations = value.map((item) => typeof item === "string" ? item.trim() : "");
+  if (translations.length !== expectedLength) throw new Error(`AI 返回 ${translations.length} 条翻译，预期 ${expectedLength} 条`);
+  return translations;
+}

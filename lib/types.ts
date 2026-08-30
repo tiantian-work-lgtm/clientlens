@@ -75,6 +75,11 @@ export interface CustomerTask {
     lastMessageAt: string;
   };
   rawConversation: string;
+  rawTranslation?: {
+    source: string;
+    lines: string[];
+    translatedAt: string;
+  };
   report: AnalysisReport;
   progress: ProgressItem[];
   provider: Provider;

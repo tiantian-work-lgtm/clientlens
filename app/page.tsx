@@ -390,7 +390,7 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
 
       <CustomerPanel task={activeTask} onUpdate={onUpdate} onAnalyze={reanalyze} analyzing={isAnalyzing} />
 
-      {showRaw && <RawDrawer task={activeTask} onClose={() => setShowRaw(false)} />}
+      {showRaw && <RawDrawer task={activeTask} onUpdate={onUpdate} onClose={() => setShowRaw(false)} />}
     </div>
   );
 }
@@ -572,8 +572,51 @@ function PanelSection({ title, action, children }: React.PropsWithChildren<{ tit
   return <section className="panel-section"><header><h4>{title}</h4>{action}</header>{children}</section>;
 }
 
-function RawDrawer({ task, onClose }: { task: CustomerTask; onClose: () => void }) {
-  return <><div className="overlay" onClick={onClose} /><aside className="drawer"><header><div><span className="eyebrow">SOURCE DATA</span><h2>原始聊天记录</h2></div><button className="icon-button" onClick={onClose}><X size={18} /></button></header><div className="drawer-meta"><span>{sourceMeta[task.source].label}</span><span>{task.customer.name}</span><span>{task.customer.lastMessageAt}</span></div><pre>{task.rawConversation}</pre></aside></>;
+function parseConversationLine(line: string) {
+  const match = line.match(/^(?:\[([^\]]+)\]\s*)?(Customer|Sales|客户|销售)\s*:\s*(.*)$/i);
+  if (!match) return { time: "", role: "unknown" as const, label: "消息", content: line.trim() };
+  const customer = /^(customer|客户)$/i.test(match[2]);
+  return { time: match[1] || "", role: customer ? "customer" as const : "sales" as const, label: customer ? "客户" : "销售", content: match[3].trim() };
+}
+
+function RawDrawer({ task, onClose, onUpdate }: { task: CustomerTask; onClose: () => void; onUpdate: (task: CustomerTask) => void }) {
+  const [translating, setTranslating] = useState(false);
+  const [translationError, setTranslationError] = useState("");
+  const messages = useMemo(() => task.rawConversation.split("\n").map(parseConversationLine).filter((item) => item.content), [task.rawConversation]);
+  const savedTranslation = task.rawTranslation?.source === task.rawConversation ? task.rawTranslation.lines : undefined;
+
+  const translate = async () => {
+    setTranslating(true);
+    setTranslationError("");
+    try {
+      const response = await fetch("/api/translate-conversation", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ texts: messages.map((item) => item.content) }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "聊天翻译失败");
+      const lines = Array.isArray(data.translations) ? data.translations.map(String) : [];
+      if (lines.length !== messages.length) throw new Error("翻译条数与聊天消息不一致");
+      onUpdate({ ...task, rawTranslation: { source: task.rawConversation, lines, translatedAt: new Date().toISOString() } });
+    } catch (error) {
+      setTranslationError(error instanceof Error ? error.message : "聊天翻译失败");
+    } finally {
+      setTranslating(false);
+    }
+  };
+
+  return <><div className="overlay" onClick={onClose} /><aside className="drawer raw-drawer">
+    <header><div><span className="eyebrow">SOURCE DATA</span><h2>原始聊天记录</h2></div><div className="drawer-actions"><button className="secondary-button" onClick={() => void translate()} disabled={translating}><Languages size={15} />{translating ? "翻译中…" : savedTranslation ? "重新翻译" : "翻译"}</button><button className="icon-button" onClick={onClose}><X size={18} /></button></div></header>
+    <div className="drawer-meta"><span>{sourceMeta[task.source].label}</span><span>{task.customer.name}</span><span>{messages.length} 条消息</span></div>
+    {translationError && <div className="raw-translation-error"><CircleAlert size={14} />{translationError}</div>}
+    <div className="raw-chat-scroll">
+      {messages.map((message, index) => <div className={`raw-message ${message.role}`} key={`${index}-${message.content.slice(0, 20)}`}>
+        <div className="raw-message-meta"><strong>{message.label}</strong>{message.time && <span>{message.time}</span>}</div>
+        <div className="raw-message-bubble"><p>{message.content}</p>{savedTranslation?.[index] && <div className="raw-message-translation"><span>中文</span><p>{savedTranslation[index]}</p></div>}</div>
+      </div>)}
+    </div>
+  </aside></>;
 }
 
 interface SaleSmartlyCustomerOption {
