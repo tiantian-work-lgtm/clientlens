@@ -977,7 +977,7 @@ function ConfirmationChecklist({ task, onUpdate }: { task: CustomerTask; onUpdat
                     <div><small>需求方向</small><p>{item.medicalDirection || "待确认客户的剂量、使用或医疗相关需求。"}</p></div>
                     <div><small>是否已经解答</small><p>{item.medicalAnswered || "未确认"}</p>{item.medicalAnswerEvidenceQuote && <blockquote>“{item.medicalAnswerEvidenceQuote}”</blockquote>}</div>
                     <div><small>是否获得客户肯定</small><p>{item.medicalAccepted || "未确认"}</p>{item.medicalAcceptanceEvidenceQuote && <blockquote>“{item.medicalAcceptanceEvidenceQuote}”</blockquote>}</div>
-                    <div className="seeding-advice"><small>建议</small><p>{item.medicalAdvice || "明确沟通边界，并在需要时建议客户咨询合格医疗专业人士。"}</p></div>
+                    <div className="seeding-advice"><small>建议</small><p>{item.medicalAdvice || "结合客户的具体问题，给出清晰、准确且有依据的下一步说明。"}</p></div>
                   </div>}
                 </div>}
                 {item.id === "scammed" && item.scamExperienceStatus && <div className={`seeding-analysis scam-analysis ${item.scamExperienceStatus === "有被骗经历" ? "needed" : "not-needed"}`}>
