@@ -37,7 +37,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import { defaultConfirmations, defaultProgress, emptyReport, initialTasks } from "@/lib/demo-data";
 import { parseConversationMessages } from "@/lib/conversation";
-import type { AnalysisModule, AnalysisModuleStatus, ConfirmationItem, ConfirmationStatus, CustomerTask, Provider, SalesStage, SourceType } from "@/lib/types";
+import type { AnalysisModule, AnalysisModuleStatus, ConfirmationItem, ConfirmationStatus, CustomerTask, HesitationSignal, Provider, SalesStage, SourceType } from "@/lib/types";
 import SettingsManager from "@/app/components/settings-manager";
 
 type View = "analysis" | "scripts" | "products" | "translate" | "settings";
@@ -139,6 +139,47 @@ function normalizeReport(value: unknown, conversation = ""): CustomerTask["repor
     advice: stringList(rawEmotionProfile.advice, ["继续观察客户表达，并通过开放式问题确认其真实关注点。"]).slice(0, 5),
     confidence: Number.isFinite(emotionConfidence) ? Math.min(1, Math.max(0, emotionConfidence)) : 0,
   };
+  const rawHesitation = report.hesitationAnalysis && typeof report.hesitationAnalysis === "object" && !Array.isArray(report.hesitationAnalysis) ? report.hesitationAnalysis as Record<string, unknown> : null;
+  const rawHesitationSignals = rawHesitation && Array.isArray(rawHesitation.signals) ? rawHesitation.signals : [];
+  const hesitationSignals = rawHesitationSignals.flatMap<HesitationSignal>((value) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+    const item = value as Record<string, unknown>;
+    const evidenceMessage = messageById.get(stringValue(item.evidenceMessageId));
+    const evidenceQuote = normalizeEvidenceQuote(item.evidenceQuote, conversation);
+    const kind: HesitationSignal["kind"] | null = item.kind === "明确异议" || item.kind === "延后说辞" || item.kind === "含蓄犹豫" || item.kind === "未回复风险" ? item.kind : null;
+    const severity: HesitationSignal["severity"] = item.severity === "高" || item.severity === "中" || item.severity === "低" ? item.severity : "中";
+    const quoteMatchesMessage = Boolean(evidenceMessage && evidenceQuote && evidenceMessage.content.normalize("NFKC").includes(evidenceQuote.normalize("NFKC")));
+    if (!kind || !evidenceMessage || !evidenceQuote || !quoteMatchesMessage || (kind !== "未回复风险" && evidenceMessage.role !== "customer") || (kind === "未回复风险" && evidenceMessage.role !== "sales")) return [];
+    const signalConfidence = Number(item.confidence);
+    return [{
+      title: stringValue(item.title, "需要人工核对的犹豫点"), kind, severity,
+      customerPerspective: stringValue(item.customerPerspective, "需要结合上下文进一步确认客户视角。"),
+      evidenceMessageId: evidenceMessage.id, evidenceQuote,
+      reasoning: stringValue(item.reasoning, "该表达可能影响当前推进。"),
+      confidence: Number.isFinite(signalConfidence) ? Math.min(1, Math.max(0, signalConfidence)) : 0,
+      followUpGoal: stringValue(item.followUpGoal, "确认客户当前最关心的问题。"),
+      followUpTiming: stringValue(item.followUpTiming, "根据最近一次沟通时间择机跟进。"),
+      suggestedMessage: stringValue(item.suggestedMessage),
+      suggestedMessageTranslation: stringValue(item.suggestedMessageTranslation),
+    }];
+  });
+  const rawReadStatus = rawHesitation?.readNoReplyStatus;
+  const readNoReplyStatus = rawReadStatus === "已确认已读未回" || rawReadStatus === "疑似未回复" || rawReadStatus === "未发现" || rawReadStatus === "无法判断" ? rawReadStatus : "无法判断";
+  const readEvidenceMessage = rawHesitation ? messageById.get(stringValue(rawHesitation.readNoReplyEvidenceMessageId)) : undefined;
+  const readEvidenceQuote = rawHesitation ? normalizeEvidenceQuote(rawHesitation.readNoReplyEvidenceQuote, conversation) : "";
+  const readEvidenceMatches = Boolean(readEvidenceMessage && readEvidenceQuote && readEvidenceMessage.content.normalize("NFKC").includes(readEvidenceQuote.normalize("NFKC")));
+  const hesitationConfidence = Number(rawHesitation?.confidence);
+  const hesitationAnalysis: CustomerTask["report"]["hesitationAnalysis"] = rawHesitation && stringValue(rawHesitation.analyzedAt) ? {
+    analyzedAt: stringValue(rawHesitation.analyzedAt),
+    readNoReplyStatus: (readNoReplyStatus === "已确认已读未回" || readNoReplyStatus === "疑似未回复") && (!readEvidenceMessage || readEvidenceMessage.role !== "sales" || !readEvidenceMatches) ? "无法判断" : readNoReplyStatus,
+    readNoReplyReason: stringValue(rawHesitation.readNoReplyReason, "当前聊天信息不足以判断未回复状态。"),
+    readNoReplyEvidenceMessageId: readEvidenceMessage?.role === "sales" && readEvidenceMatches ? readEvidenceMessage.id : "",
+    readNoReplyEvidenceQuote: readEvidenceMessage?.role === "sales" && readEvidenceMatches ? readEvidenceQuote : "",
+    overallCustomerPerspective: stringValue(rawHesitation.overallCustomerPerspective, "当前证据不足，建议结合完整对话人工核对。"),
+    signals: hesitationSignals.slice(0, 12),
+    strategy: stringList(rawHesitation.strategy, ["优先确认客户当前最在意的问题，再决定跟进内容。"]).slice(0, 6),
+    confidence: Number.isFinite(hesitationConfidence) ? Math.min(1, Math.max(0, hesitationConfidence)) : 0,
+  } : undefined;
   const objections = rawObjections.flatMap((value) => {
     if (!value || typeof value !== "object" || Array.isArray(value)) return [];
     const item = value as Record<string, unknown>;
@@ -289,6 +330,7 @@ function normalizeReport(value: unknown, conversation = ""): CustomerTask["repor
     summary: stringValue(report.summary, "AI 未返回有效的对话总结。"),
     profile,
     emotionProfile,
+    hesitationAnalysis,
     stage: normalizeStage(stringValue(report.stage)),
     parallelStages,
     stageReason: stringValue(report.stageReason, "当前聊天记录不足以支持更具体的阶段判断。"),
@@ -540,6 +582,7 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
       onUpdate({
         ...activeTask,
         rawConversation: conversation,
+        report: changed ? { ...activeTask.report, hesitationAnalysis: undefined } : activeTask.report,
         name: `${activeTask.customer.name} · ${Number(data.messageCount ?? 0)} 条消息`,
         status: changed ? "stale" : activeTask.status,
         updatedAt: changed ? "刚刚" : activeTask.updatedAt,
@@ -672,6 +715,8 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
             </div>
           </ReportCard>
 
+          <DeepHesitationCard task={activeTask} onUpdate={onUpdate} onLocate={openRawChat} />
+
           <ConfirmationChecklist task={activeTask} onUpdate={onUpdate} />
           </>}
 
@@ -740,6 +785,66 @@ function AnalysisFailed({ task, onRetry }: { task: CustomerTask; onRetry: () => 
 
 function ReportCard({ icon: Icon, title, tone, featured, children }: React.PropsWithChildren<{ icon: typeof Sparkles; title: string; tone: string; featured?: boolean }>) {
   return <article className={`report-card ${featured ? "featured" : ""}`}><header><span className={`card-icon ${tone}`}><Icon size={17} /></span><h3>{title}</h3></header><div className="card-body">{children}</div></article>;
+}
+
+function DeepHesitationCard({ task, onUpdate, onLocate }: { task: CustomerTask; onUpdate: (task: CustomerTask) => void; onLocate: (messageId?: string, quote?: string) => void }) {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const analysis = task.report.hesitationAnalysis;
+  const runAnalysis = async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const response = await fetch("/api/hesitation-analyze", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ conversation: task.rawConversation }) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "深度犹豫分析失败");
+      onUpdate(normalizeTask({
+        ...task,
+        report: { ...task.report, hesitationAnalysis: data.analysis },
+        provider: data.provider === "deepseek" ? "deepseek" : "openai",
+        model: data.provider === "deepseek" ? "DeepSeek" : "GPT",
+        updatedAt: "刚刚",
+      }));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "深度犹豫分析失败");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return <ReportCard icon={Search} title="深度犹豫与未回复分析" tone="orange">
+    {!analysis ? <div className="hesitation-cta">
+      <span>按需分析 · 首次不自动运行</span>
+      <h4>从客户视角重新细看整段聊天</h4>
+      <p>识别已读未回或疑似未回复、明确异议、延后说辞和有证据的潜在犹豫，并为每个问题生成独立跟进建议。</p>
+      <button className="primary-button" onClick={() => void runAnalysis()} disabled={loading || task.status === "analyzing"}><Search size={14} />{loading ? "正在深度分析…" : "开始深度分析"}</button>
+      {error && <div className="hesitation-error"><CircleAlert size={13} />{error}</div>}
+    </div> : <div className="hesitation-result">
+      <div className="hesitation-result-head">
+        <div><span className={`read-status status-${analysis.readNoReplyStatus}`}>{analysis.readNoReplyStatus}</span><small>深度分析置信度 {Math.round(analysis.confidence * 100)}%</small></div>
+        <button onClick={() => void runAnalysis()} disabled={loading}><RefreshCw size={13} className={loading ? "spin" : ""} />{loading ? "分析中…" : "重新分析"}</button>
+      </div>
+      <div className="customer-perspective"><small>站在客户角度</small><p>{analysis.overallCustomerPerspective}</p></div>
+      <div className="read-no-reply-detail"><strong>未回复判断</strong><p>{analysis.readNoReplyReason}</p>{analysis.readNoReplyEvidenceQuote && <blockquote><button onClick={() => onLocate(analysis.readNoReplyEvidenceMessageId, analysis.readNoReplyEvidenceQuote)}>定位原文</button>“{analysis.readNoReplyEvidenceQuote}”</blockquote>}</div>
+      <div className="hesitation-signals">
+        <h4>发现 {analysis.signals.length} 个需要关注的点</h4>
+        {!analysis.signals.length && <div className="empty-objections"><CheckCircle2 size={15} />没有发现具有原文依据的明显异议或延后说辞</div>}
+        {analysis.signals.map((signal, index) => <article key={`${signal.title}-${index}`}>
+          <header><span className={`severity ${signal.severity}`}>{signal.severity}</span><strong>{signal.title}</strong><em>{signal.kind}</em><small>{Math.round(signal.confidence * 100)}%</small></header>
+          <div className="signal-body">
+            <div className="signal-perspective"><small>客户视角</small><p>{signal.customerPerspective}</p></div>
+            <blockquote><button onClick={() => onLocate(signal.evidenceMessageId, signal.evidenceQuote)}>已核验原文</button>“{signal.evidenceQuote}”</blockquote>
+            <p className="signal-reasoning"><span>判断说明</span>{signal.reasoning}</p>
+            <div className="follow-up-plan"><div><small>跟进目标</small><p>{signal.followUpGoal}</p></div><div><small>建议时机</small><p>{signal.followUpTiming}</p></div></div>
+            <div className="signal-message"><header><strong>建议跟进消息</strong><button onClick={() => navigator.clipboard.writeText(signal.suggestedMessage)}><Copy size={12} />复制</button></header><p>{signal.suggestedMessage}</p><div><small>中文核对</small><p>{signal.suggestedMessageTranslation}</p></div></div>
+          </div>
+        </article>)}
+      </div>
+      <div className="hesitation-strategy"><h4>整体跟进顺序</h4>{analysis.strategy.map((item, index) => <p key={item}><span>{index + 1}</span>{item}</p>)}</div>
+      {error && <div className="hesitation-error"><CircleAlert size={13} />{error}</div>}
+      <p className="hesitation-disclaimer">潜在犹豫属于基于原文的销售推断，不代表已经确认客户的内心想法。</p>
+    </div>}
+  </ReportCard>;
 }
 
 const confirmationState: Record<ConfirmationStatus, { label: string; className: string }> = {

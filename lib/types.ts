@@ -37,6 +37,33 @@ export interface CustomerEmotionProfile {
   confidence: number;
 }
 
+export interface HesitationSignal {
+  title: string;
+  kind: "明确异议" | "延后说辞" | "含蓄犹豫" | "未回复风险";
+  severity: "高" | "中" | "低";
+  customerPerspective: string;
+  evidenceMessageId: string;
+  evidenceQuote: string;
+  reasoning: string;
+  confidence: number;
+  followUpGoal: string;
+  followUpTiming: string;
+  suggestedMessage: string;
+  suggestedMessageTranslation: string;
+}
+
+export interface HesitationAnalysis {
+  analyzedAt: string;
+  readNoReplyStatus: "已确认已读未回" | "疑似未回复" | "未发现" | "无法判断";
+  readNoReplyReason: string;
+  readNoReplyEvidenceMessageId: string;
+  readNoReplyEvidenceQuote: string;
+  overallCustomerPerspective: string;
+  signals: HesitationSignal[];
+  strategy: string[];
+  confidence: number;
+}
+
 export interface Objection {
   title: string;
   severity: "高" | "中" | "低";
@@ -151,6 +178,7 @@ export interface AnalysisReport {
   summary: string;
   profile: string[];
   emotionProfile: CustomerEmotionProfile;
+  hesitationAnalysis?: HesitationAnalysis;
   stage: SalesStage;
   parallelStages: SalesStage[];
   stageReason: string;

@@ -1,4 +1,4 @@
-import type { AnalysisModule, AnalysisReport, ConfirmationItem, CustomerEmotionProfile, Objection, Provider, SalesStage } from "./types";
+import type { AnalysisModule, AnalysisReport, ConfirmationItem, CustomerEmotionProfile, HesitationAnalysis, Objection, Provider, SalesStage } from "./types";
 import { getRuntimeProviderConfig, type RuntimeProviderConfig } from "./provider-config";
 import { buildNumberedConversationChunks, parseConversationMessages, type ParsedConversationMessage } from "./conversation";
 
@@ -188,6 +188,44 @@ const actionSchema = {
     nextActions: { type: "array", items: { type: "string" } },
     suggestedReply: { type: "string" },
     suggestedReplyTranslation: { type: "string" },
+  },
+};
+
+const hesitationSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["readNoReplyStatus", "readNoReplyReason", "readNoReplyEvidenceMessageId", "readNoReplyEvidenceQuote", "overallCustomerPerspective", "signals", "strategy", "confidence"],
+  properties: {
+    readNoReplyStatus: { type: "string", enum: ["已确认已读未回", "疑似未回复", "未发现", "无法判断"] },
+    readNoReplyReason: { type: "string" },
+    readNoReplyEvidenceMessageId: { type: "string" },
+    readNoReplyEvidenceQuote: { type: "string" },
+    overallCustomerPerspective: { type: "string" },
+    signals: {
+      type: "array",
+      maxItems: 12,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["title", "kind", "severity", "customerPerspective", "evidenceMessageId", "evidenceQuote", "reasoning", "confidence", "followUpGoal", "followUpTiming", "suggestedMessage", "suggestedMessageTranslation"],
+        properties: {
+          title: { type: "string" },
+          kind: { type: "string", enum: ["明确异议", "延后说辞", "含蓄犹豫", "未回复风险"] },
+          severity: { type: "string", enum: ["高", "中", "低"] },
+          customerPerspective: { type: "string" },
+          evidenceMessageId: { type: "string" },
+          evidenceQuote: { type: "string" },
+          reasoning: { type: "string" },
+          confidence: { type: "number", minimum: 0, maximum: 1 },
+          followUpGoal: { type: "string" },
+          followUpTiming: { type: "string" },
+          suggestedMessage: { type: "string" },
+          suggestedMessageTranslation: { type: "string" },
+        },
+      },
+    },
+    strategy: { type: "array", minItems: 1, maxItems: 6, items: { type: "string" } },
+    confidence: { type: "number", minimum: 0, maximum: 1 },
   },
 };
 
@@ -666,6 +704,69 @@ export async function analyzeWithProvider(provider: Provider, conversation: stri
   const risk = results[1] as RiskModuleResult;
   const action = results[2] as ActionModuleResult;
   return { ...customer, ...risk, ...action };
+}
+
+type HesitationModelResult = Omit<HesitationAnalysis, "analyzedAt">;
+
+const hesitationInstruction = `${commonPrompt}
+这是一次用户主动触发的深度复盘，不属于首次常规分析。请按消息顺序细看完整对话，并站在客户视角识别：明确异议、延后说辞、含蓄犹豫和未回复风险。延后说辞包括“稍后看看”“研究后回复”“之后再说”等推迟决策表达；含蓄犹豫只能作为有证据的可能性推断，禁止声称读懂客户内心或把推断写成事实。
+每个 signals 项必须引用一条真实消息的 M 编号及逐字原文，解释为什么该表达可能阻碍推进，并分别给出跟进目标、建议时机、可直接发送的客户语言消息及自然简体中文翻译。没有原文依据的点必须删除，不得为追求数量而虚构。
+readNoReplyStatus 只有输入明确包含已读标记时才能写“已确认已读未回”；若最后一条关键销售消息之后没有客户回复但没有已读标记，只能写“疑似未回复”；若后续已有客户回复则不能把此前普通等待误判为当前未回复。礼貌感谢、普通询价和正常考虑不自动等于拒绝。
+overallCustomerPerspective 要总结客户此刻可能如何看待整个沟通过程，并明确区分事实与推断。strategy 提供多点跟进顺序，优先解决高影响问题，避免连续轰炸、施压和重复发送相同内容。只输出符合字段要求的合法 JSON。`;
+
+function validateHesitationResult(result: HesitationModelResult, messages: ParsedConversationMessage[], conversation: string, final: boolean) {
+  if (!result?.readNoReplyStatus || !result.readNoReplyReason?.trim() || !result.overallCustomerPerspective?.trim() || !Array.isArray(result.signals) || !Array.isArray(result.strategy) || !result.strategy.length || !Number.isFinite(result.confidence)) throw new Error("深度犹豫分析字段不完整");
+  const messageById = new Map(messages.map((message) => [message.id, message]));
+  const titles = new Set<string>();
+  for (const signal of result.signals) {
+    if (!signal.title?.trim() || titles.has(signal.title.trim()) || !signal.customerPerspective?.trim() || !signal.reasoning?.trim() || !signal.followUpGoal?.trim() || !signal.followUpTiming?.trim() || !signal.suggestedMessage?.trim() || !signal.suggestedMessageTranslation?.trim() || !Number.isFinite(signal.confidence)) throw new Error("深度犹豫分析包含重复或不完整的判断");
+    titles.add(signal.title.trim());
+    const evidenceMessage = messageById.get(signal.evidenceMessageId);
+    if (!evidenceMessage || !hasVerifiedEvidence(messageById, signal.evidenceMessageId, signal.evidenceQuote)) throw new Error("深度犹豫分析包含无法核验的原文");
+    if (signal.kind !== "未回复风险" && evidenceMessage.role !== "customer") throw new Error("客户异议或犹豫必须引用客户原文");
+    if (signal.kind === "未回复风险") {
+      const evidenceIndex = messages.findIndex((message) => message.id === signal.evidenceMessageId);
+      if (evidenceMessage.role !== "sales" || (final && messages.slice(evidenceIndex + 1).some((message) => message.role === "customer"))) throw new Error("未回复风险必须引用尚无客户后续回复的销售消息");
+    }
+  }
+  if (!final) return result;
+  if (result.readNoReplyStatus === "已确认已读未回" && !/(?:已读|\bseen\b|read\s*(?:at|receipt|status))/i.test(conversation)) throw new Error("聊天记录没有明确已读标记，不能判断已确认已读未回");
+  if (result.readNoReplyStatus === "已确认已读未回" || result.readNoReplyStatus === "疑似未回复") {
+    const evidenceMessage = messageById.get(result.readNoReplyEvidenceMessageId);
+    const evidenceIndex = messages.findIndex((message) => message.id === result.readNoReplyEvidenceMessageId);
+    if (evidenceMessage?.role !== "sales" || !hasVerifiedEvidence(messageById, result.readNoReplyEvidenceMessageId, result.readNoReplyEvidenceQuote) || messages.slice(evidenceIndex + 1).some((message) => message.role === "customer")) throw new Error("未回复判断缺少最后一条未获客户回复的销售原文");
+  }
+  return result;
+}
+
+async function requestHesitationOnce(config: RuntimeProviderConfig, provider: Provider, input: string, merge = false) {
+  const instructions = `${hesitationInstruction}${merge ? "\n下面是按时间顺序排列的分段分析及对话尾部，请去重、校正跨分段误判并合并为最终结果。保留真实消息编号与原文。" : ""}`;
+  if (provider === "openai") return requestOpenAIJson<HesitationModelResult>(config, hesitationSchema, "deep_hesitation_analysis", instructions, input);
+  return requestDeepSeekJson<HesitationModelResult>(config, [{ role: "system", content: instructions }, { role: "user", content: input }], 6000);
+}
+
+export async function analyzeHesitationWithProvider(provider: Provider, conversation: string): Promise<HesitationAnalysis | null> {
+  const config = await getRuntimeProviderConfig(provider);
+  if (!config) return null;
+  const messages = parseConversationMessages(conversation);
+  const chunks = buildNumberedConversationChunks(conversation);
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const retryPrefix = attempt ? "上一次结果未通过原文或顺序核验。删除无法核验的推断，并严格区分事实、疑似与无法判断。\n\n" : "";
+      const chunkResults: HesitationModelResult[] = [];
+      for (const chunk of chunks) {
+        const result = await requestHesitationOnce(config, provider, `${retryPrefix}${chunk}`);
+        chunkResults.push(validateHesitationResult(result, messages, conversation, chunks.length === 1));
+      }
+      const merged = chunks.length === 1 ? chunkResults[0] : await requestHesitationOnce(config, provider, JSON.stringify({ chunkResults, conversationTail: chunks.at(-1) }), true);
+      const validated = validateHesitationResult(merged, messages, conversation, true);
+      return { ...validated, analyzedAt: new Date().toISOString() };
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error("深度犹豫分析失败");
 }
 
 export interface BilingualSuggestion {
