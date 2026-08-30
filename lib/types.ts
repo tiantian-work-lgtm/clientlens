@@ -1,6 +1,7 @@
 export type SourceType = "salesmartly" | "text" | "excel";
 export type TaskStatus = "ready" | "analyzing" | "stale" | "failed";
 export type Provider = "openai" | "deepseek";
+export type IntegrationProvider = Provider | "salesmartly";
 export type SalesStage =
   | "初次询盘与客户背调"
   | "信任建立"

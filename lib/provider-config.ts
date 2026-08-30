@@ -1,6 +1,6 @@
 import { decryptSecret, maskSecret } from "./secret-crypto";
 import { query } from "./db";
-import type { Provider } from "./types";
+import type { IntegrationProvider, Provider } from "./types";
 
 export interface RuntimeProviderConfig {
   apiKey: string;
@@ -20,10 +20,10 @@ interface ProviderRow {
 const providerDefaults = {
   openai: { model: "gpt-5.6-terra", baseUrl: "https://api.openai.com" },
   deepseek: { model: "deepseek-v4-flash", baseUrl: "https://api.deepseek.com" },
-  salesmartly: { model: "", baseUrl: "" },
+  salesmartly: { model: "", baseUrl: "https://developer.salesmartly.com" },
 };
 
-export async function getRuntimeProviderConfig(provider: Provider): Promise<RuntimeProviderConfig | null> {
+export async function getRuntimeProviderConfig(provider: IntegrationProvider): Promise<RuntimeProviderConfig | null> {
   if (process.env.DATABASE_URL && process.env.SETTINGS_ENCRYPTION_KEY) {
     try {
       const result = await query<ProviderRow>("SELECT * FROM provider_configs WHERE provider = $1 AND enabled = TRUE", [provider]);
@@ -33,11 +33,19 @@ export async function getRuntimeProviderConfig(provider: Provider): Promise<Runt
       console.error("Unable to read encrypted provider configuration", error instanceof Error ? error.message : error);
     }
   }
-  const apiKey = provider === "openai" ? process.env.OPENAI_API_KEY : process.env.DEEPSEEK_API_KEY;
+  const apiKey = provider === "openai"
+    ? process.env.OPENAI_API_KEY
+    : provider === "deepseek"
+      ? process.env.DEEPSEEK_API_KEY
+      : process.env.SALESMARTLY_API_TOKEN || process.env.SALESMARTLY_API_KEY;
   if (!apiKey) return null;
   return {
     apiKey,
-    model: provider === "openai" ? process.env.OPENAI_MODEL || providerDefaults.openai.model : process.env.DEEPSEEK_MODEL || providerDefaults.deepseek.model,
+    model: provider === "openai"
+      ? process.env.OPENAI_MODEL || providerDefaults.openai.model
+      : provider === "deepseek"
+        ? process.env.DEEPSEEK_MODEL || providerDefaults.deepseek.model
+        : process.env.SALESMARTLY_PROJECT_ID || "",
     baseUrl: providerDefaults[provider].baseUrl,
   };
 }
