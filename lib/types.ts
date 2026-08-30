@@ -68,6 +68,34 @@ export interface HesitationAnalysis {
   confidence: number;
 }
 
+export interface ProductResearchSource {
+  title: string;
+  url: string;
+  excerpt: string;
+  level: "自有产品资料" | "同行评审研究" | "官方或机构资料" | "厂商产品资料" | "其他公开资料";
+}
+
+export interface ProductTalkingPoint {
+  title: string;
+  explanation: string;
+  sourceUrls: string[];
+}
+
+export interface ProductResearch {
+  productName: string;
+  customerNeed: string;
+  customerEvidenceMessageId: string;
+  customerEvidenceQuote: string;
+  matchLevel: "高" | "中" | "低" | "资料不足";
+  matchSummary: string;
+  talkingPoints: ProductTalkingPoint[];
+  limitations: string[];
+  sources: ProductResearchSource[];
+  suggestedReply: string;
+  suggestedReplyTranslation: string;
+  searchedAt: string;
+}
+
 export interface Objection {
   title: string;
   severity: "高" | "中" | "低";
@@ -183,6 +211,7 @@ export interface AnalysisReport {
   profile: string[];
   emotionProfile: CustomerEmotionProfile;
   hesitationAnalysis?: HesitationAnalysis;
+  productResearch?: ProductResearch;
   stage: SalesStage;
   parallelStages: SalesStage[];
   stageReason: string;

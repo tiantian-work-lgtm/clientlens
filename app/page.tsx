@@ -37,7 +37,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import { defaultConfirmations, defaultProgress, emptyReport, initialTasks } from "@/lib/demo-data";
 import { parseConversationMessages } from "@/lib/conversation";
-import type { AnalysisModule, AnalysisModuleStatus, ConfirmationItem, ConfirmationStatus, CustomerTask, HesitationSignal, Provider, SalesStage, SourceType } from "@/lib/types";
+import type { AnalysisModule, AnalysisModuleStatus, ConfirmationItem, ConfirmationStatus, CustomerTask, HesitationSignal, ProductResearch, Provider, SalesStage, SourceType } from "@/lib/types";
 import SettingsManager from "@/app/components/settings-manager";
 
 type View = "analysis" | "scripts" | "products" | "translate" | "settings";
@@ -178,6 +178,7 @@ function normalizeReport(value: unknown, conversation = ""): CustomerTask["repor
     strategy: stringList(rawHesitation.strategy, ["优先确认客户当前最在意的问题，再决定跟进内容。"]).slice(0, 6),
     confidence: Number.isFinite(hesitationConfidence) ? Math.min(1, Math.max(0, hesitationConfidence)) : 0,
   } : undefined;
+  const rawProductResearch = report.productResearch && typeof report.productResearch === "object" && !Array.isArray(report.productResearch) ? report.productResearch as ProductResearch : undefined;
   const objections = rawObjections.flatMap((value) => {
     if (!value || typeof value !== "object" || Array.isArray(value)) return [];
     const item = value as Record<string, unknown>;
@@ -329,6 +330,7 @@ function normalizeReport(value: unknown, conversation = ""): CustomerTask["repor
     profile,
     emotionProfile,
     hesitationAnalysis,
+    productResearch: rawProductResearch,
     stage: normalizeStage(stringValue(report.stage)),
     parallelStages,
     stageReason: stringValue(report.stageReason, "当前聊天记录不足以支持更具体的阶段判断。"),
@@ -757,7 +759,7 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
           </>}
 
           {moduleVisible("checklist") && <>
-          <ConfirmationChecklist task={activeTask} onUpdate={onUpdate} />
+          <ConfirmationChecklist task={activeTask} onUpdate={onUpdate} onLocate={openRawChat} />
           </>}
 
           {moduleVisible("action") && <>
@@ -887,6 +889,56 @@ function DeepHesitationCard({ task, onUpdate, onLocate }: { task: CustomerTask; 
   </ReportCard>;
 }
 
+function ProductResearchCard({ task, onUpdate, onLocate }: { task: CustomerTask; onUpdate: (task: CustomerTask) => void; onLocate: (messageId?: string, quote?: string) => void }) {
+  const research = task.report.productResearch;
+  const defaultProduct = research?.productName || (task.customer.product && task.customer.product !== "待识别" ? task.customer.product : "KLOW");
+  const [productName, setProductName] = useState(defaultProduct);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => setProductName(defaultProduct), [task.id, defaultProduct]);
+
+  const runResearch = async () => {
+    if (!productName.trim()) return setError("请先输入产品名称");
+    setLoading(true);
+    setError("");
+    try {
+      const response = await fetch("/api/product-research", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ productName: productName.trim(), conversation: task.rawConversation }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "产品联网研究失败");
+      onUpdate(normalizeTask({ ...task, report: { ...task.report, productResearch: data.research }, updatedAt: "刚刚" }));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "产品联网研究失败");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return <section className="product-research">
+    <header><div><Globe2 size={16} /><div><strong>产品痛点匹配与联网研究</strong><small>按需运行 · 结果随当前任务保存</small></div></div><span>DeepSeek Web Search</span></header>
+    <div className="product-research-form">
+      <label><span>目标产品</span><input value={productName} onChange={(event) => setProductName(event.target.value)} placeholder="例如 KLOW" /></label>
+      <button type="button" className="primary-button" onClick={() => void runResearch()} disabled={loading}>{loading ? <RefreshCw className="spin" size={14} /> : <Search size={14} />}{loading ? "正在检索资料…" : research ? "重新联网研究" : "联网研究并生成话术"}</button>
+    </div>
+    {!research && !loading && <p className="product-research-hint">系统会提取客户的具体痛点，联网核验产品及成分资料，再生成带来源的价值说明；不会生成个体化剂量、周期或治疗方案。</p>}
+    {error && <div className="product-research-error"><CircleAlert size={14} />{error}</div>}
+    {research && <div className="product-research-result">
+      <div className="research-match-head"><div><small>客户关注</small><strong>{research.customerNeed}</strong></div><span className={`match-level level-${research.matchLevel}`}>匹配度 {research.matchLevel}</span></div>
+      <button className="research-evidence" type="button" onClick={() => onLocate(research.customerEvidenceMessageId, research.customerEvidenceQuote)}><span>客户原文</span>“{research.customerEvidenceQuote}”</button>
+      <p className="research-summary">{research.matchSummary}</p>
+      <div className="research-points"><h5>可用于沟通的价值点</h5>{research.talkingPoints.map((point, index) => <article key={`${point.title}-${index}`}><span>{index + 1}</span><div><strong>{point.title}</strong><p>{point.explanation}</p><div>{point.sourceUrls.map((url) => <a href={url} target="_blank" rel="noreferrer" key={url}><Link2 size={11} />查看依据</a>)}</div></div></article>)}</div>
+      {!!research.limitations.length && <div className="research-limitations"><strong>资料边界</strong>{research.limitations.map((item) => <p key={item}><CircleAlert size={12} />{item}</p>)}</div>}
+      <details className="research-sources"><summary>查看 {research.sources.length} 条资料来源 <ChevronDown size={14} /></summary><div>{research.sources.map((source) => <a href={source.url} target="_blank" rel="noreferrer" key={`${source.url}-${source.title}`}><span>{source.level}</span><strong>{source.title}</strong><p>{source.excerpt}</p></a>)}</div></details>
+      <div className="research-reply"><header><Bot size={15} /><strong>针对当前客户的建议回复</strong><button type="button" onClick={() => navigator.clipboard.writeText(research.suggestedReply)}><Copy size={13} />复制原文</button></header><p>{research.suggestedReply}</p><div><small>中文核对</small><p>{research.suggestedReplyTranslation}</p></div></div>
+      <small className="research-time">检索于 {new Date(research.searchedAt).toLocaleString("zh-CN")}</small>
+    </div>}
+  </section>;
+}
+
 const confirmationState: Record<ConfirmationStatus, { label: string; className: string }> = {
   confirmed: { label: "已确认", className: "confirmed" },
   unknown: { label: "未确认", className: "unknown" },
@@ -894,7 +946,7 @@ const confirmationState: Record<ConfirmationStatus, { label: string; className: 
   na: { label: "不适用", className: "na" },
 };
 
-function ConfirmationChecklist({ task, onUpdate }: { task: CustomerTask; onUpdate: (task: CustomerTask) => void }) {
+function ConfirmationChecklist({ task, onUpdate, onLocate }: { task: CustomerTask; onUpdate: (task: CustomerTask) => void; onLocate: (messageId?: string, quote?: string) => void }) {
   const [generating, setGenerating] = useState<string | null>(null);
   const [result, setResult] = useState<{ id: string; mode: "hook" | "explain"; text: string; translation: string } | null>(null);
   const categories: ConfirmationItem["category"][] = ["客户角色", "认知与经历", "产品与信任", "交易条件"];
@@ -969,6 +1021,7 @@ function ConfirmationChecklist({ task, onUpdate }: { task: CustomerTask; onUpdat
                     <div className="seeding-advice"><small>建议</small><p>{item.seedingAdvice || "先确认客户希望改善的问题，再做针对性价值说明。"}</p></div>
                   </div>}
                 </div>}
+                {item.id === "seeding" && <ProductResearchCard task={task} onUpdate={onUpdate} onLocate={onLocate} />}
                 {item.id === "medical" && item.medicalNeed && <div className={`seeding-analysis medical-analysis ${item.medicalNeed === "需要提供建议" ? "needed" : "not-needed"}`}>
                   <header><span>建议结论</span><strong>{item.medicalNeed}</strong></header>
                   {item.medicalNeed === "需要提供建议" && <div className="seeding-detail-grid medical-detail-grid">
