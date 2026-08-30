@@ -2,6 +2,7 @@
 
 import {
   Archive,
+  ArrowUp,
   ArrowLeftRight,
   BookOpen,
   Bot,
@@ -34,7 +35,7 @@ import {
   X,
   Zap,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { defaultConfirmations, defaultProgress, emptyReport, initialTasks } from "@/lib/demo-data";
 import { parseConversationMessages } from "@/lib/conversation";
 import type { AnalysisModule, AnalysisModuleStatus, ConfirmationItem, ConfirmationStatus, CustomerTask, HesitationSignal, ImportPreview, ProductResearch, Provider, SalesStage, SourceType } from "@/lib/types";
@@ -58,6 +59,9 @@ const sourceMeta: Record<SourceType, { label: string; icon: typeof Cloud; color:
 };
 
 const salesStages: SalesStage[] = ["初次询盘与客户背调", "信任建立", "产品与订单匹配", "决策推进", "等待付款", "已成交", "售后与复购"];
+
+type ReportSectionId = "summary" | "profile" | "psychology" | "objections" | "hesitation" | "checklist" | "product-research" | "improvements" | "next-actions";
+const ReportCollapseContext = createContext<{ collapsed: Record<string, boolean>; toggle: (id: ReportSectionId) => void }>({ collapsed: {}, toggle: () => undefined });
 
 function normalizeStage(value?: string): SalesStage {
   if (salesStages.includes(value as SalesStage)) return value as SalesStage;
@@ -561,6 +565,9 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
   const [syncError, setSyncError] = useState("");
   const [showProductResearch, setShowProductResearch] = useState(Boolean(activeTask.report.productResearch));
   const productResearchRef = useRef<HTMLDivElement>(null);
+  const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({});
+  const [activeReportSection, setActiveReportSection] = useState<ReportSectionId>("summary");
+  const skipCollapseSaveRef = useRef(false);
   const isAnalyzing = analyzing || activeTask.status === "analyzing";
   const hasCompletedModule = Object.values(activeTask.analysisModules ?? {}).includes("done");
   const moduleVisible = (module: AnalysisModule) => {
@@ -571,8 +578,55 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
 
   useEffect(() => setShowProductResearch(Boolean(activeTask.report.productResearch)), [activeTask.id, activeTask.report.productResearch]);
 
+  useEffect(() => {
+    skipCollapseSaveRef.current = true;
+    try {
+      const saved = localStorage.getItem(`clientlens-report-collapse-${activeTask.id}`);
+      setCollapsedSections(saved ? JSON.parse(saved) as Record<string, boolean> : {});
+    } catch { setCollapsedSections({}); }
+  }, [activeTask.id]);
+
+  useEffect(() => {
+    if (skipCollapseSaveRef.current) { skipCollapseSaveRef.current = false; return; }
+    try { localStorage.setItem(`clientlens-report-collapse-${activeTask.id}`, JSON.stringify(collapsedSections)); } catch { /* storage may be unavailable */ }
+  }, [activeTask.id, collapsedSections]);
+
+  useEffect(() => {
+    const root = document.querySelector(".report-pane");
+    if (!root) return;
+    const sections = Array.from(root.querySelectorAll<HTMLElement>("[data-report-section]"));
+    const observer = new IntersectionObserver((entries) => {
+      const visible = entries.filter((entry) => entry.isIntersecting).sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
+      const id = visible[0]?.target.getAttribute("data-report-section") as ReportSectionId | null;
+      if (id) setActiveReportSection(id);
+    }, { root, rootMargin: "-150px 0px -62% 0px", threshold: 0 });
+    sections.forEach((section) => observer.observe(section));
+    return () => observer.disconnect();
+  }, [activeTask.id, showProductResearch, activeTask.status]);
+
+  const toggleReportSection = (id: ReportSectionId) => setCollapsedSections((current) => ({ ...current, [id]: !current[id] }));
+
+  const reportSections = useMemo(() => {
+    const sections: Array<{ id: ReportSectionId; label: string; meta?: string }> = [];
+    if (moduleVisible("customer")) sections.push({ id: "summary", label: "对话总结" }, { id: "profile", label: "客户画像" });
+    if (moduleVisible("psychology")) sections.push({ id: "psychology", label: "情绪与心理" });
+    if (moduleVisible("objections")) sections.push({ id: "objections", label: "异议与犹豫", meta: String(activeTask.report.objections.length) }, { id: "hesitation", label: "深度犹豫", meta: "按需" });
+    if (moduleVisible("checklist")) sections.push({ id: "checklist", label: "确认清单", meta: `${activeTask.report.confirmations.filter((item) => item.status === "confirmed" || item.status === "na").length}/${activeTask.report.confirmations.length}` });
+    if (showProductResearch) sections.push({ id: "product-research", label: "产品匹配", meta: "按需" });
+    if (moduleVisible("action")) sections.push({ id: "improvements", label: "沟通改善" }, { id: "next-actions", label: "下一步建议" });
+    return sections;
+  }, [activeTask, showProductResearch]);
+
+  const openReportSection = (id: ReportSectionId) => {
+    setCollapsedSections((current) => ({ ...current, [id]: false }));
+    window.setTimeout(() => document.getElementById(`report-${id}`)?.scrollIntoView({ behavior: "smooth", block: "start" }), 40);
+  };
+
+  const setAllReportSections = (collapsed: boolean) => setCollapsedSections(Object.fromEntries(reportSections.map((section) => [section.id, collapsed])));
+
   const openProductResearch = () => {
     setShowProductResearch(true);
+    setCollapsedSections((current) => ({ ...current, "product-research": false }));
     window.setTimeout(() => productResearchRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
   };
 
@@ -687,11 +741,13 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
         {syncError && <div className="sync-error-banner"><CircleAlert size={16} /><span>{syncError}</span><button onClick={() => setSyncError("")}><X size={14} /></button></div>}
         {!!Object.keys(activeTask.analysisModuleErrors ?? {}).length && activeTask.status !== "analyzing" && <div className="partial-error-banner"><CircleAlert size={16} /><span>部分分析未完成：{Object.entries(activeTask.analysisModuleErrors ?? {}).map(([module, error]) => `${analysisModuleLabels[module as AnalysisModule]}（${error}）`).join("；")}</span><button onClick={() => void retryFailedModules()}>仅重试失败模块</button></div>}
 
+        {activeTask.status !== "failed" && (activeTask.status !== "analyzing" || hasCompletedModule) && <ReportDirectory sections={reportSections} active={activeReportSection} collapsed={collapsedSections} onOpen={openReportSection} onSetAll={setAllReportSections} />}
+
         {activeTask.status === "analyzing" && !hasCompletedModule ? (
           <AnalysisLoading task={activeTask} />
         ) : activeTask.status === "failed" ? (
           <AnalysisFailed task={activeTask} onRetry={reanalyze} />
-        ) : <div className="report-content">
+        ) : <ReportCollapseContext.Provider value={{ collapsed: collapsedSections, toggle: toggleReportSection }}><div className="report-content">
           {activeTask.status === "analyzing" && <AnalysisModuleProgress task={activeTask} compact />}
           {moduleVisible("customer") && <>
           <div className="report-intro">
@@ -700,17 +756,17 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
             <div className={`confidence score-${confidenceLabel(activeTask.report.confidence)}`}><div style={{ "--score": `${activeTask.report.confidence * 100}%` } as React.CSSProperties} /><span>{confidenceLabel(activeTask.report.confidence)}</span></div>
           </div>
 
-          <ReportCard icon={FileText} title="对话总结" tone="violet">
+          <ReportCard icon={FileText} title="对话总结" tone="violet" sectionId="summary">
             <p className="summary-text">{activeTask.report.summary}</p>
           </ReportCard>
 
-          <ReportCard icon={UserRound} title="客户画像" tone="blue">
+          <ReportCard icon={UserRound} title="客户画像" tone="blue" sectionId="profile">
             <div className="profile-tags">{activeTask.report.profile.map((item, index) => <span key={`${item}-${index}`}>{item}</span>)}</div>
           </ReportCard>
           </>}
 
           {moduleVisible("psychology") && <>
-          <ReportCard icon={UsersRound} title="客户情绪、沟通性格与心理研判" tone="cyan">
+          <ReportCard icon={UsersRound} title="客户情绪、沟通性格与心理研判" tone="cyan" sectionId="psychology">
             <div className="emotion-headline">
               <div><small>当前情绪</small><strong>{activeTask.report.emotionProfile.currentEmotion}</strong></div>
               <div><small>情绪变化</small><strong>{activeTask.report.emotionProfile.emotionTrend}</strong></div>
@@ -745,7 +801,7 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
           </>}
 
           {moduleVisible("objections") && <>
-          <ReportCard icon={CircleAlert} title={`主要异议与犹豫点 · ${activeTask.report.objections.length}`} tone="orange">
+          <ReportCard icon={CircleAlert} title={`主要异议与犹豫点 · ${activeTask.report.objections.length}`} tone="orange" sectionId="objections">
             <div className="objection-list">
               {!activeTask.report.objections.length && <div className="empty-objections"><CheckCircle2 size={15} />暂未识别到具有原始聊天依据的明确异议</div>}
               {activeTask.report.objections.map((item, index) => (
@@ -776,17 +832,19 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
           </div>}
 
           {moduleVisible("action") && <>
-          <ReportCard icon={Zap} title="本次沟通可改善" tone="amber">
+          <ReportCard icon={Zap} title="本次沟通可改善" tone="amber" sectionId="improvements">
             <div className="number-list">{activeTask.report.improvements.map((item, i) => <div key={item}><span>{i + 1}</span><p>{item}</p></div>)}</div>
           </ReportCard>
 
-          <ReportCard icon={Sparkles} title="AI 下一步建议" tone="violet" featured>
+          <ReportCard icon={Sparkles} title="AI 下一步建议" tone="violet" featured sectionId="next-actions">
             <div className="action-list">{activeTask.report.nextActions.map((item, i) => <div key={item}><span>{i + 1}</span><p>{item}</p></div>)}</div>
             <div className="reply-box"><div><Bot size={16} /><strong>建议回复</strong><button onClick={() => navigator.clipboard.writeText(activeTask.report.suggestedReply)}><Copy size={14} />复制原文</button></div><p>{activeTask.report.suggestedReply}</p><div className="reply-translation"><span>中文核对</span><p>{activeTask.report.suggestedReplyTranslation}</p></div></div>
           </ReportCard>
           </>}
-        </div>}
+        </div></ReportCollapseContext.Provider>}
       </section>
+
+      <button type="button" className="report-back-top" onClick={() => document.querySelector(".report-pane")?.scrollTo({ top: 0, behavior: "smooth" })} title="返回顶部"><ArrowUp size={17} /></button>
 
       <RawChatPanel
         task={activeTask}
@@ -838,8 +896,23 @@ function AnalysisFailed({ task, onRetry }: { task: CustomerTask; onRetry: () => 
   );
 }
 
-function ReportCard({ icon: Icon, title, tone, featured, children }: React.PropsWithChildren<{ icon: typeof Sparkles; title: string; tone: string; featured?: boolean }>) {
-  return <article className={`report-card ${featured ? "featured" : ""}`}><header><span className={`card-icon ${tone}`}><Icon size={17} /></span><h3>{title}</h3></header><div className="card-body">{children}</div></article>;
+function ReportDirectory({ sections, active, collapsed, onOpen, onSetAll }: { sections: Array<{ id: ReportSectionId; label: string; meta?: string }>; active: ReportSectionId; collapsed: Record<string, boolean>; onOpen: (id: ReportSectionId) => void; onSetAll: (collapsed: boolean) => void }) {
+  return <nav className="report-directory" aria-label="报告目录">
+    <div className="report-directory-inner">
+      <strong>报告目录</strong>
+      <div className="report-directory-links">{sections.map((section) => <button type="button" key={section.id} className={active === section.id ? "active" : ""} onClick={() => onOpen(section.id)}><span>{section.label}</span>{section.meta && <em>{section.meta}</em>}{collapsed[section.id] && <i />}</button>)}</div>
+      <div className="report-directory-actions"><button type="button" onClick={() => onSetAll(false)}>全部展开</button><button type="button" onClick={() => onSetAll(true)}>全部收起</button></div>
+    </div>
+  </nav>;
+}
+
+function ReportCard({ icon: Icon, title, tone, featured, sectionId, children }: React.PropsWithChildren<{ icon: typeof Sparkles; title: string; tone: string; featured?: boolean; sectionId?: ReportSectionId }>) {
+  const { collapsed, toggle } = useContext(ReportCollapseContext);
+  const isCollapsed = sectionId ? Boolean(collapsed[sectionId]) : false;
+  return <article id={sectionId ? `report-${sectionId}` : undefined} data-report-section={sectionId} className={`report-card ${featured ? "featured" : ""} ${isCollapsed ? "collapsed" : ""}`}>
+    <header className={sectionId ? "collapsible" : ""} onClick={sectionId ? () => toggle(sectionId) : undefined}><span className={`card-icon ${tone}`}><Icon size={17} /></span><h3>{title}</h3>{sectionId && <button type="button" className="report-collapse-button" aria-label={isCollapsed ? `展开${title}` : `收起${title}`} aria-expanded={!isCollapsed} onClick={(event) => { event.stopPropagation(); toggle(sectionId); }}><ChevronDown size={17} /></button>}</header>
+    {!isCollapsed && <div className="card-body">{children}</div>}
+  </article>;
 }
 
 function DeepHesitationCard({ task, onUpdate, onLocate }: { task: CustomerTask; onUpdate: (task: CustomerTask) => void; onLocate: (messageId?: string, quote?: string) => void }) {
@@ -867,7 +940,7 @@ function DeepHesitationCard({ task, onUpdate, onLocate }: { task: CustomerTask; 
     }
   };
 
-  return <ReportCard icon={Search} title="深度犹豫与未回复分析" tone="orange">
+  return <ReportCard icon={Search} title="深度犹豫与未回复分析" tone="orange" sectionId="hesitation">
     {!analysis ? <div className="hesitation-cta">
       <span>按需分析 · 首次不自动运行</span>
       <h4>从客户视角重新细看整段聊天</h4>
@@ -944,7 +1017,7 @@ function ProductResearchCard({ task, onUpdate, onLocate }: { task: CustomerTask;
     }
   };
 
-  return <ReportCard icon={Globe2} title="产品匹配与种草建议" tone="violet">
+  return <ReportCard icon={Globe2} title="产品匹配与种草建议" tone="violet" sectionId="product-research">
     <div className="product-research">
     <div className="product-research-head"><div><strong>针对当前客户生成有资料依据的价值说明</strong><small>按需运行 · 结果随当前任务保存</small></div><span>DeepSeek Web Search</span></div>
     <div className="product-research-form">
@@ -1015,7 +1088,7 @@ function ConfirmationChecklist({ task, onUpdate, onLocate, onOpenProductResearch
   };
 
   return (
-    <ReportCard icon={ListChecks} title={`客户确认清单 · ${completed}/${task.report.confirmations.length}`} tone="green">
+    <ReportCard icon={ListChecks} title={`客户确认清单 · ${completed}/${task.report.confirmations.length}`} tone="green" sectionId="checklist">
       <p className="checklist-intro">点击状态可人工切换。对未确认或存在风险的项目，可结合当前对话生成探询钩子或直接说明。</p>
       {!!riskItems.length && <div className="risk-summary">
         <header><CircleAlert size={14} /><strong>发现 {riskItems.length} 个风险点</strong></header>
