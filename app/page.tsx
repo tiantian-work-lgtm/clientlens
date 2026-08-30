@@ -171,7 +171,7 @@ async function analyzeConcurrently(task: CustomerTask, conversation: string, onU
   let succeeded = 0;
   let states = Object.fromEntries(analysisModules.map((module) => [module, "analyzing"])) as Record<AnalysisModule, AnalysisModuleStatus>;
   let errors: Partial<Record<AnalysisModule, string>> = {};
-  let latest = { ...task, rawConversation: conversation, status: "analyzing" as const, analysisStep: "analyzing" as const, analysisModules: states, analysisModuleErrors: errors, analysisError: undefined };
+  let latest: CustomerTask = { ...task, rawConversation: conversation, status: "analyzing", analysisStep: "analyzing", analysisModules: states, analysisModuleErrors: errors, analysisError: undefined };
   onUpdate(latest);
   await Promise.all(analysisModules.map(async (module) => {
     try {
