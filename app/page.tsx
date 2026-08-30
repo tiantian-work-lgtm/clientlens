@@ -600,18 +600,33 @@ function PanelSection({ title, action, children }: React.PropsWithChildren<{ tit
   return <section className="panel-section"><header><h4>{title}</h4>{action}</header>{children}</section>;
 }
 
-function parseConversationLine(line: string) {
-  const match = line.match(/^(?:\[([^\]]+)\]\s*)?(Customer|Sales|客户|销售)\s*:\s*(.*)$/i);
-  if (!match) return { time: "", role: "unknown" as const, label: "消息", content: line.trim() };
-  const customer = /^(customer|客户)$/i.test(match[2]);
-  return { time: match[1] || "", role: customer ? "customer" as const : "sales" as const, label: customer ? "客户" : "销售", content: match[3].trim() };
+function parseConversation(conversation: string) {
+  type ParsedMessage = { time: string; role: "customer" | "sales" | "unknown"; label: string; content: string };
+  const messages: ParsedMessage[] = [];
+  for (const rawLine of conversation.split("\n")) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    const match = line.match(/^(?:\[([^\]]+)\]\s*)?(Customer|Sales|客户|销售)\s*:\s*(.*)$/i);
+    if (match) {
+      if (match[3].trim() === "[系统消息]") continue;
+      const customer = /^(customer|客户)$/i.test(match[2]);
+      messages.push({ time: match[1] || "", role: customer ? "customer" : "sales", label: customer ? "客户" : "销售", content: match[3].trim() });
+      continue;
+    }
+    const previous = messages.at(-1);
+    if (previous) previous.content = `${previous.content}\n${line}`.trim();
+    else messages.push({ time: "", role: "unknown", label: "消息", content: line });
+  }
+  return messages;
 }
 
 function RawDrawer({ task, onClose, onUpdate }: { task: CustomerTask; onClose: () => void; onUpdate: (task: CustomerTask) => void }) {
   const [translating, setTranslating] = useState(false);
   const [translationError, setTranslationError] = useState("");
-  const messages = useMemo(() => task.rawConversation.split("\n").map(parseConversationLine).filter((item) => item.content), [task.rawConversation]);
-  const savedTranslation = task.rawTranslation?.source === task.rawConversation ? task.rawTranslation.lines : undefined;
+  const messages = useMemo(() => parseConversation(task.rawConversation), [task.rawConversation]);
+  const savedTranslation = task.rawTranslation?.source === task.rawConversation && task.rawTranslation.lines.length === messages.length
+    ? task.rawTranslation.lines
+    : undefined;
 
   const translate = async () => {
     setTranslating(true);

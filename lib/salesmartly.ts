@@ -28,8 +28,8 @@ interface RawMessage {
   is_system?: number | string | boolean;
   send_time?: number;
   sender?: string;
-  sender_type?: number;
-  msg_type?: number;
+  sender_type?: number | string;
+  msg_type?: number | string;
   text?: string;
   content?: string | Record<string, unknown>;
   is_withdraw?: number | string | boolean;
@@ -114,10 +114,10 @@ export async function getSaleSmartlyConversation(chatUserId: string) {
   const messages = rawMessages
     // SaleSmartly 的 is_system=-1 表示机器人消息，应当保留；只有 1 才是系统通知。
     // 部分项目会将 0/1 返回为字符串，因此不能直接用 JavaScript 真值判断。
-    .filter((item) => !isEnabledFlag(item.is_withdraw) && !isEnabledFlag(item.is_system))
+    .filter((item) => !isEnabledFlag(item.is_withdraw) && !isEnabledFlag(item.is_system) && Number(item.msg_type) !== 8 && item.text?.trim() !== "[系统消息]")
     .sort((left, right) => (left.send_time ?? left.sequence_id ?? 0) - (right.send_time ?? right.sequence_id ?? 0));
   const conversation = messages.map((item) => {
-    const role = item.sender === chatUserId || item.sender_type === 1 ? "Customer" : "Sales";
+    const role = item.sender === chatUserId || Number(item.sender_type) === 1 ? "Customer" : "Sales";
     const text = extractMessageText(item);
     return `[${formatTimestamp(item.send_time ?? 0)}] ${role}: ${text}`;
   }).join("\n");
@@ -143,7 +143,8 @@ function extractMessageText(item: RawMessage) {
     const contentText = item.content.text;
     if (typeof contentText === "string" && contentText.trim()) return contentText.trim();
   }
-  return messageTypeNames[item.msg_type ?? 0] || `[消息类型 ${item.msg_type ?? 0}]`;
+  const messageType = Number(item.msg_type ?? 0);
+  return messageTypeNames[messageType] || `[消息类型 ${messageType}]`;
 }
 
 function formatTimestamp(value: number) {
