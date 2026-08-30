@@ -231,6 +231,16 @@ function normalizeReport(value: unknown, conversation = ""): CustomerTask["repor
       companyAcceptanceEvidenceMessageId: item.id === "company" ? stringValue(item.companyAcceptanceEvidenceMessageId) : "",
       companyAcceptanceEvidenceQuote: item.id === "company" ? normalizeEvidenceQuote(item.companyAcceptanceEvidenceQuote, conversation) : "",
       companyAdvice: item.id === "company" ? stringValue(item.companyAdvice, fallback.companyAdvice || "") : "",
+      feedbackMentionSource: item.id === "feedback" && (item.feedbackMentionSource === "客户主动询问" || item.feedbackMentionSource === "销售主动提出" || item.feedbackMentionSource === "未提及") ? item.feedbackMentionSource : fallback.feedbackMentionSource,
+      feedbackMentionEvidenceMessageId: item.id === "feedback" ? stringValue(item.feedbackMentionEvidenceMessageId) : "",
+      feedbackMentionEvidenceQuote: item.id === "feedback" ? normalizeEvidenceQuote(item.feedbackMentionEvidenceQuote, conversation) : "",
+      feedbackAnswered: item.id === "feedback" && (item.feedbackAnswered === "已解答" || item.feedbackAnswered === "尚未解答" || item.feedbackAnswered === "未确认") ? item.feedbackAnswered : fallback.feedbackAnswered,
+      feedbackAnswerEvidenceMessageId: item.id === "feedback" ? stringValue(item.feedbackAnswerEvidenceMessageId) : "",
+      feedbackAnswerEvidenceQuote: item.id === "feedback" ? normalizeEvidenceQuote(item.feedbackAnswerEvidenceQuote, conversation) : "",
+      feedbackAccepted: item.id === "feedback" && (item.feedbackAccepted === "客户明确肯定" || item.feedbackAccepted === "客户未明确肯定" || item.feedbackAccepted === "未确认") ? item.feedbackAccepted : fallback.feedbackAccepted,
+      feedbackAcceptanceEvidenceMessageId: item.id === "feedback" ? stringValue(item.feedbackAcceptanceEvidenceMessageId) : "",
+      feedbackAcceptanceEvidenceQuote: item.id === "feedback" ? normalizeEvidenceQuote(item.feedbackAcceptanceEvidenceQuote, conversation) : "",
+      feedbackAdvice: item.id === "feedback" ? stringValue(item.feedbackAdvice, fallback.feedbackAdvice || "") : "",
       confidence: Number.isFinite(confidence) ? Math.min(1, Math.max(0, confidence)) : 0,
     };
   });
@@ -792,6 +802,15 @@ function ConfirmationChecklist({ task, onUpdate }: { task: CustomerTask; onUpdat
                     <div><small>是否已经说明</small><p>{item.companyExplained || "未确认"}</p>{item.companyExplanationEvidenceQuote && <blockquote>“{item.companyExplanationEvidenceQuote}”</blockquote>}</div>
                     <div><small>是否获得客户肯定</small><p>{item.companyAccepted || "未确认"}</p>{item.companyAcceptanceEvidenceQuote && <blockquote>“{item.companyAcceptanceEvidenceQuote}”</blockquote>}</div>
                     <div className="seeding-advice"><small>建议</small><p>{item.companyAdvice || "根据客户最想核验的内容，提供真实、具体且可验证的公司资料。"}</p></div>
+                  </div>
+                </div>}
+                {item.id === "feedback" && item.feedbackMentionSource && <div className={`seeding-analysis feedback-analysis ${item.feedbackMentionSource === "未提及" ? "not-needed" : "needed"}`}>
+                  <header><span>客户反馈判断</span><strong>{item.feedbackMentionSource}</strong></header>
+                  <div className="seeding-detail-grid feedback-detail-grid">
+                    <div><small>由谁提出</small><p>{item.feedbackMentionSource}</p>{item.feedbackMentionEvidenceQuote && <blockquote>“{item.feedbackMentionEvidenceQuote}”</blockquote>}</div>
+                    <div><small>是否已经解答</small><p>{item.feedbackAnswered || "未确认"}</p>{item.feedbackAnswerEvidenceQuote && <blockquote>“{item.feedbackAnswerEvidenceQuote}”</blockquote>}</div>
+                    <div><small>是否获得客户肯定</small><p>{item.feedbackAccepted || "未确认"}</p>{item.feedbackAcceptanceEvidenceQuote && <blockquote>“{item.feedbackAcceptanceEvidenceQuote}”</blockquote>}</div>
+                    <div className="seeding-advice"><small>建议</small><p>{item.feedbackAdvice || "结合客户的国家和信任顾虑，提供真实、相关且已脱敏的客户反馈或物流参考。"}</p></div>
                   </div>
                 </div>}
                 {(item.status === "unknown" || item.status === "risk") && <div className="confirmation-actions">

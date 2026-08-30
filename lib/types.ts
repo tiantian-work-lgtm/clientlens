@@ -99,6 +99,16 @@ export interface ConfirmationItem {
   companyAcceptanceEvidenceMessageId?: string;
   companyAcceptanceEvidenceQuote?: string;
   companyAdvice?: string;
+  feedbackMentionSource?: "客户主动询问" | "销售主动提出" | "未提及";
+  feedbackMentionEvidenceMessageId?: string;
+  feedbackMentionEvidenceQuote?: string;
+  feedbackAnswered?: "已解答" | "尚未解答" | "未确认";
+  feedbackAnswerEvidenceMessageId?: string;
+  feedbackAnswerEvidenceQuote?: string;
+  feedbackAccepted?: "客户明确肯定" | "客户未明确肯定" | "未确认";
+  feedbackAcceptanceEvidenceMessageId?: string;
+  feedbackAcceptanceEvidenceQuote?: string;
+  feedbackAdvice?: string;
   confidence: number;
 }
 
