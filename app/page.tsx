@@ -559,6 +559,8 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
   const [analyzing, setAnalyzing] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState("");
+  const [showProductResearch, setShowProductResearch] = useState(Boolean(activeTask.report.productResearch));
+  const productResearchRef = useRef<HTMLDivElement>(null);
   const isAnalyzing = analyzing || activeTask.status === "analyzing";
   const hasCompletedModule = Object.values(activeTask.analysisModules ?? {}).includes("done");
   const moduleVisible = (module: AnalysisModule) => {
@@ -566,6 +568,13 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
     return state ? state === "done" : activeTask.status !== "analyzing";
   };
   const filtered = tasks.filter((task) => task.name.toLowerCase().includes(taskSearch.toLowerCase()));
+
+  useEffect(() => setShowProductResearch(Boolean(activeTask.report.productResearch)), [activeTask.id, activeTask.report.productResearch]);
+
+  const openProductResearch = () => {
+    setShowProductResearch(true);
+    window.setTimeout(() => productResearchRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+  };
 
   const openRawChat = (messageId = "", quote = "") => {
     setShowRaw(true);
@@ -759,8 +768,12 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
           </>}
 
           {moduleVisible("checklist") && <>
-          <ConfirmationChecklist task={activeTask} onUpdate={onUpdate} onLocate={openRawChat} />
+          <ConfirmationChecklist task={activeTask} onUpdate={onUpdate} onLocate={openRawChat} onOpenProductResearch={openProductResearch} />
           </>}
+
+          {showProductResearch && <div ref={productResearchRef} className="product-research-anchor">
+            <ProductResearchCard task={activeTask} onUpdate={onUpdate} onLocate={openRawChat} />
+          </div>}
 
           {moduleVisible("action") && <>
           <ReportCard icon={Zap} title="本次沟通可改善" tone="amber">
@@ -893,39 +906,54 @@ function ProductResearchCard({ task, onUpdate, onLocate }: { task: CustomerTask;
   const research = task.report.productResearch;
   const defaultProduct = research?.productName || (task.customer.product && task.customer.product !== "待识别" ? task.customer.product : "KLOW");
   const [productName, setProductName] = useState(defaultProduct);
-  const [loading, setLoading] = useState(false);
+  const [stage, setStage] = useState<"searching" | "formatting" | null>(null);
   const [error, setError] = useState("");
+  const [searchSummary, setSearchSummary] = useState("");
 
   useEffect(() => setProductName(defaultProduct), [task.id, defaultProduct]);
 
   const runResearch = async () => {
     if (!productName.trim()) return setError("请先输入产品名称");
-    setLoading(true);
+    setStage("searching");
     setError("");
+    setSearchSummary("");
     try {
-      const response = await fetch("/api/product-research", {
+      const searchResponse = await fetch("/api/product-research", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ productName: productName.trim(), conversation: task.rawConversation }),
+        body: JSON.stringify({ mode: "search", productName: productName.trim(), conversation: task.rawConversation }),
       });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "产品联网研究失败");
-      onUpdate(normalizeTask({ ...task, report: { ...task.report, productResearch: data.research }, updatedAt: "刚刚" }));
+      const searchData = await searchResponse.json();
+      if (!searchResponse.ok) throw new Error(searchData.error || "产品联网搜索失败");
+      const evidence = typeof searchData.searchSummary === "string" ? searchData.searchSummary : "";
+      if (!evidence) throw new Error("联网搜索没有返回可用资料");
+      setSearchSummary(evidence);
+      setStage("formatting");
+      const formatResponse = await fetch("/api/product-research", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "format", productName: productName.trim(), conversation: task.rawConversation, searchSummary: evidence }),
+      });
+      const formatData = await formatResponse.json();
+      if (!formatResponse.ok) throw new Error(formatData.error || "搜索已完成，但资料整理失败");
+      onUpdate(normalizeTask({ ...task, report: { ...task.report, productResearch: formatData.research }, updatedAt: "刚刚" }));
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "产品联网研究失败");
     } finally {
-      setLoading(false);
+      setStage(null);
     }
   };
 
-  return <section className="product-research">
-    <header><div><Globe2 size={16} /><div><strong>产品痛点匹配与联网研究</strong><small>按需运行 · 结果随当前任务保存</small></div></div><span>DeepSeek Web Search</span></header>
+  return <ReportCard icon={Globe2} title="产品匹配与种草建议" tone="violet">
+    <div className="product-research">
+    <div className="product-research-head"><div><strong>针对当前客户生成有资料依据的价值说明</strong><small>按需运行 · 结果随当前任务保存</small></div><span>DeepSeek Web Search</span></div>
     <div className="product-research-form">
       <label><span>目标产品</span><input value={productName} onChange={(event) => setProductName(event.target.value)} placeholder="例如 KLOW" /></label>
-      <button type="button" className="primary-button" onClick={() => void runResearch()} disabled={loading}>{loading ? <RefreshCw className="spin" size={14} /> : <Search size={14} />}{loading ? "正在检索资料…" : research ? "重新联网研究" : "联网研究并生成话术"}</button>
+      <button type="button" className="primary-button" onClick={() => void runResearch()} disabled={Boolean(stage)}>{stage ? <RefreshCw className="spin" size={14} /> : <Search size={14} />}{stage === "searching" ? "正在搜索产品资料…" : stage === "formatting" ? "正在核验并生成建议…" : research ? "重新联网研究" : "联网研究并生成话术"}</button>
     </div>
-    {!research && !loading && <p className="product-research-hint">系统会提取客户的具体痛点，联网核验产品及成分资料，再生成带来源的价值说明；不会生成个体化剂量、周期或治疗方案。</p>}
+    {!research && !stage && <p className="product-research-hint">系统会提取客户的具体痛点，联网核验产品及成分资料，再生成带来源的价值说明；不会生成个体化剂量、周期或治疗方案。</p>}
     {error && <div className="product-research-error"><CircleAlert size={14} />{error}</div>}
+    {error && searchSummary && <details className="research-search-backup"><summary>搜索资料已保留，可展开核对 <ChevronDown size={14} /></summary><pre>{searchSummary}</pre></details>}
     {research && <div className="product-research-result">
       <div className="research-match-head"><div><small>客户关注</small><strong>{research.customerNeed}</strong></div><span className={`match-level level-${research.matchLevel}`}>匹配度 {research.matchLevel}</span></div>
       <button className="research-evidence" type="button" onClick={() => onLocate(research.customerEvidenceMessageId, research.customerEvidenceQuote)}><span>客户原文</span>“{research.customerEvidenceQuote}”</button>
@@ -936,7 +964,8 @@ function ProductResearchCard({ task, onUpdate, onLocate }: { task: CustomerTask;
       <div className="research-reply"><header><Bot size={15} /><strong>针对当前客户的建议回复</strong><button type="button" onClick={() => navigator.clipboard.writeText(research.suggestedReply)}><Copy size={13} />复制原文</button></header><p>{research.suggestedReply}</p><div><small>中文核对</small><p>{research.suggestedReplyTranslation}</p></div></div>
       <small className="research-time">检索于 {new Date(research.searchedAt).toLocaleString("zh-CN")}</small>
     </div>}
-  </section>;
+    </div>
+  </ReportCard>;
 }
 
 const confirmationState: Record<ConfirmationStatus, { label: string; className: string }> = {
@@ -946,7 +975,7 @@ const confirmationState: Record<ConfirmationStatus, { label: string; className: 
   na: { label: "不适用", className: "na" },
 };
 
-function ConfirmationChecklist({ task, onUpdate, onLocate }: { task: CustomerTask; onUpdate: (task: CustomerTask) => void; onLocate: (messageId?: string, quote?: string) => void }) {
+function ConfirmationChecklist({ task, onUpdate, onLocate, onOpenProductResearch }: { task: CustomerTask; onUpdate: (task: CustomerTask) => void; onLocate: (messageId?: string, quote?: string) => void; onOpenProductResearch: () => void }) {
   const [generating, setGenerating] = useState<string | null>(null);
   const [result, setResult] = useState<{ id: string; mode: "hook" | "explain"; text: string; translation: string } | null>(null);
   const categories: ConfirmationItem["category"][] = ["客户角色", "认知与经历", "产品与信任", "交易条件"];
@@ -1020,8 +1049,8 @@ function ConfirmationChecklist({ task, onUpdate, onLocate }: { task: CustomerTas
                     <div><small>是否获得客户肯定</small><p>{item.seedingAccepted || "未确认"}</p>{item.seedingAcceptanceEvidenceQuote && <blockquote>“{item.seedingAcceptanceEvidenceQuote}”</blockquote>}</div>
                     <div className="seeding-advice"><small>建议</small><p>{item.seedingAdvice || "先确认客户希望改善的问题，再做针对性价值说明。"}</p></div>
                   </div>}
+                  <button type="button" className="seeding-research-button" onClick={onOpenProductResearch}><Globe2 size={13} />{task.report.productResearch ? "查看产品匹配建议" : item.seedingNeed === "需要种草" ? "生成针对性种草建议" : "研究其他产品"}</button>
                 </div>}
-                {item.id === "seeding" && <ProductResearchCard task={task} onUpdate={onUpdate} onLocate={onLocate} />}
                 {item.id === "medical" && item.medicalNeed && <div className={`seeding-analysis medical-analysis ${item.medicalNeed === "需要提供建议" ? "needed" : "not-needed"}`}>
                   <header><span>建议结论</span><strong>{item.medicalNeed}</strong></header>
                   {item.medicalNeed === "需要提供建议" && <div className="seeding-detail-grid medical-detail-grid">
