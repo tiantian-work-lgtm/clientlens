@@ -1,27 +1,40 @@
-import type { AnalysisReport, Provider } from "./types";
+import type { AnalysisModule, AnalysisReport, ConfirmationItem, Objection, Provider, SalesStage } from "./types";
 import { getRuntimeProviderConfig, type RuntimeProviderConfig } from "./provider-config";
+import { buildNumberedConversationChunks } from "./conversation";
 
-const analysisSchema = {
+const stages = ["初次询盘与客户背调", "信任建立", "产品与订单匹配", "决策推进", "等待付款", "已成交", "售后与复购"];
+
+const customerSchema = {
   type: "object",
   additionalProperties: false,
-  required: ["summary", "profile", "stage", "parallelStages", "stageReason", "objections", "confirmations", "improvements", "nextActions", "suggestedReply", "suggestedReplyTranslation", "confidence"],
+  required: ["summary", "profile", "stage", "parallelStages", "stageReason", "confidence"],
   properties: {
     summary: { type: "string" },
     profile: { type: "array", items: { type: "string" } },
-    stage: { type: "string", enum: ["初次询盘与客户背调", "信任建立", "产品与订单匹配", "决策推进", "等待付款", "已成交", "售后与复购"] },
-    parallelStages: { type: "array", items: { type: "string", enum: ["初次询盘与客户背调", "信任建立", "产品与订单匹配", "决策推进", "等待付款", "已成交", "售后与复购"] } },
+    stage: { type: "string", enum: stages },
+    parallelStages: { type: "array", items: { type: "string", enum: stages } },
     stageReason: { type: "string" },
+    confidence: { type: "number", minimum: 0, maximum: 1 },
+  },
+};
+
+const riskSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["objections", "confirmations"],
+  properties: {
     objections: {
       type: "array",
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["title", "severity", "status", "evidence", "evidenceQuote", "advice"],
+        required: ["title", "severity", "status", "evidence", "evidenceMessageId", "evidenceQuote", "advice"],
         properties: {
           title: { type: "string" },
           severity: { type: "string", enum: ["高", "中", "低"] },
           status: { type: "string", enum: ["待解决", "处理中", "已解决"] },
           evidence: { type: "string" },
+          evidenceMessageId: { type: "string" },
           evidenceQuote: { type: "string" },
           advice: { type: "string" },
         },
@@ -32,37 +45,55 @@ const analysisSchema = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["id", "category", "label", "status", "evidence", "evidenceQuote", "riskReason", "confidence"],
+        required: ["id", "category", "label", "status", "evidence", "evidenceMessageId", "evidenceQuote", "riskReason", "confidence"],
         properties: {
           id: { type: "string" },
           category: { type: "string", enum: ["客户角色", "认知与经历", "产品与信任", "交易条件"] },
           label: { type: "string" },
           status: { type: "string", enum: ["confirmed", "unknown", "risk", "na"] },
           evidence: { type: "string" },
+          evidenceMessageId: { type: "string" },
           evidenceQuote: { type: "string" },
           riskReason: { type: "string" },
           confidence: { type: "number", minimum: 0, maximum: 1 },
         },
       },
     },
+  },
+};
+
+const actionSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["improvements", "nextActions", "suggestedReply", "suggestedReplyTranslation"],
+  properties: {
     improvements: { type: "array", items: { type: "string" } },
     nextActions: { type: "array", items: { type: "string" } },
     suggestedReply: { type: "string" },
     suggestedReplyTranslation: { type: "string" },
-    confidence: { type: "number", minimum: 0, maximum: 1 },
   },
 };
 
-const systemPrompt = `你是一名严谨的 B2B 销售对话分析师。根据对话生成结构化客户分析。
-要求：
-1. 判断与事实分开，不确定的信息不要当成事实；
-2. objections 中 evidence 用中文说明判断依据，evidenceQuote 必须从对话中逐字摘录最相关的一小段原文（保留原语言和说话方，不超过 200 字）；如果没有直接原文，evidenceQuote 返回空字符串，严禁编造，但仍可保留需要人工核对的异议判断；
-3. 改善建议要具体且可执行；
-4. 销售阶段只能从以下七项选择：初次询盘与客户背调、信任建立、产品与订单匹配、决策推进、等待付款、已成交、售后与复购；主阶段取最接近当前成交里程碑的一项，第1至3阶段可同时放入 parallelStages；
-5. confirmations 必须覆盖：客户角色与经验、是否需要产品种草、是否需要基础知识科普、剂量/使用/医疗问题、是否有被骗经历、COA与产品一致性、产品包装、公司资料、其他客户反馈、物流清关和时效、支付方式与付款安全；
-6. confirmations 中只有对话出现明确顾虑、冲突、负面信号或成交阻碍时才能标记 risk；仅仅没有谈到必须标记 unknown。risk 项必须在 riskReason 说明风险原因，在 evidence 用中文概括判断依据，并在 evidenceQuote 原样摘录最相关的一小段原始聊天（保留原语言和说话方，不超过 200 字）；找不到直接原文时 evidenceQuote 返回空字符串，严禁编造；非 risk 项的 riskReason 返回空字符串；
-7. suggestedReply 沿用客户语言，suggestedReplyTranslation 必须给出对应的自然简体中文翻译，其他分析字段使用中文；
-8. 医疗相关内容只识别是否出现以及是否需要合规转介，不生成个体化剂量或医疗建议；不虚构公开背调信息。`;
+const commonPrompt = `你是一名严谨的 B2B 销售对话分析师。判断与事实必须分开，不确定的信息不能当成事实。输入中的每条消息都有稳定编号 M00001 等。不得虚构消息、客户背景、公司资料或公开背调信息。医疗相关内容只识别是否出现以及是否需要合规转介，不生成个体化剂量或医疗建议。所有分析字段使用中文。`;
+
+const modulePrompts: Record<AnalysisModule, string> = {
+  customer: `${commonPrompt}\n只分析：对话总结、客户画像、销售阶段和总体置信度。销售阶段只能从七阶段中选择；主阶段取最接近当前成交里程碑的一项，第1至3阶段可以同时放入 parallelStages。`,
+  risk: `${commonPrompt}\n只分析异议、犹豫点、风险和确认清单。每个 objections 项必须有明确具体的 title，不得返回“待确认异议1”之类占位标题；evidence 用中文概括；evidenceMessageId 必须填写最相关且真实存在的 M 编号；evidenceQuote 必须逐字摘录该编号消息的原文。confirmations 必须覆盖且只覆盖以下 11 项，并严格使用括号内 id：客户角色与经验(role)、是否需要产品种草(seeding)、是否需要基础知识科普(education)、剂量/使用/医疗问题(medical)、是否有被骗经历(scammed)、COA与产品一致性(coa)、产品包装(packaging)、公司资料(company)、其他客户反馈(feedback)、物流清关和时效(logistics)、支付方式与付款安全(payment_method)。只有明确顾虑、冲突、负面信号或成交阻碍才能标记 risk，仅仅没谈到必须标记 unknown；无直接依据时 evidenceMessageId 和 evidenceQuote 都返回空字符串。`,
+  action: `${commonPrompt}\n只分析本次沟通可改善之处、下一步行动和建议回复。建议必须具体可执行；suggestedReply 沿用客户语言，suggestedReplyTranslation 返回自然简体中文翻译。`,
+};
+
+export interface CustomerModuleResult {
+  summary: string;
+  profile: string[];
+  stage: SalesStage;
+  parallelStages: SalesStage[];
+  stageReason: string;
+  confidence: number;
+}
+
+export interface RiskModuleResult { objections: Objection[]; confirmations: ConfirmationItem[] }
+export interface ActionModuleResult { improvements: string[]; nextActions: string[]; suggestedReply: string; suggestedReplyTranslation: string }
+export type AnalysisModuleResult = CustomerModuleResult | RiskModuleResult | ActionModuleResult;
 
 function extractOpenAIText(payload: unknown): string {
   const data = payload as { output_text?: string; output?: Array<{ content?: Array<{ type?: string; text?: string }> }> };
@@ -120,33 +151,72 @@ async function requestDeepSeekJson<T>(
   throw new Error(`DeepSeek 连续两次返回空内容（finish_reason: ${lastFinishReason}）。请切换 deepseek-v4-pro 或暂时改用 OpenAI。`);
 }
 
-export async function analyzeWithProvider(provider: Provider, conversation: string): Promise<AnalysisReport | null> {
+async function requestOpenAIJson<T>(config: RuntimeProviderConfig, schema: Record<string, unknown>, schemaName: string, instructions: string, input: string): Promise<T> {
+  const response = await fetch(`${config.baseUrl || "https://api.openai.com"}/v1/responses`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${config.apiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ model: config.model, instructions, input, store: false, text: { format: { type: "json_schema", name: schemaName, strict: true, schema } } }),
+    signal: AbortSignal.timeout(90_000),
+  });
+  if (!response.ok) throw new Error(`OpenAI request failed: ${response.status}`);
+  return parseJsonContent<T>(extractOpenAIText(await response.json()));
+}
+
+function moduleSchema(module: AnalysisModule) {
+  return module === "customer" ? customerSchema : module === "risk" ? riskSchema : actionSchema;
+}
+
+function validateModuleResult(module: AnalysisModule, value: AnalysisModuleResult) {
+  if (!value || typeof value !== "object") throw new Error(`${module} 模块返回空结果`);
+  if (module === "risk") {
+    const result = value as RiskModuleResult;
+    if (!Array.isArray(result.objections) || !Array.isArray(result.confirmations)) throw new Error("风险模块字段不完整");
+    if (result.objections.some((item) => !item.title?.trim() || /^待确认异议\s*\d*$/i.test(item.title.trim()))) throw new Error("风险模块返回了无效异议标题");
+    if (result.objections.some((item) => item.evidenceMessageId && !/^M\d{5,}$/.test(item.evidenceMessageId))) throw new Error("风险模块返回了无效消息编号");
+  }
+  return value;
+}
+
+async function requestModuleOnce(config: RuntimeProviderConfig, provider: Provider, module: AnalysisModule, input: string, merge = false): Promise<AnalysisModuleResult> {
+  const instruction = `${modulePrompts[module]}${merge ? "\n下面是分段分析结果，请去重并合并为一个最终结果。消息编号与原文必须原样保留。" : ""}`;
+  if (provider === "openai") {
+    return requestOpenAIJson<AnalysisModuleResult>(config, moduleSchema(module), `customer_${module}_analysis`, instruction, input);
+  }
+  const tokens = module === "risk" ? 5000 : module === "customer" ? 2400 : 2800;
+  return requestDeepSeekJson<AnalysisModuleResult>(config, [{ role: "system", content: `${instruction}\n只输出符合字段要求的合法 JSON。` }, { role: "user", content: input }], tokens);
+}
+
+export async function analyzeModuleWithProvider(provider: Provider, conversation: string, module: AnalysisModule): Promise<AnalysisModuleResult | null> {
   const config = await getRuntimeProviderConfig(provider);
   if (!config) return null;
-  if (provider === "openai") {
-    const response = await fetch(`${config.baseUrl || "https://api.openai.com"}/v1/responses`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${config.apiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: config.model,
-        instructions: systemPrompt,
-        input: conversation,
-        store: false,
-        text: { format: { type: "json_schema", name: "customer_analysis", strict: true, schema: analysisSchema } },
-      }),
-    });
-    if (!response.ok) throw new Error(`OpenAI request failed: ${response.status}`);
-    const text = extractOpenAIText(await response.json());
-    return JSON.parse(text) as AnalysisReport;
+  const chunks = buildNumberedConversationChunks(conversation);
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const chunkResults: AnalysisModuleResult[] = [];
+      for (const chunk of chunks) chunkResults.push(validateModuleResult(module, await requestModuleOnce(config, provider, module, chunk)));
+      const result = chunkResults.length === 1
+        ? chunkResults[0]
+        : await requestModuleOnce(config, provider, module, JSON.stringify(chunkResults), true);
+      return validateModuleResult(module, result);
+    } catch (error) {
+      lastError = error;
+    }
   }
+  throw lastError instanceof Error ? lastError : new Error(`${module} 模块分析失败`);
+}
 
-  return requestDeepSeekJson<AnalysisReport>(config, [
-    {
-      role: "system",
-      content: `${systemPrompt}\n只输出合法 JSON，并严格使用指定字段。字段：summary, profile, stage, parallelStages, stageReason, objections, confirmations, improvements, nextActions, suggestedReply, suggestedReplyTranslation, confidence。JSON 示例：{"summary":"...","profile":[],"stage":"初次询盘与客户背调","parallelStages":[],"stageReason":"...","objections":[],"confirmations":[],"improvements":[],"nextActions":[],"suggestedReply":"...","suggestedReplyTranslation":"...","confidence":0.8}`,
-    },
-    { role: "user", content: conversation },
-  ], 6000);
+export async function analyzeWithProvider(provider: Provider, conversation: string): Promise<AnalysisReport | null> {
+  const results = await Promise.all([
+    analyzeModuleWithProvider(provider, conversation, "customer"),
+    analyzeModuleWithProvider(provider, conversation, "risk"),
+    analyzeModuleWithProvider(provider, conversation, "action"),
+  ]);
+  if (results.some((result) => !result)) return null;
+  const customer = results[0] as CustomerModuleResult;
+  const risk = results[1] as RiskModuleResult;
+  const action = results[2] as ActionModuleResult;
+  return { ...customer, ...risk, ...action };
 }
 
 export interface BilingualSuggestion {
@@ -168,7 +238,7 @@ export async function generateChecklistSuggestion(provider: Provider, conversati
   const instruction = mode === "hook"
     ? `根据当前对话，生成一句自然、不审问客户的探询钩子，用于确认“${item}”。`
     : `根据当前对话，生成一段简短、可信、可直接发送的说明，用于阐述“${item}”。不得虚构公司、产品或客户反馈。`;
-  const prompt = `${systemPrompt}\n${instruction}\n沿用客户使用的语言生成 text，并为其提供自然简体中文翻译 translation。只输出包含 text 和 translation 的合法 JSON。\n\n对话：\n${conversation}`;
+  const prompt = `${commonPrompt}\n${instruction}\n沿用客户使用的语言生成 text，并为其提供自然简体中文翻译 translation。只输出包含 text 和 translation 的合法 JSON。\n\n对话：\n${conversation}`;
   const config = await getRuntimeProviderConfig(provider);
   if (!config) return null;
   if (provider === "openai") {

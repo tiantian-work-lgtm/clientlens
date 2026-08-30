@@ -11,6 +11,8 @@ export type SalesStage =
   | "已成交"
   | "售后与复购";
 export type ConfirmationStatus = "confirmed" | "unknown" | "risk" | "na";
+export type AnalysisModule = "customer" | "risk" | "action";
+export type AnalysisModuleStatus = "pending" | "analyzing" | "done" | "failed";
 
 export interface Evidence {
   quote: string;
@@ -22,6 +24,7 @@ export interface Objection {
   severity: "高" | "中" | "低";
   status: "待解决" | "处理中" | "已解决";
   evidence: string;
+  evidenceMessageId?: string;
   evidenceQuote?: string;
   evidenceVerified?: boolean;
   advice: string;
@@ -33,6 +36,7 @@ export interface ConfirmationItem {
   label: string;
   status: ConfirmationStatus;
   evidence: string;
+  evidenceMessageId?: string;
   evidenceQuote?: string;
   riskReason?: string;
   confidence: number;
@@ -67,6 +71,8 @@ export interface CustomerTask {
   status: TaskStatus;
   analysisStep?: "importing" | "analyzing";
   analysisError?: string;
+  analysisModules?: Record<AnalysisModule, AnalysisModuleStatus>;
+  analysisModuleErrors?: Partial<Record<AnalysisModule, string>>;
   updatedAt: string;
   customer: {
     name: string;

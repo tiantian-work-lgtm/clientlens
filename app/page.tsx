@@ -39,7 +39,8 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { defaultConfirmations, defaultProgress, emptyReport, initialTasks } from "@/lib/demo-data";
-import type { ConfirmationItem, ConfirmationStatus, CustomerTask, ProgressItem, SalesStage, SourceType } from "@/lib/types";
+import { parseConversationMessages } from "@/lib/conversation";
+import type { AnalysisModule, AnalysisModuleStatus, ConfirmationItem, ConfirmationStatus, CustomerTask, ProgressItem, Provider, SalesStage, SourceType } from "@/lib/types";
 import SettingsManager from "@/app/components/settings-manager";
 
 type View = "analysis" | "scripts" | "products" | "translate" | "settings";
@@ -93,19 +94,24 @@ function normalizeReport(value: unknown, conversation = ""): CustomerTask["repor
     .map((stage) => normalizeStage(stage))
     .filter((stage, index, items) => items.indexOf(stage) === index);
   const rawObjections = Array.isArray(report.objections) ? report.objections : [];
+  const parsedMessages = parseConversationMessages(conversation);
+  const messageById = new Map(parsedMessages.map((message) => [message.id, message]));
   const objections = rawObjections.flatMap((value, index) => {
     if (!value || typeof value !== "object" || Array.isArray(value)) return [];
     const item = value as Record<string, unknown>;
-    const evidenceQuote = normalizeEvidenceQuote(item.evidenceQuote, conversation) || normalizeEvidenceQuote(item.evidence, conversation);
+    const requestedMessageId = stringValue(item.evidenceMessageId);
+    const evidenceMessage = messageById.get(requestedMessageId);
+    const evidenceQuote = evidenceMessage?.content || normalizeEvidenceQuote(item.evidenceQuote, conversation) || normalizeEvidenceQuote(item.evidence, conversation);
     const severity: "高" | "中" | "低" = item.severity === "高" || item.severity === "中" || item.severity === "低" ? item.severity : "中";
     const status: "待解决" | "处理中" | "已解决" = item.status === "待解决" || item.status === "处理中" || item.status === "已解决" ? item.status : "待解决";
     return [{
-      title: stringValue(item.title, `待确认异议 ${index + 1}`),
+      title: stringValue(item.title, `需要人工核对的潜在异议 ${index + 1}`),
       severity,
       status,
       evidence: stringValue(item.evidence, "AI 识别到潜在犹豫点，具体依据需要人工核对。"),
       evidenceQuote,
-      evidenceVerified: Boolean(evidenceQuote),
+      evidenceMessageId: evidenceMessage?.id || "",
+      evidenceVerified: Boolean(evidenceMessage || evidenceQuote),
       advice: stringValue(item.advice, "需要结合原始对话进一步确认。"),
     }];
   });
@@ -116,14 +122,17 @@ function normalizeReport(value: unknown, conversation = ""): CustomerTask["repor
     const item = raw as Record<string, unknown>;
     const requestedStatus = item.status === "confirmed" || item.status === "unknown" || item.status === "risk" || item.status === "na" ? item.status : fallback.status;
     const confidence = Number(item.confidence);
-    const evidenceQuote = normalizeEvidenceQuote(item.evidenceQuote, conversation);
-    const status = requestedStatus === "risk" && !evidenceQuote ? "unknown" : requestedStatus;
+    const requestedMessageId = stringValue(item.evidenceMessageId);
+    const evidenceMessage = messageById.get(requestedMessageId);
+    const evidenceQuote = evidenceMessage?.content || normalizeEvidenceQuote(item.evidenceQuote, conversation);
+    const status = requestedStatus === "risk" && !evidenceMessage && !evidenceQuote ? "unknown" : requestedStatus;
     const evidence = requestedStatus === "risk" && !evidenceQuote ? fallback.evidence : stringValue(item.evidence, fallback.evidence);
     return {
       ...fallback,
       status,
       evidence,
       evidenceQuote,
+      evidenceMessageId: evidenceMessage?.id || "",
       riskReason: status === "risk" ? stringValue(item.riskReason, evidence) : "",
       confidence: Number.isFinite(confidence) ? Math.min(1, Math.max(0, confidence)) : 0,
     };
@@ -143,6 +152,56 @@ function normalizeReport(value: unknown, conversation = ""): CustomerTask["repor
     suggestedReplyTranslation: stringValue(report.suggestedReplyTranslation),
     confidence: Number.isFinite(confidence) ? Math.min(1, Math.max(0, confidence)) : 0,
   };
+}
+
+const analysisModules: AnalysisModule[] = ["customer", "risk", "action"];
+const analysisModuleLabels: Record<AnalysisModule, string> = { customer: "客户与阶段", risk: "异议与风险", action: "行动与回复" };
+
+function mergeAnalysisModule(report: CustomerTask["report"], module: AnalysisModule, result: unknown, conversation: string) {
+  const value = result && typeof result === "object" ? result as Record<string, unknown> : {};
+  if (module === "customer") return normalizeReport({ ...report, summary: value.summary, profile: value.profile, stage: value.stage, parallelStages: value.parallelStages, stageReason: value.stageReason, confidence: value.confidence }, conversation);
+  if (module === "risk") return normalizeReport({ ...report, objections: value.objections, confirmations: value.confirmations }, conversation);
+  return normalizeReport({ ...report, improvements: value.improvements, nextActions: value.nextActions, suggestedReply: value.suggestedReply, suggestedReplyTranslation: value.suggestedReplyTranslation }, conversation);
+}
+
+async function analyzeConcurrently(task: CustomerTask, conversation: string, onUpdate: (task: CustomerTask) => void) {
+  let report = task.report;
+  let provider: Provider = task.provider;
+  let completed = 0;
+  let succeeded = 0;
+  let states = Object.fromEntries(analysisModules.map((module) => [module, "analyzing"])) as Record<AnalysisModule, AnalysisModuleStatus>;
+  let errors: Partial<Record<AnalysisModule, string>> = {};
+  let latest = { ...task, rawConversation: conversation, status: "analyzing" as const, analysisStep: "analyzing" as const, analysisModules: states, analysisModuleErrors: errors, analysisError: undefined };
+  onUpdate(latest);
+  await Promise.all(analysisModules.map(async (module) => {
+    try {
+      const response = await fetch("/api/analyze", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ conversation, module }) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || `${analysisModuleLabels[module]}分析失败`);
+      provider = data.provider === "deepseek" ? "deepseek" : "openai";
+      report = mergeAnalysisModule(report, module, data.result, conversation);
+      states = { ...states, [module]: "done" };
+      succeeded += 1;
+    } catch (error) {
+      states = { ...states, [module]: "failed" };
+      errors = { ...errors, [module]: error instanceof Error ? error.message : `${analysisModuleLabels[module]}分析失败` };
+    }
+    completed += 1;
+    latest = normalizeTask({
+      ...latest,
+      report,
+      provider,
+      model: provider === "openai" ? "GPT" : "DeepSeek",
+      analysisModules: states,
+      analysisModuleErrors: errors,
+      status: completed < analysisModules.length ? "analyzing" : succeeded ? "ready" : "failed",
+      analysisStep: completed < analysisModules.length ? "analyzing" : undefined,
+      analysisError: completed === analysisModules.length && !succeeded ? Object.values(errors).join("；") : undefined,
+      updatedAt: "刚刚",
+    });
+    onUpdate(latest);
+  }));
+  return latest;
 }
 
 function normalizeTask(task: CustomerTask): CustomerTask {
@@ -266,16 +325,18 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
   const [renaming, setRenaming] = useState<string | null>(null);
   const [draftName, setDraftName] = useState("");
   const [showRaw, setShowRaw] = useState(false);
-  const [rawTarget, setRawTarget] = useState<{ quote: string; nonce: number } | null>(null);
+  const [rawTarget, setRawTarget] = useState<{ messageId?: string; quote: string; nonce: number } | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState("");
   const isAnalyzing = analyzing || activeTask.status === "analyzing";
+  const hasCompletedModule = Object.values(activeTask.analysisModules ?? {}).includes("done");
+  const moduleVisible = (module: AnalysisModule) => activeTask.status !== "analyzing" || activeTask.analysisModules?.[module] === "done";
   const filtered = tasks.filter((task) => task.name.toLowerCase().includes(taskSearch.toLowerCase()));
 
-  const openRawChat = (quote = "") => {
+  const openRawChat = (messageId = "", quote = "") => {
     setShowRaw(true);
-    setRawTarget({ quote, nonce: Date.now() });
+    setRawTarget({ messageId, quote, nonce: Date.now() });
   };
 
   const rename = (task: CustomerTask) => {
@@ -286,17 +347,8 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
 
   const reanalyze = async () => {
     setAnalyzing(true);
-    onUpdate({ ...activeTask, status: "analyzing", analysisStep: "analyzing", analysisError: undefined });
     try {
-      const response = await fetch("/api/analyze", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ conversation: activeTask.rawConversation }),
-      });
-      const data = await response.json();
-      const provider = data.provider === "deepseek" ? "deepseek" : "openai";
-      if (!response.ok) throw new Error(data.error || "AI 分析失败");
-      onUpdate({ ...activeTask, provider, model: provider === "openai" ? "GPT" : "DeepSeek", report: data.report ? normalizeTask({ ...activeTask, report: data.report }).report : activeTask.report, status: "ready", analysisStep: undefined, analysisError: undefined, updatedAt: "刚刚" });
+      await analyzeConcurrently(activeTask, activeTask.rawConversation, onUpdate);
     } catch (error) {
       onUpdate({ ...activeTask, status: "failed", analysisStep: undefined, analysisError: error instanceof Error ? error.message : "AI 分析失败" });
     } finally {
@@ -380,12 +432,15 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
           <div className="stale-banner"><CircleAlert size={17} /><div><strong>发现新的聊天消息</strong><span>当前报告基于旧记录，建议同步并重新分析。</span></div><button onClick={reanalyze}>立即更新</button></div>
         )}
         {syncError && <div className="sync-error-banner"><CircleAlert size={16} /><span>{syncError}</span><button onClick={() => setSyncError("")}><X size={14} /></button></div>}
+        {!!Object.keys(activeTask.analysisModuleErrors ?? {}).length && activeTask.status !== "analyzing" && <div className="partial-error-banner"><CircleAlert size={16} /><span>部分分析未完成：{Object.entries(activeTask.analysisModuleErrors ?? {}).map(([module, error]) => `${analysisModuleLabels[module as AnalysisModule]}（${error}）`).join("；")}</span><button onClick={reanalyze}>重试</button></div>}
 
-        {activeTask.status === "analyzing" ? (
+        {activeTask.status === "analyzing" && !hasCompletedModule ? (
           <AnalysisLoading task={activeTask} />
         ) : activeTask.status === "failed" ? (
           <AnalysisFailed task={activeTask} onRetry={reanalyze} />
         ) : <div className="report-content">
+          {activeTask.status === "analyzing" && <AnalysisModuleProgress task={activeTask} compact />}
+          {moduleVisible("customer") && <>
           <div className="report-intro">
             <div className="ai-orb"><Sparkles size={22} /></div>
             <div><span>AI ANALYSIS</span><h2>{activeTask.customer.name} 的对话洞察</h2><p>基于 {activeTask.rawConversation.split("\n").length} 条对话 · {activeTask.model} · 置信度 {Math.round(activeTask.report.confidence * 100)}%</p></div>
@@ -410,12 +465,14 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
               <p className="muted-copy">{activeTask.report.stageReason}</p>
             </ReportCard>
           </div>
+          </>}
 
+          {moduleVisible("risk") && <>
           <ReportCard icon={CircleAlert} title={`主要异议与犹豫点 · ${activeTask.report.objections.length}`} tone="orange">
             <div className="objection-list">
               {activeTask.report.objections.map((item, index) => (
                 <details key={item.title} open={index === 0}>
-                  <summary onClick={() => openRawChat(item.evidenceQuote || item.evidence)} title="点击定位到原始聊天"><span className={`severity ${item.severity}`}>{item.severity}</span><strong>{item.title}</strong><span className="objection-state">{item.status}</span><ChevronDown size={16} /></summary>
+                  <summary onClick={() => openRawChat(item.evidenceMessageId, item.evidenceQuote || item.evidence)} title="点击定位到原始聊天"><span className={`severity ${item.severity}`}>{item.severity}</span><strong>{item.title}</strong><span className="objection-state">{item.status}</span><ChevronDown size={16} /></summary>
                   <div className="evidence">
                     <p className="objection-basis"><span>判断依据</span>{item.evidence}</p>
                     {item.evidenceVerified && item.evidenceQuote
@@ -429,7 +486,9 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
           </ReportCard>
 
           <ConfirmationChecklist task={activeTask} onUpdate={onUpdate} />
+          </>}
 
+          {moduleVisible("action") && <>
           <ReportCard icon={Zap} title="本次沟通可改善" tone="amber">
             <div className="number-list">{activeTask.report.improvements.map((item, i) => <div key={item}><span>{i + 1}</span><p>{item}</p></div>)}</div>
           </ReportCard>
@@ -438,6 +497,7 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
             <div className="action-list">{activeTask.report.nextActions.map((item, i) => <div key={item}><span>{i + 1}</span><p>{item}</p></div>)}</div>
             <div className="reply-box"><div><Bot size={16} /><strong>建议回复</strong><button onClick={() => navigator.clipboard.writeText(activeTask.report.suggestedReply)}><Copy size={14} />复制原文</button></div><p>{activeTask.report.suggestedReply}</p><div className="reply-translation"><span>中文核对</span><p>{activeTask.report.suggestedReplyTranslation}</p></div></div>
           </ReportCard>
+          </>}
         </div>}
       </section>
 
@@ -456,13 +516,22 @@ function AnalysisLoading({ task }: { task: CustomerTask }) {
       <span className="eyebrow">AI ANALYSIS</span>
       <h2>{importing ? "正在同步客户聊天记录" : "正在生成客户分析报告"}</h2>
       <p>{importing ? "正在从 SaleSmartly 获取并整理该客户的历史消息…" : "AI 正在识别客户画像、销售阶段、异议和下一步建议…"}</p>
-      <div className="analysis-steps">
-        <span className={importing ? "active" : "done"}><Check size={13} />读取聊天记录</span>
-        <span className={!importing ? "active" : ""}><Sparkles size={13} />AI 结构化分析</span>
-        <span><FileText size={13} />生成分析报告</span>
-      </div>
+      {importing ? <div className="analysis-steps"><span className="active"><Cloud size={13} />读取聊天记录</span></div> : <AnalysisModuleProgress task={task} />}
     </div>
   );
+}
+
+function AnalysisModuleProgress({ task, compact = false }: { task: CustomerTask; compact?: boolean }) {
+  const states = task.analysisModules ?? { customer: "analyzing", risk: "analyzing", action: "analyzing" };
+  return <div className={`analysis-steps ${compact ? "compact" : ""}`}>
+    {analysisModules.map((module) => {
+      const state = states[module];
+      return <span className={state === "analyzing" ? "active" : state} key={module}>
+        {state === "done" ? <Check size={13} /> : state === "failed" ? <CircleAlert size={13} /> : <Sparkles size={13} />}
+        {analysisModuleLabels[module]}
+      </span>;
+    })}
+  </div>;
 }
 
 function AnalysisFailed({ task, onRetry }: { task: CustomerTask; onRetry: () => void }) {
@@ -639,38 +708,25 @@ function PanelSection({ title, action, children }: React.PropsWithChildren<{ tit
   return <section className="panel-section"><header><h4>{title}</h4>{action}</header>{children}</section>;
 }
 
-function parseConversation(conversation: string) {
-  type ParsedMessage = { time: string; role: "customer" | "sales" | "unknown"; label: string; content: string };
-  const messages: ParsedMessage[] = [];
-  for (const rawLine of conversation.split("\n")) {
-    const line = rawLine.trim();
-    if (!line) continue;
-    const match = line.match(/^(?:\[([^\]]+)\]\s*)?(Customer|Sales|客户|销售)\s*:\s*(.*)$/i);
-    if (match) {
-      if (match[3].trim() === "[系统消息]") continue;
-      const customer = /^(customer|客户)$/i.test(match[2]);
-      messages.push({ time: match[1] || "", role: customer ? "customer" : "sales", label: customer ? "客户" : "销售", content: match[3].trim() });
-      continue;
-    }
-    const previous = messages.at(-1);
-    if (previous) previous.content = `${previous.content}\n${line}`.trim();
-    else messages.push({ time: "", role: "unknown", label: "消息", content: line });
-  }
-  return messages;
-}
-
-function RawChatPanel({ task, onClose, onUpdate, target }: { task: CustomerTask; onClose: () => void; onUpdate: (task: CustomerTask) => void; target: { quote: string; nonce: number } | null }) {
+function RawChatPanel({ task, onClose, onUpdate, target }: { task: CustomerTask; onClose: () => void; onUpdate: (task: CustomerTask) => void; target: { messageId?: string; quote: string; nonce: number } | null }) {
   const [translating, setTranslating] = useState(false);
   const [translationError, setTranslationError] = useState("");
   const [highlightedIndex, setHighlightedIndex] = useState<number | null>(null);
   const messageRefs = useRef<Array<HTMLDivElement | null>>([]);
-  const messages = useMemo(() => parseConversation(task.rawConversation), [task.rawConversation]);
+  const messages = useMemo(() => parseConversationMessages(task.rawConversation), [task.rawConversation]);
   const savedTranslation = task.rawTranslation?.source === task.rawConversation && task.rawTranslation.lines.length === messages.length
     ? task.rawTranslation.lines
     : undefined;
 
   useEffect(() => {
-    if (!target?.quote) return;
+    if (!target?.messageId && !target?.quote) return;
+    const messageIdIndex = target.messageId ? messages.findIndex((message) => message.id === target.messageId) : -1;
+    if (messageIdIndex >= 0) {
+      setHighlightedIndex(messageIdIndex);
+      messageRefs.current[messageIdIndex]?.scrollIntoView({ behavior: "smooth", block: "center" });
+      const timer = window.setTimeout(() => setHighlightedIndex(null), 1800);
+      return () => window.clearTimeout(timer);
+    }
     const cleanQuote = target.quote.replace(/^[\s"'“”‘’]+|[\s"'“”‘’]+$/g, "").replace(/^(?:\[[^\]]+\]\s*)?(?:Customer|Sales|客户|销售)\s*:\s*/i, "").trim();
     const normalize = (text: string) => text.normalize("NFKC").replace(/[‘’]/g, "'").replace(/[–—]/g, "-").replace(/\s+/g, " ").trim().toLocaleLowerCase();
     const needle = normalize(cleanQuote);
@@ -710,7 +766,7 @@ function RawChatPanel({ task, onClose, onUpdate, target }: { task: CustomerTask;
     {translationError && <div className="raw-translation-error"><CircleAlert size={14} />{translationError}</div>}
     <div className="raw-chat-scroll">
       {messages.map((message, index) => <div ref={(element) => { messageRefs.current[index] = element; }} className={`raw-message ${message.role} ${highlightedIndex === index ? "flash-highlight" : ""}`} key={`${index}-${message.content.slice(0, 20)}`}>
-        <div className="raw-message-meta"><strong>{message.label}</strong>{message.time && <span>{message.time}</span>}</div>
+        <div className="raw-message-meta"><strong>{message.label}</strong><span>{message.id}</span>{message.time && <span>{message.time}</span>}</div>
         <div className="raw-message-bubble"><p>{message.content}</p>{savedTranslation?.[index] && <div className="raw-message-translation"><span>中文</span><p>{savedTranslation[index]}</p></div>}</div>
       </div>)}
     </div>
@@ -826,21 +882,12 @@ function NewTaskModal({ onClose, onCreate, onUpdate }: { onClose: () => void; on
         onUpdate(workingTask);
       }
       if (!importedConversation.trim()) importedConversation = "Customer: Please send me more information about your product and pricing.";
-      const analysisResponse = await fetch("/api/analyze", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ conversation: importedConversation }) });
-      const analysis = await analysisResponse.json();
-      if (!analysisResponse.ok) throw new Error(analysis.error || "AI 分析失败");
-      const provider = analysis.provider === "deepseek" ? "deepseek" : "openai";
-      onUpdate(normalizeTask({
+      workingTask = normalizeTask({
         ...workingTask,
         name: source === "salesmartly" ? `${name} · ${importedMessageCount} 条消息` : `${name} · 新分析`,
-        status: "ready",
-        analysisStep: undefined,
-        analysisError: undefined,
         rawConversation: importedConversation,
-        report: analysis.report || emptyReport,
-        provider,
-        model: provider === "openai" ? "GPT" : "DeepSeek",
-      }));
+      });
+      await analyzeConcurrently(workingTask, importedConversation, onUpdate);
     } catch (error) {
       onUpdate({ ...workingTask, status: "failed", analysisStep: undefined, analysisError: error instanceof Error ? error.message : "创建分析任务失败" });
     } finally { setCreating(false); }
