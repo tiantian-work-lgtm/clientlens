@@ -11,7 +11,6 @@ import {
   ChevronRight,
   CircleAlert,
   CircleDashed,
-  Clock3,
   Cloud,
   Copy,
   Database,
@@ -23,7 +22,6 @@ import {
   Link2,
   ListChecks,
   LockKeyhole,
-  Pencil,
   Plus,
   RefreshCw,
   Search,
@@ -40,7 +38,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import { defaultConfirmations, defaultProgress, emptyReport, initialTasks } from "@/lib/demo-data";
 import { parseConversationMessages } from "@/lib/conversation";
-import type { AnalysisModule, AnalysisModuleStatus, ConfirmationItem, ConfirmationStatus, CustomerTask, ProgressItem, Provider, SalesStage, SourceType } from "@/lib/types";
+import type { AnalysisModule, AnalysisModuleStatus, ConfirmationItem, ConfirmationStatus, CustomerTask, Provider, SalesStage, SourceType } from "@/lib/types";
 import SettingsManager from "@/app/components/settings-manager";
 
 type View = "analysis" | "scripts" | "products" | "translate" | "settings";
@@ -80,11 +78,22 @@ function stringList(value: unknown, fallback: string[] = []) {
   return [...fallback];
 }
 
+function confidenceLabel(score: number) {
+  if (score >= 0.8) return "高可信";
+  if (score >= 0.6) return "中等可信";
+  if (score > 0) return "低可信";
+  return "待分析";
+}
+
 function normalizeEvidenceQuote(value: unknown, conversation: string) {
   const candidate = stringValue(value).replace(/^[\s"'“”‘’]+|[\s"'“”‘’]+$/g, "").trim();
   if (candidate.length < 4) return "";
   const normalize = (text: string) => text.normalize("NFKC").replace(/[‘’]/g, "'").replace(/[–—]/g, "-").replace(/\s+/g, " ").trim().toLocaleLowerCase();
   return normalize(conversation).includes(normalize(candidate)) ? candidate : "";
+}
+
+function isPlaceholderObjectionTitle(value: string) {
+  return /^(?:待确认|待核对|需要人工核对(?:的潜在)?)?\s*异议\s*\d*$/i.test(value.trim());
 }
 
 function normalizeReport(value: unknown, conversation = ""): CustomerTask["report"] {
@@ -96,16 +105,18 @@ function normalizeReport(value: unknown, conversation = ""): CustomerTask["repor
   const rawObjections = Array.isArray(report.objections) ? report.objections : [];
   const parsedMessages = parseConversationMessages(conversation);
   const messageById = new Map(parsedMessages.map((message) => [message.id, message]));
-  const objections = rawObjections.flatMap((value, index) => {
+  const objections = rawObjections.flatMap((value) => {
     if (!value || typeof value !== "object" || Array.isArray(value)) return [];
     const item = value as Record<string, unknown>;
     const requestedMessageId = stringValue(item.evidenceMessageId);
     const evidenceMessage = messageById.get(requestedMessageId);
+    const title = stringValue(item.title);
+    if (!title || isPlaceholderObjectionTitle(title)) return [];
     const evidenceQuote = evidenceMessage?.content || normalizeEvidenceQuote(item.evidenceQuote, conversation) || normalizeEvidenceQuote(item.evidence, conversation);
     const severity: "高" | "中" | "低" = item.severity === "高" || item.severity === "中" || item.severity === "低" ? item.severity : "中";
     const status: "待解决" | "处理中" | "已解决" = item.status === "待解决" || item.status === "处理中" || item.status === "已解决" ? item.status : "待解决";
     return [{
-      title: stringValue(item.title, `需要人工核对的潜在异议 ${index + 1}`),
+      title,
       severity,
       status,
       evidence: stringValue(item.evidence, "AI 识别到潜在犹豫点，具体依据需要人工核对。"),
@@ -164,16 +175,24 @@ function mergeAnalysisModule(report: CustomerTask["report"], module: AnalysisMod
   return normalizeReport({ ...report, improvements: value.improvements, nextActions: value.nextActions, suggestedReply: value.suggestedReply, suggestedReplyTranslation: value.suggestedReplyTranslation }, conversation);
 }
 
-async function analyzeConcurrently(task: CustomerTask, conversation: string, onUpdate: (task: CustomerTask) => void) {
-  let report = task.report;
+async function analyzeConcurrently(task: CustomerTask, conversation: string, onUpdate: (task: CustomerTask) => void, requestedModules: AnalysisModule[] = analysisModules) {
+  const resettingRisk = requestedModules.includes("risk");
+  // 风险模块开始时先清空旧结果，避免失败时继续展示旧版本占位或过期判断。
+  let report: CustomerTask["report"] = resettingRisk ? {
+    ...task.report,
+    objections: [],
+    confirmations: defaultConfirmations.map((item) => ({ ...item })),
+  } : task.report;
   let provider: Provider = task.provider;
   let completed = 0;
   let succeeded = 0;
-  let states = Object.fromEntries(analysisModules.map((module) => [module, "analyzing"])) as Record<AnalysisModule, AnalysisModuleStatus>;
-  let errors: Partial<Record<AnalysisModule, string>> = {};
+  let states = { customer: "pending", risk: "pending", action: "pending", ...(task.analysisModules ?? {}) } as Record<AnalysisModule, AnalysisModuleStatus>;
+  for (const module of requestedModules) states[module] = "analyzing";
+  let errors: Partial<Record<AnalysisModule, string>> = { ...(task.analysisModuleErrors ?? {}) };
+  for (const module of requestedModules) delete errors[module];
   let latest: CustomerTask = { ...task, rawConversation: conversation, status: "analyzing", analysisStep: "analyzing", analysisModules: states, analysisModuleErrors: errors, analysisError: undefined };
   onUpdate(latest);
-  await Promise.all(analysisModules.map(async (module) => {
+  await Promise.all(requestedModules.map(async (module) => {
     try {
       const response = await fetch("/api/analyze", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ conversation, module }) });
       const data = await response.json();
@@ -194,9 +213,9 @@ async function analyzeConcurrently(task: CustomerTask, conversation: string, onU
       model: provider === "openai" ? "GPT" : "DeepSeek",
       analysisModules: states,
       analysisModuleErrors: errors,
-      status: completed < analysisModules.length ? "analyzing" : succeeded ? "ready" : "failed",
-      analysisStep: completed < analysisModules.length ? "analyzing" : undefined,
-      analysisError: completed === analysisModules.length && !succeeded ? Object.values(errors).join("；") : undefined,
+      status: completed < requestedModules.length ? "analyzing" : (succeeded || Object.values(states).includes("done")) ? "ready" : "failed",
+      analysisStep: completed < requestedModules.length ? "analyzing" : undefined,
+      analysisError: completed === requestedModules.length && !succeeded && !Object.values(states).includes("done") ? Object.values(errors).join("；") : undefined,
       updatedAt: "刚刚",
     });
     onUpdate(latest);
@@ -331,7 +350,10 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
   const [syncError, setSyncError] = useState("");
   const isAnalyzing = analyzing || activeTask.status === "analyzing";
   const hasCompletedModule = Object.values(activeTask.analysisModules ?? {}).includes("done");
-  const moduleVisible = (module: AnalysisModule) => activeTask.status !== "analyzing" || activeTask.analysisModules?.[module] === "done";
+  const moduleVisible = (module: AnalysisModule) => {
+    const state = activeTask.analysisModules?.[module];
+    return state ? state === "done" : activeTask.status !== "analyzing";
+  };
   const filtered = tasks.filter((task) => task.name.toLowerCase().includes(taskSearch.toLowerCase()));
 
   const openRawChat = (messageId = "", quote = "") => {
@@ -351,6 +373,17 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
       await analyzeConcurrently(activeTask, activeTask.rawConversation, onUpdate);
     } catch (error) {
       onUpdate({ ...activeTask, status: "failed", analysisStep: undefined, analysisError: error instanceof Error ? error.message : "AI 分析失败" });
+    } finally {
+      setAnalyzing(false);
+    }
+  };
+
+  const retryFailedModules = async () => {
+    const failedModules = analysisModules.filter((module) => activeTask.analysisModules?.[module] === "failed");
+    if (!failedModules.length) return reanalyze();
+    setAnalyzing(true);
+    try {
+      await analyzeConcurrently(activeTask, activeTask.rawConversation, onUpdate, failedModules);
     } finally {
       setAnalyzing(false);
     }
@@ -382,7 +415,7 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
   };
 
   return (
-    <div className={`analysis-grid ${showRaw ? "raw-open" : ""}`}>
+    <div className={`analysis-grid ${showRaw ? "mobile-raw-open" : ""}`}>
       <aside className="task-rail">
         <div className="rail-head">
           <div><span className="eyebrow">WORKSPACE</span><h2>分析任务</h2></div>
@@ -421,8 +454,7 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
             <h1>客户分析报告</h1>
           </div>
           <div className="toolbar-actions">
-            {activeTask.source === "salesmartly" && <button className="secondary-button" onClick={() => void syncLatestMessages()} disabled={syncing || isAnalyzing}><Cloud size={16} className={syncing ? "spin" : ""} />{syncing ? "同步中…" : "同步最新消息"}</button>}
-            <button className={`secondary-button ${showRaw ? "active" : ""}`} onClick={() => openRawChat()}><FileText size={16} />原始聊天</button>
+            <button className="secondary-button mobile-raw-toggle" onClick={() => openRawChat()}><FileText size={16} />原始聊天</button>
             <button className="secondary-button"><Upload size={16} />导出</button>
             <button className="primary-button" onClick={reanalyze} disabled={isAnalyzing}><RefreshCw size={16} className={isAnalyzing ? "spin" : ""} />{isAnalyzing ? "分析中…" : "重新分析"}</button>
           </div>
@@ -432,7 +464,7 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
           <div className="stale-banner"><CircleAlert size={17} /><div><strong>发现新的聊天消息</strong><span>当前报告基于旧记录，建议同步并重新分析。</span></div><button onClick={reanalyze}>立即更新</button></div>
         )}
         {syncError && <div className="sync-error-banner"><CircleAlert size={16} /><span>{syncError}</span><button onClick={() => setSyncError("")}><X size={14} /></button></div>}
-        {!!Object.keys(activeTask.analysisModuleErrors ?? {}).length && activeTask.status !== "analyzing" && <div className="partial-error-banner"><CircleAlert size={16} /><span>部分分析未完成：{Object.entries(activeTask.analysisModuleErrors ?? {}).map(([module, error]) => `${analysisModuleLabels[module as AnalysisModule]}（${error}）`).join("；")}</span><button onClick={reanalyze}>重试</button></div>}
+        {!!Object.keys(activeTask.analysisModuleErrors ?? {}).length && activeTask.status !== "analyzing" && <div className="partial-error-banner"><CircleAlert size={16} /><span>部分分析未完成：{Object.entries(activeTask.analysisModuleErrors ?? {}).map(([module, error]) => `${analysisModuleLabels[module as AnalysisModule]}（${error}）`).join("；")}</span><button onClick={() => void retryFailedModules()}>仅重试失败模块</button></div>}
 
         {activeTask.status === "analyzing" && !hasCompletedModule ? (
           <AnalysisLoading task={activeTask} />
@@ -444,7 +476,7 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
           <div className="report-intro">
             <div className="ai-orb"><Sparkles size={22} /></div>
             <div><span>AI ANALYSIS</span><h2>{activeTask.customer.name} 的对话洞察</h2><p>基于 {activeTask.rawConversation.split("\n").length} 条对话 · {activeTask.model} · 置信度 {Math.round(activeTask.report.confidence * 100)}%</p></div>
-            <div className="confidence"><div style={{ "--score": `${activeTask.report.confidence * 100}%` } as React.CSSProperties} /><span>高可信</span></div>
+            <div className={`confidence score-${confidenceLabel(activeTask.report.confidence)}`}><div style={{ "--score": `${activeTask.report.confidence * 100}%` } as React.CSSProperties} /><span>{confidenceLabel(activeTask.report.confidence)}</span></div>
           </div>
 
           <ReportCard icon={FileText} title="对话总结" tone="violet">
@@ -470,6 +502,7 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
           {moduleVisible("risk") && <>
           <ReportCard icon={CircleAlert} title={`主要异议与犹豫点 · ${activeTask.report.objections.length}`} tone="orange">
             <div className="objection-list">
+              {!activeTask.report.objections.length && <div className="empty-objections"><CheckCircle2 size={15} />暂未识别到具有原始聊天依据的明确异议</div>}
               {activeTask.report.objections.map((item, index) => (
                 <details key={item.title} open={index === 0}>
                   <summary onClick={() => openRawChat(item.evidenceMessageId, item.evidenceQuote || item.evidence)} title="点击定位到原始聊天"><span className={`severity ${item.severity}`}>{item.severity}</span><strong>{item.title}</strong><span className="objection-state">{item.status}</span><ChevronDown size={16} /></summary>
@@ -501,9 +534,14 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
         </div>}
       </section>
 
-      {showRaw
-        ? <RawChatPanel task={activeTask} onUpdate={onUpdate} onClose={() => setShowRaw(false)} target={rawTarget} />
-        : <CustomerPanel task={activeTask} onUpdate={onUpdate} onAnalyze={reanalyze} analyzing={isAnalyzing} />}
+      <RawChatPanel
+        task={activeTask}
+        onUpdate={onUpdate}
+        onClose={() => setShowRaw(false)}
+        onSync={activeTask.source === "salesmartly" ? syncLatestMessages : undefined}
+        syncing={syncing}
+        target={rawTarget}
+      />
     </div>
   );
 }
@@ -637,78 +675,7 @@ function ConfirmationChecklist({ task, onUpdate }: { task: CustomerTask; onUpdat
   );
 }
 
-function CustomerPanel({ task, onUpdate, onAnalyze, analyzing }: { task: CustomerTask; onUpdate: (task: CustomerTask) => void; onAnalyze: () => void; analyzing: boolean }) {
-  const done = task.progress.filter((item) => item.state === "done").length;
-  const cycleState = (item: ProgressItem): ProgressItem["state"] => {
-    const states: ProgressItem["state"][] = ["todo", "doing", "done", "na"];
-    return states[(states.indexOf(item.state) + 1) % states.length];
-  };
-  const updateProgress = (item: ProgressItem) => {
-    if (item.locked) return;
-    onUpdate({ ...task, progress: task.progress.map((current) => current.id === item.id ? { ...current, state: cycleState(current) } : current) });
-  };
-
-  return (
-    <aside className="customer-panel">
-      <div className="panel-scroll">
-        <div className="customer-card">
-          <div className="avatar">{initials(task.customer.name)}</div>
-          <div><h3>{task.customer.name}</h3><p>{task.customer.company || "未填写公司"}</p></div>
-          <button className="icon-button"><Pencil size={15} /></button>
-        </div>
-        <div className="customer-tags"><span>{task.customer.country}</span><span>{task.customer.product}</span></div>
-
-        <PanelSection title="客户资料">
-          <dl className="data-list">
-            <div><dt>来源渠道</dt><dd>{task.customer.channel}</dd></div>
-            <div><dt>负责人</dt><dd><span className="mini-avatar">{task.customer.owner[0]}</span>{task.customer.owner}</dd></div>
-            <div><dt>最后消息</dt><dd>{task.customer.lastMessageAt}</dd></div>
-          </dl>
-        </PanelSection>
-
-        <PanelSection title="当前判断">
-          <div className="panel-stage"><small>主阶段</small><strong>{task.report.stage}</strong></div>
-          {!!task.report.parallelStages.length && <div className="panel-parallel"><small>并行</small>{task.report.parallelStages.map((stage) => <span key={stage}>{stage}</span>)}</div>}
-          <dl className="data-list compact panel-analysis-stats">
-            <div><dt>首要阻碍</dt><dd>{task.report.objections.find((item) => item.status !== "已解决")?.title || "暂无"}</dd></div>
-            <div><dt>判断置信度</dt><dd>{Math.round(task.report.confidence * 100)}%</dd></div>
-          </dl>
-        </PanelSection>
-
-        <PanelSection title="七阶段进度" action={<span className="progress-count">{done}/{task.progress.length}</span>}>
-          <div className="progress-bar"><i style={{ width: `${done / task.progress.length * 100}%` }} /></div>
-          <div className="progress-list">
-            {task.progress.map((item) => (
-              <button key={item.id} onClick={() => updateProgress(item)} className={item.state} title={item.locked ? "人工确认项已锁定" : "点击切换状态"}>
-                <span>{item.state === "done" ? <Check size={13} /> : item.state === "doing" ? <Clock3 size={13} /> : item.state === "na" ? "—" : ""}</span>
-                <em>{item.label}</em>{item.locked && <LockKeyhole size={12} />}
-              </button>
-            ))}
-          </div>
-          <p className="panel-hint">AI 建议状态，人工确认后可锁定</p>
-        </PanelSection>
-
-        <PanelSection title="本次分析">
-          <dl className="data-list compact">
-            <div><dt>分析模型</dt><dd><span className={`provider-dot ${task.provider}`} />{task.model}</dd></div>
-            <div><dt>数据来源</dt><dd>{sourceMeta[task.source].label}</dd></div>
-            <div><dt>更新时间</dt><dd>{task.updatedAt}</dd></div>
-            <div><dt>报告版本</dt><dd>v2.0</dd></div>
-          </dl>
-        </PanelSection>
-      </div>
-      <div className="panel-actions">
-        <button className="primary-button wide" onClick={onAnalyze} disabled={analyzing}><RefreshCw size={16} className={analyzing ? "spin" : ""} />{analyzing ? "正在分析" : "重新分析"}</button>
-      </div>
-    </aside>
-  );
-}
-
-function PanelSection({ title, action, children }: React.PropsWithChildren<{ title: string; action?: React.ReactNode }>) {
-  return <section className="panel-section"><header><h4>{title}</h4>{action}</header>{children}</section>;
-}
-
-function RawChatPanel({ task, onClose, onUpdate, target }: { task: CustomerTask; onClose: () => void; onUpdate: (task: CustomerTask) => void; target: { messageId?: string; quote: string; nonce: number } | null }) {
+function RawChatPanel({ task, onClose, onUpdate, onSync, syncing = false, target }: { task: CustomerTask; onClose: () => void; onUpdate: (task: CustomerTask) => void; onSync?: () => Promise<void>; syncing?: boolean; target: { messageId?: string; quote: string; nonce: number } | null }) {
   const [translating, setTranslating] = useState(false);
   const [translationError, setTranslationError] = useState("");
   const [highlightedIndex, setHighlightedIndex] = useState<number | null>(null);
@@ -761,7 +728,7 @@ function RawChatPanel({ task, onClose, onUpdate, target }: { task: CustomerTask;
   };
 
   return <aside className="raw-side-panel">
-    <header><div><span className="eyebrow">SOURCE DATA</span><h2>原始聊天记录</h2></div><div className="drawer-actions"><button className="secondary-button" onClick={() => void translate()} disabled={translating}><Languages size={15} />{translating ? "翻译中…" : savedTranslation ? "重新翻译" : "翻译"}</button><button className="icon-button" onClick={onClose}><X size={18} /></button></div></header>
+    <header><div><span className="eyebrow">SOURCE DATA</span><h2>原始聊天记录</h2></div><div className="drawer-actions">{onSync && <button className="secondary-button" onClick={() => void onSync()} disabled={syncing}><Cloud size={15} className={syncing ? "spin" : ""} />{syncing ? "同步中" : "同步"}</button>}<button className="secondary-button" onClick={() => void translate()} disabled={translating}><Languages size={15} />{translating ? "翻译中…" : savedTranslation ? "重新翻译" : "翻译"}</button><button className="icon-button raw-close-button" onClick={onClose}><X size={18} /></button></div></header>
     <div className="drawer-meta"><span>{sourceMeta[task.source].label}</span><span>{task.customer.name}</span><span>{messages.length} 条消息</span></div>
     {translationError && <div className="raw-translation-error"><CircleAlert size={14} />{translationError}</div>}
     <div className="raw-chat-scroll">

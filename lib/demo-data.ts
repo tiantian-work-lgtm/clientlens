@@ -27,8 +27,8 @@ export const defaultConfirmations: ConfirmationItem[] = [
 const demoConfirmations: ConfirmationItem[] = defaultConfirmations.map((item) => {
   if (item.id === "role") return { ...item, status: "confirmed", evidence: "客户代表公司询问首批采购，并熟悉批次资料。", confidence: 0.82 };
   if (item.id === "seeding") return { ...item, status: "na", evidence: "客户已有明确目标产品。", confidence: 0.76 };
-  if (item.id === "coa") return { ...item, status: "risk", evidence: "客户询问收到的产品是否对应同一批次 COA。", evidenceQuote: "Customer: Is the COA from the same batch I will receive?", riskReason: "客户尚未确认质量文件与实际交付批次一致，可能阻碍首次下单。", confidence: 0.96 };
-  if (item.id === "payment_method") return { ...item, status: "risk", evidence: "客户询问首次订单可获得什么付款保障。", evidenceQuote: "Customer: What protection do I have for the first order?", riskReason: "客户对首次付款的资金安全缺乏信心，未解决前可能不会付款。", confidence: 0.95 };
+  if (item.id === "coa") return { ...item, status: "risk", evidence: "客户询问收到的产品是否对应同一批次 COA。", evidenceMessageId: "M00001", evidenceQuote: "Is the COA from the same batch I will receive?", riskReason: "客户尚未确认质量文件与实际交付批次一致，可能阻碍首次下单。", confidence: 0.96 };
+  if (item.id === "payment_method") return { ...item, status: "risk", evidence: "客户询问首次订单可获得什么付款保障。", evidenceMessageId: "M00003", evidenceQuote: "What protection do I have for the first order?", riskReason: "客户对首次付款的资金安全缺乏信心，未解决前可能不会付款。", confidence: 0.95 };
   return { ...item };
 });
 
@@ -60,7 +60,8 @@ export const demoReport: AnalysisReport = {
       severity: "高",
       status: "处理中",
       evidence: "“Is the COA from the same batch I will receive?”",
-      evidenceQuote: "Customer: Is the COA from the same batch I will receive?",
+      evidenceMessageId: "M00001",
+      evidenceQuote: "Is the COA from the same batch I will receive?",
       advice: "明确说明文件与批次的对应关系，并只提供可验证的资料。",
     },
     {
@@ -68,7 +69,8 @@ export const demoReport: AnalysisReport = {
       severity: "中",
       status: "待解决",
       evidence: "“What protection do I have for the first order?”",
-      evidenceQuote: "Customer: What protection do I have for the first order?",
+      evidenceMessageId: "M00003",
+      evidenceQuote: "What protection do I have for the first order?",
       advice: "先解释可用付款路径和流程，再约定一个低风险的首单方案。",
     },
   ],
