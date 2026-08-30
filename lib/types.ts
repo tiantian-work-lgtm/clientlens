@@ -51,6 +51,15 @@ export interface ConfirmationItem {
   seedingAcceptanceEvidenceMessageId?: string;
   seedingAcceptanceEvidenceQuote?: string;
   seedingAdvice?: string;
+  medicalNeed?: "需要提供建议" | "无需提供建议";
+  medicalDirection?: string;
+  medicalAnswered?: "已解答" | "尚未解答" | "未确认";
+  medicalAnswerEvidenceMessageId?: string;
+  medicalAnswerEvidenceQuote?: string;
+  medicalAccepted?: "客户明确肯定" | "客户未明确肯定" | "未确认";
+  medicalAcceptanceEvidenceMessageId?: string;
+  medicalAcceptanceEvidenceQuote?: string;
+  medicalAdvice?: string;
   confidence: number;
 }
 

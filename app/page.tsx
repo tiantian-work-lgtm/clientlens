@@ -183,6 +183,15 @@ function normalizeReport(value: unknown, conversation = ""): CustomerTask["repor
       seedingAcceptanceEvidenceMessageId: item.id === "seeding" ? stringValue(item.seedingAcceptanceEvidenceMessageId) : "",
       seedingAcceptanceEvidenceQuote: item.id === "seeding" ? normalizeEvidenceQuote(item.seedingAcceptanceEvidenceQuote, conversation) : "",
       seedingAdvice: item.id === "seeding" ? stringValue(item.seedingAdvice, fallback.seedingAdvice || "") : "",
+      medicalNeed: item.id === "medical" && (item.medicalNeed === "需要提供建议" || item.medicalNeed === "无需提供建议") ? item.medicalNeed : fallback.medicalNeed,
+      medicalDirection: item.id === "medical" ? stringValue(item.medicalDirection, fallback.medicalDirection || "") : "",
+      medicalAnswered: item.id === "medical" && (item.medicalAnswered === "已解答" || item.medicalAnswered === "尚未解答" || item.medicalAnswered === "未确认") ? item.medicalAnswered : fallback.medicalAnswered,
+      medicalAnswerEvidenceMessageId: item.id === "medical" ? stringValue(item.medicalAnswerEvidenceMessageId) : "",
+      medicalAnswerEvidenceQuote: item.id === "medical" ? normalizeEvidenceQuote(item.medicalAnswerEvidenceQuote, conversation) : "",
+      medicalAccepted: item.id === "medical" && (item.medicalAccepted === "客户明确肯定" || item.medicalAccepted === "客户未明确肯定" || item.medicalAccepted === "未确认") ? item.medicalAccepted : fallback.medicalAccepted,
+      medicalAcceptanceEvidenceMessageId: item.id === "medical" ? stringValue(item.medicalAcceptanceEvidenceMessageId) : "",
+      medicalAcceptanceEvidenceQuote: item.id === "medical" ? normalizeEvidenceQuote(item.medicalAcceptanceEvidenceQuote, conversation) : "",
+      medicalAdvice: item.id === "medical" ? stringValue(item.medicalAdvice, fallback.medicalAdvice || "") : "",
       confidence: Number.isFinite(confidence) ? Math.min(1, Math.max(0, confidence)) : 0,
     };
   });
@@ -699,6 +708,15 @@ function ConfirmationChecklist({ task, onUpdate }: { task: CustomerTask; onUpdat
                     <div><small>当前是否已种草</small><p>{item.seedingPerformed || "未确认"}</p>{item.seedingPerformedEvidenceQuote && <blockquote>“{item.seedingPerformedEvidenceQuote}”</blockquote>}</div>
                     <div><small>是否获得客户肯定</small><p>{item.seedingAccepted || "未确认"}</p>{item.seedingAcceptanceEvidenceQuote && <blockquote>“{item.seedingAcceptanceEvidenceQuote}”</blockquote>}</div>
                     <div className="seeding-advice"><small>建议</small><p>{item.seedingAdvice || "先确认客户希望改善的问题，再做针对性价值说明。"}</p></div>
+                  </div>}
+                </div>}
+                {item.id === "medical" && item.medicalNeed && <div className={`seeding-analysis medical-analysis ${item.medicalNeed === "需要提供建议" ? "needed" : "not-needed"}`}>
+                  <header><span>建议结论</span><strong>{item.medicalNeed}</strong></header>
+                  {item.medicalNeed === "需要提供建议" && <div className="seeding-detail-grid medical-detail-grid">
+                    <div><small>需求方向</small><p>{item.medicalDirection || "待确认客户的剂量、使用或医疗相关需求。"}</p></div>
+                    <div><small>是否已经解答</small><p>{item.medicalAnswered || "未确认"}</p>{item.medicalAnswerEvidenceQuote && <blockquote>“{item.medicalAnswerEvidenceQuote}”</blockquote>}</div>
+                    <div><small>是否获得客户肯定</small><p>{item.medicalAccepted || "未确认"}</p>{item.medicalAcceptanceEvidenceQuote && <blockquote>“{item.medicalAcceptanceEvidenceQuote}”</blockquote>}</div>
+                    <div className="seeding-advice"><small>建议</small><p>{item.medicalAdvice || "明确沟通边界，并在需要时建议客户咨询合格医疗专业人士。"}</p></div>
                   </div>}
                 </div>}
                 {(item.status === "unknown" || item.status === "risk") && <div className="confirmation-actions">

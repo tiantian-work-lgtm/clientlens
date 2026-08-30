@@ -13,7 +13,6 @@ export const defaultProgress: ProgressItem[] = [
 export const defaultConfirmations: ConfirmationItem[] = [
   { id: "role", category: "客户角色", label: "客户角色与经验", status: "unknown", evidence: "对话中尚未确认。", confidence: 0 },
   { id: "seeding", category: "认知与经历", label: "是否需要产品种草", status: "unknown", evidence: "对话中尚未确认。", confidence: 0 },
-  { id: "education", category: "认知与经历", label: "是否需要基础知识科普", status: "unknown", evidence: "对话中尚未确认。", confidence: 0 },
   { id: "medical", category: "认知与经历", label: "剂量、使用或医疗问题", status: "unknown", evidence: "对话中尚未确认。", confidence: 0 },
   { id: "scammed", category: "认知与经历", label: "是否有被骗经历", status: "unknown", evidence: "对话中尚未确认。", confidence: 0 },
   { id: "coa", category: "产品与信任", label: "COA 与产品一致性", status: "unknown", evidence: "对话中尚未确认。", confidence: 0 },
@@ -27,6 +26,7 @@ export const defaultConfirmations: ConfirmationItem[] = [
 const demoConfirmations: ConfirmationItem[] = defaultConfirmations.map((item) => {
   if (item.id === "role") return { ...item, status: "confirmed", evidence: "客户代表公司询问首批采购，并熟悉批次资料。", confidence: 0.82 };
   if (item.id === "seeding") return { ...item, status: "na", evidence: "客户已有明确目标产品，当前重点是核实批次资料和付款保障。", evidenceMessageId: "M00001", evidenceQuote: "Is the COA from the same batch I will receive?", seedingNeed: "无需种草", seedingDirection: "", seedingPerformed: "未确认", seedingPerformedEvidenceMessageId: "", seedingPerformedEvidenceQuote: "", seedingAccepted: "未确认", seedingAcceptanceEvidenceMessageId: "", seedingAcceptanceEvidenceQuote: "", seedingAdvice: "", confidence: 0.76 };
+  if (item.id === "medical") return { ...item, status: "na", evidence: "客户当前只在核实批次资料和付款保障，没有提出剂量、使用或医疗需求。", evidenceMessageId: "M00001", evidenceQuote: "Is the COA from the same batch I will receive?", medicalNeed: "无需提供建议", medicalDirection: "", medicalAnswered: "未确认", medicalAnswerEvidenceMessageId: "", medicalAnswerEvidenceQuote: "", medicalAccepted: "未确认", medicalAcceptanceEvidenceMessageId: "", medicalAcceptanceEvidenceQuote: "", medicalAdvice: "", confidence: 0.72 };
   if (item.id === "coa") return { ...item, status: "risk", evidence: "客户询问收到的产品是否对应同一批次 COA。", evidenceMessageId: "M00001", evidenceQuote: "Is the COA from the same batch I will receive?", riskReason: "客户尚未确认质量文件与实际交付批次一致，可能阻碍首次下单。", confidence: 0.96 };
   if (item.id === "payment_method") return { ...item, status: "risk", evidence: "客户询问首次订单可获得什么付款保障。", evidenceMessageId: "M00003", evidenceQuote: "What protection do I have for the first order?", riskReason: "客户对首次付款的资金安全缺乏信心，未解决前可能不会付款。", confidence: 0.95 };
   return { ...item };

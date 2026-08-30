@@ -49,7 +49,7 @@ const riskSchema = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["id", "category", "label", "status", "evidence", "evidenceMessageId", "evidenceQuote", "riskReason", "seedingNeed", "seedingDirection", "seedingPerformed", "seedingPerformedEvidenceMessageId", "seedingPerformedEvidenceQuote", "seedingAccepted", "seedingAcceptanceEvidenceMessageId", "seedingAcceptanceEvidenceQuote", "seedingAdvice", "confidence"],
+        required: ["id", "category", "label", "status", "evidence", "evidenceMessageId", "evidenceQuote", "riskReason", "seedingNeed", "seedingDirection", "seedingPerformed", "seedingPerformedEvidenceMessageId", "seedingPerformedEvidenceQuote", "seedingAccepted", "seedingAcceptanceEvidenceMessageId", "seedingAcceptanceEvidenceQuote", "seedingAdvice", "medicalNeed", "medicalDirection", "medicalAnswered", "medicalAnswerEvidenceMessageId", "medicalAnswerEvidenceQuote", "medicalAccepted", "medicalAcceptanceEvidenceMessageId", "medicalAcceptanceEvidenceQuote", "medicalAdvice", "confidence"],
         properties: {
           id: { type: "string" },
           category: { type: "string", enum: ["客户角色", "认知与经历", "产品与信任", "交易条件"] },
@@ -68,6 +68,15 @@ const riskSchema = {
           seedingAcceptanceEvidenceMessageId: { type: "string" },
           seedingAcceptanceEvidenceQuote: { type: "string" },
           seedingAdvice: { type: "string" },
+          medicalNeed: { type: "string", enum: ["需要提供建议", "无需提供建议", ""] },
+          medicalDirection: { type: "string" },
+          medicalAnswered: { type: "string", enum: ["已解答", "尚未解答", "未确认", ""] },
+          medicalAnswerEvidenceMessageId: { type: "string" },
+          medicalAnswerEvidenceQuote: { type: "string" },
+          medicalAccepted: { type: "string", enum: ["客户明确肯定", "客户未明确肯定", "未确认", ""] },
+          medicalAcceptanceEvidenceMessageId: { type: "string" },
+          medicalAcceptanceEvidenceQuote: { type: "string" },
+          medicalAdvice: { type: "string" },
           confidence: { type: "number", minimum: 0, maximum: 1 },
         },
       },
@@ -91,7 +100,7 @@ const commonPrompt = `你是一名严谨的 B2B 销售对话分析师。判断�
 
 const modulePrompts: Record<AnalysisModule, string> = {
   customer: `${commonPrompt}\n只分析：对话总结、客户画像、销售阶段和总体置信度。客户画像 profile 必须严格返回 10 项，并按以下顺序和“维度：结论”格式填写：身份与组织、客户类型与经验、核心需求与目标、产品兴趣、决策权与流程、采购意向、价格敏感度、信任状态、核心关注与风险偏好、沟通风格与下一步倾向。每项应尽量具体，但只能依据聊天内容；聊天没有提供的维度必须写“维度：待确认”，禁止用常识补全或虚构。销售阶段只能从七阶段中选择；主阶段取最接近当前成交里程碑的一项，第1至3阶段可以同时放入 parallelStages。`,
-  risk: `${commonPrompt}\n只分析异议、犹豫点、风险和确认清单。JSON 根对象必须且只能包含 objections 和 confirmations。objections 每项必须完整包含 title、severity、status、evidence、evidenceMessageId、evidenceQuote、resolutionEvidenceMessageId、resolutionEvidenceQuote、resolutionReason、advice；没有原始聊天直接依据的判断不要放入 objections，绝不能返回“待确认异议1”等占位标题。evidence 用中文概括；evidenceMessageId 必须填写客户提出该异议的真实 M 编号；evidenceQuote 必须逐字摘录该编号消息的原文。必须按 M 编号顺序判断解决状态：①销售没有在后续消息正面回答核心问题、回答回避问题，或客户后来再次追问同一问题，status=未解决；②销售在后续消息正面回答，且此后客户没有再追问同一问题，但客户也没有明确表示认可，status=未追问-基本解决；③销售正面回答后，客户在更晚的消息中明确肯定、接受或赞同该答案，status=客户肯定-完全解决。普通礼貌致谢、话题切换、沉默和问题发生前的肯定都不能算完全解决。基本解决时 resolutionEvidenceMessageId/Quote 必须引用异议之后销售的直接回答；完全解决时必须引用销售回答之后客户明确肯定的原文；未解决时这两个字段返回空字符串。resolutionReason 用中文说明为何符合该状态。confirmations 每项还必须包含完整种草字段，并覆盖且只覆盖以下 11 项及括号内 id：客户角色与经验(role)、是否需要产品种草(seeding)、是否需要基础知识科普(education)、剂量/使用/医疗问题(medical)、是否有被骗经历(scammed)、COA与产品一致性(coa)、产品包装(packaging)、公司资料(company)、其他客户反馈(feedback)、物流清关和时效(logistics)、支付方式与付款安全(payment_method)。非 seeding 项的全部 seeding 字段返回空字符串。seeding 项必须在“需要种草”和“无需种草”中二选一，并引用最相关的客户原文：客户仍在探索方案、不清楚产品与自身目标的关系、需要建立改善预期或痛点价值时判为需要种草；客户已明确目标产品并表现出足够认知、主要只核实价格/文件/交易条件时判为无需种草。若需要种草，seedingDirection 必须具体写客户关注的改善、期望或痛点；seedingPerformed 判断销售是否已经围绕该方向完成价值阐述，只有已种草时才填写 seedingPerformedEvidenceMessageId/Quote 并逐字引用销售原话，否则两字段为空；seedingAccepted 只有客户在种草内容之后明确肯定、认可或表现出购买兴趣时才可填客户明确肯定，此时 seedingAcceptanceEvidenceMessageId/Quote 必须逐字引用该客户后续原话，否则两字段为空；沉默、礼貌致谢不算肯定；seedingAdvice 给出下一步具体建议。只有明确顾虑、冲突、负面信号或成交阻碍才能标记 risk，仅仅没谈到必须标记 unknown；无直接依据时 evidenceMessageId 和 evidenceQuote 都返回空字符串。`,
+  risk: `${commonPrompt}\n只分析异议、犹豫点、风险和确认清单，JSON 根对象只能包含 objections 和 confirmations。异议必须有真实客户原文，禁止“待确认异议1”等占位标题。按消息顺序判断：未正面回答、回避或客户再次追问=未解决；销售正面回答且客户未再追问=未追问-基本解决；销售回答后客户明确认可=客户肯定-完全解决。基本解决引用销售回答，完全解决引用客户后续肯定；沉默、礼貌致谢或话题切换不算肯定。确认清单必须且只返回 10 项：role、seeding、medical、scammed、coa、packaging、company、feedback、logistics、payment_method，禁止返回 education。只有明确顾虑或成交阻碍才能标记 risk，没谈到应标记 unknown。所有 evidenceQuote 必须逐字引用对应 M 编号原文。seeding 必须在需要种草/无需种草中二选一：需要时填写客户改善期望或痛点方向、销售是否已种草、客户是否在种草后明确肯定及下一步建议；已种草必须引用销售原话，客户明确肯定必须引用更晚的客户原话；非 seeding 项的全部 seeding 字段为空。medical 必须在需要提供建议/无需提供建议中二选一：客户提出剂量、用法、不良反应、禁忌、身体状况、疗效预期等需求时判为需要；需要时填写需求方向、是否已合规解答、客户是否在解答后明确肯定及下一步建议；已解答必须引用销售原话，客户明确肯定必须引用更晚的客户原话；不得生成个体化剂量、诊疗结论或替代专业医生，建议只能是安全沟通或专业转介；非 medical 项的全部 medical 字段为空。`,
   action: `${commonPrompt}\n只分析本次沟通可改善之处、下一步行动和建议回复。建议必须具体可执行；suggestedReply 沿用客户语言，suggestedReplyTranslation 返回自然简体中文翻译。`,
 };
 
@@ -179,11 +188,10 @@ function moduleSchema(module: AnalysisModule) {
   return module === "customer" ? customerSchema : module === "risk" ? riskSchema : actionSchema;
 }
 
-const confirmationIds = ["role", "seeding", "education", "medical", "scammed", "coa", "packaging", "company", "feedback", "logistics", "payment_method"];
+const confirmationIds = ["role", "seeding", "medical", "scammed", "coa", "packaging", "company", "feedback", "logistics", "payment_method"];
 const confirmationDefinitions: Array<Pick<ConfirmationItem, "id" | "category" | "label">> = [
   { id: "role", category: "客户角色", label: "客户角色与经验" },
   { id: "seeding", category: "认知与经历", label: "是否需要产品种草" },
-  { id: "education", category: "认知与经历", label: "是否需要基础知识科普" },
   { id: "medical", category: "认知与经历", label: "剂量、使用或医疗问题" },
   { id: "scammed", category: "认知与经历", label: "是否有被骗经历" },
   { id: "coa", category: "产品与信任", label: "COA 与产品一致性" },
@@ -277,6 +285,15 @@ function normalizeRiskResult(value: AnalysisModuleResult, messages: ParsedConver
       seedingAcceptanceEvidenceMessageId: item?.id === "seeding" ? item.seedingAcceptanceEvidenceMessageId || "" : "",
       seedingAcceptanceEvidenceQuote: item?.id === "seeding" ? item.seedingAcceptanceEvidenceQuote || "" : "",
       seedingAdvice: item?.id === "seeding" ? item.seedingAdvice?.trim() || "" : "",
+      medicalNeed: item?.id === "medical" && (item.medicalNeed === "需要提供建议" || item.medicalNeed === "无需提供建议") ? item.medicalNeed : undefined,
+      medicalDirection: item?.id === "medical" ? item.medicalDirection?.trim() || "" : "",
+      medicalAnswered: item?.id === "medical" && (item.medicalAnswered === "已解答" || item.medicalAnswered === "尚未解答" || item.medicalAnswered === "未确认") ? item.medicalAnswered : undefined,
+      medicalAnswerEvidenceMessageId: item?.id === "medical" ? item.medicalAnswerEvidenceMessageId || "" : "",
+      medicalAnswerEvidenceQuote: item?.id === "medical" ? item.medicalAnswerEvidenceQuote || "" : "",
+      medicalAccepted: item?.id === "medical" && (item.medicalAccepted === "客户明确肯定" || item.medicalAccepted === "客户未明确肯定" || item.medicalAccepted === "未确认") ? item.medicalAccepted : undefined,
+      medicalAcceptanceEvidenceMessageId: item?.id === "medical" ? item.medicalAcceptanceEvidenceMessageId || "" : "",
+      medicalAcceptanceEvidenceQuote: item?.id === "medical" ? item.medicalAcceptanceEvidenceQuote || "" : "",
+      medicalAdvice: item?.id === "medical" ? item.medicalAdvice?.trim() || "" : "",
       confidence: Number.isFinite(confidence) ? Math.min(1, Math.max(0, confidence)) : 0,
     } satisfies ConfirmationItem;
   });
@@ -315,6 +332,17 @@ function validateModuleResult(module: AnalysisModule, value: AnalysisModuleResul
     const performedIndex = messages.findIndex((message) => message.id === seeding.seedingPerformedEvidenceMessageId);
     const acceptanceIndex = messages.findIndex((message) => message.id === seeding.seedingAcceptanceEvidenceMessageId);
     if (seeding.seedingAccepted === "客户明确肯定" && (acceptanceMessage?.role !== "customer" || performedIndex < 0 || acceptanceIndex <= performedIndex || !hasVerifiedEvidence(messageById, seeding.seedingAcceptanceEvidenceMessageId, seeding.seedingAcceptanceEvidenceQuote))) throw new Error("客户肯定结论缺少种草之后的可核验原文");
+    const medical = result.confirmations.find((item) => item.id === "medical");
+    if (!medical || (medical.medicalNeed !== "需要提供建议" && medical.medicalNeed !== "无需提供建议")) throw new Error("医疗问题分析缺少明确结论");
+    const medicalEvidenceMessage = messageById.get(medical.evidenceMessageId || "");
+    if (medicalEvidenceMessage?.role !== "customer" || !hasVerifiedEvidence(messageById, medical.evidenceMessageId, medical.evidenceQuote)) throw new Error("医疗问题分析缺少可核验的客户原文");
+    if (medical.medicalNeed === "需要提供建议" && (!medical.medicalDirection?.trim() || !medical.medicalAnswered || !medical.medicalAccepted || !medical.medicalAdvice?.trim())) throw new Error("需要提供医疗相关建议时必须完整返回方向、解答、肯定与建议");
+    const answerMessage = messageById.get(medical.medicalAnswerEvidenceMessageId || "");
+    if (medical.medicalAnswered === "已解答" && (answerMessage?.role !== "sales" || !hasVerifiedEvidence(messageById, medical.medicalAnswerEvidenceMessageId, medical.medicalAnswerEvidenceQuote))) throw new Error("已解答结论缺少可核验的销售原文");
+    const medicalAcceptanceMessage = messageById.get(medical.medicalAcceptanceEvidenceMessageId || "");
+    const answerIndex = messages.findIndex((message) => message.id === medical.medicalAnswerEvidenceMessageId);
+    const medicalAcceptanceIndex = messages.findIndex((message) => message.id === medical.medicalAcceptanceEvidenceMessageId);
+    if (medical.medicalAccepted === "客户明确肯定" && (medicalAcceptanceMessage?.role !== "customer" || answerIndex < 0 || medicalAcceptanceIndex <= answerIndex || !hasVerifiedEvidence(messageById, medical.medicalAcceptanceEvidenceMessageId, medical.medicalAcceptanceEvidenceQuote))) throw new Error("客户肯定结论缺少解答之后的可核验原文");
   }
   return value;
 }
