@@ -31,6 +31,7 @@ export interface ConfirmationItem {
   label: string;
   status: ConfirmationStatus;
   evidence: string;
+  evidenceQuote?: string;
   riskReason?: string;
   confidence: number;
 }

@@ -16,12 +16,12 @@ export const defaultConfirmations: ConfirmationItem[] = [
   { id: "education", category: "认知与经历", label: "是否需要基础知识科普", status: "unknown", evidence: "对话中尚未确认。", confidence: 0.54 },
   { id: "medical", category: "认知与经历", label: "剂量、使用或医疗问题", status: "unknown", evidence: "尚未出现相关问题；如出现需进行合规提示。", confidence: 0.68 },
   { id: "scammed", category: "认知与经历", label: "是否有被骗经历", status: "unknown", evidence: "客户表达付款安全顾虑，但没有明确说明经历。", confidence: 0.63 },
-  { id: "coa", category: "产品与信任", label: "COA 与产品一致性", status: "risk", evidence: "客户询问收到的产品是否对应同一批次 COA。", riskReason: "客户尚未确认质量文件与实际交付批次一致，可能阻碍首次下单。", confidence: 0.96 },
+  { id: "coa", category: "产品与信任", label: "COA 与产品一致性", status: "risk", evidence: "客户询问收到的产品是否对应同一批次 COA。", evidenceQuote: "Customer: Is the COA from the same batch I will receive?", riskReason: "客户尚未确认质量文件与实际交付批次一致，可能阻碍首次下单。", confidence: 0.96 },
   { id: "packaging", category: "产品与信任", label: "产品包装", status: "unknown", evidence: "对话中尚未讨论包装。", confidence: 0.91 },
   { id: "company", category: "产品与信任", label: "公司资料", status: "unknown", evidence: "销售介绍了公司背景，但客户未明确确认是否足够。", confidence: 0.72 },
   { id: "feedback", category: "产品与信任", label: "其他客户反馈", status: "unknown", evidence: "尚未提供或讨论可验证反馈。", confidence: 0.88 },
   { id: "logistics", category: "交易条件", label: "物流、清关和时效", status: "unknown", evidence: "尚未确认目的地和期望时效。", confidence: 0.92 },
-  { id: "payment_method", category: "交易条件", label: "支付方式与付款安全", status: "risk", evidence: "客户询问首次订单可获得什么付款保障。", riskReason: "客户对首次付款的资金安全缺乏信心，未解决前可能不会付款。", confidence: 0.95 },
+  { id: "payment_method", category: "交易条件", label: "支付方式与付款安全", status: "risk", evidence: "客户询问首次订单可获得什么付款保障。", evidenceQuote: "Customer: What protection do I have for the first order?", riskReason: "客户对首次付款的资金安全缺乏信心，未解决前可能不会付款。", confidence: 0.95 },
 ];
 
 export const demoReport: AnalysisReport = {

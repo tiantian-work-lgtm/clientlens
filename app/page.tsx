@@ -111,6 +111,7 @@ function normalizeReport(value: unknown): CustomerTask["report"] {
       ...fallback,
       status,
       evidence,
+      evidenceQuote: stringValue(item.evidenceQuote, fallback.evidenceQuote || ""),
       riskReason: status === "risk" ? stringValue(item.riskReason, evidence) : "",
       confidence: Number.isFinite(confidence) ? Math.min(1, Math.max(0, confidence)) : fallback.confidence,
     };
@@ -478,6 +479,7 @@ function ConfirmationChecklist({ task, onUpdate }: { task: CustomerTask; onUpdat
       report: { ...task.report, confirmations: task.report.confirmations.map((current) => current.id === item.id ? {
         ...current,
         status,
+        evidenceQuote: status === "risk" ? current.evidenceQuote || "" : current.evidenceQuote,
         riskReason: status === "risk" ? current.riskReason || "该项目由人工标记为风险，具体原因需要补充确认。" : "",
       } : current) },
     });
@@ -510,6 +512,7 @@ function ConfirmationChecklist({ task, onUpdate }: { task: CustomerTask; onUpdat
           <strong>{item.label}</strong>
           <p><span>风险原因</span>{item.riskReason || item.evidence || "该项目被人工标记为风险，原因尚待补充。"}</p>
           <p><span>对话依据</span>{item.evidence || "暂无直接对话依据，建议进一步确认。"}</p>
+          <blockquote><span>原始片段</span>{item.evidenceQuote ? `“${item.evidenceQuote.replaceAll("“", "").replaceAll("”", "") }”` : "暂无可验证的原始聊天片段"}</blockquote>
         </div>)}
       </div>}
       <div className="confirmation-groups">
