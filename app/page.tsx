@@ -320,7 +320,7 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
 
           <ReportCard icon={Sparkles} title="AI 下一步建议" tone="violet" featured>
             <div className="action-list">{activeTask.report.nextActions.map((item, i) => <div key={item}><span>{i + 1}</span><p>{item}</p></div>)}</div>
-            <div className="reply-box"><div><Bot size={16} /><strong>建议回复</strong><button onClick={() => navigator.clipboard.writeText(activeTask.report.suggestedReply)}><Copy size={14} />复制</button></div><p>{activeTask.report.suggestedReply}</p></div>
+            <div className="reply-box"><div><Bot size={16} /><strong>建议回复</strong><button onClick={() => navigator.clipboard.writeText(activeTask.report.suggestedReply)}><Copy size={14} />复制原文</button></div><p>{activeTask.report.suggestedReply}</p><div className="reply-translation"><span>中文核对</span><p>{activeTask.report.suggestedReplyTranslation}</p></div></div>
           </ReportCard>
         </div>
       </section>
@@ -345,7 +345,7 @@ const confirmationState: Record<ConfirmationStatus, { label: string; className: 
 
 function ConfirmationChecklist({ task, onUpdate }: { task: CustomerTask; onUpdate: (task: CustomerTask) => void }) {
   const [generating, setGenerating] = useState<string | null>(null);
-  const [result, setResult] = useState<{ id: string; mode: "hook" | "explain"; text: string } | null>(null);
+  const [result, setResult] = useState<{ id: string; mode: "hook" | "explain"; text: string; translation: string } | null>(null);
   const categories: ConfirmationItem["category"][] = ["客户角色", "认知与经历", "产品与信任", "交易条件"];
   const completed = task.report.confirmations.filter((item) => item.status === "confirmed" || item.status === "na").length;
 
@@ -368,9 +368,9 @@ function ConfirmationChecklist({ task, onUpdate }: { task: CustomerTask; onUpdat
         body: JSON.stringify({ conversation: task.rawConversation, item: item.label, mode, provider: task.provider }),
       });
       const data = await response.json();
-      setResult({ id: item.id, mode, text: data.suggestion || data.error || "暂时无法生成建议。" });
+      setResult({ id: item.id, mode, text: data.suggestion || data.error || "暂时无法生成建议。", translation: data.translation || "暂无中文翻译。" });
     } catch {
-      setResult({ id: item.id, mode, text: "生成失败，请稍后重试。" });
+      setResult({ id: item.id, mode, text: "Generation failed. Please try again later.", translation: "生成失败，请稍后重试。" });
     } finally {
       setGenerating(null);
     }
@@ -398,7 +398,7 @@ function ConfirmationChecklist({ task, onUpdate }: { task: CustomerTask; onUpdat
                   <button onClick={() => generate(item, "hook")} disabled={!!generating}><Sparkles size={12} />{generating === `${item.id}-hook` ? "生成中…" : "生成探询钩子"}</button>
                   <button onClick={() => generate(item, "explain")} disabled={!!generating}><Bot size={12} />{generating === `${item.id}-explain` ? "生成中…" : "生成直接阐述"}</button>
                 </div>}
-                {selectedResult && <div className="generated-suggestion"><header><span>{selectedResult.mode === "hook" ? "探询钩子" : "直接阐述"}</span><button onClick={() => navigator.clipboard.writeText(selectedResult.text)}><Copy size={12} />复制</button></header><p>{selectedResult.text}</p></div>}
+                {selectedResult && <div className="generated-suggestion"><header><span>{selectedResult.mode === "hook" ? "探询钩子" : "直接阐述"}</span><button onClick={() => navigator.clipboard.writeText(selectedResult.text)}><Copy size={12} />复制原文</button></header><p>{selectedResult.text}</p><div className="suggestion-translation"><span>中文核对</span><p>{selectedResult.translation}</p></div></div>}
               </div>;
             })}
           </section>;
@@ -591,7 +591,7 @@ function SettingsView() {
     <div className="settings-layout"><aside><button className="active"><Bot size={16} />大模型设置</button><button><Link2 size={16} />SaleSmartly</button><button><ListChecks size={16} />分析模板</button><button><ShieldCheck size={16} />数据与安全</button></aside><div className="settings-content">
       <div className="settings-title"><h2>大模型服务</h2><p>密钥仅由服务端加密保存，不会发送到浏览器。</p></div>
       <div className="provider-grid">
-        <ProviderCard name="OpenAI GPT" icon={<Sparkles size={20} />} className="openai-card" model="gpt-5.4-mini" hint="Responses API · Structured Outputs" configured={connections.openai} />
+        <ProviderCard name="OpenAI GPT" icon={<Sparkles size={20} />} className="openai-card" model="gpt-5.6-terra" hint="Responses API · Structured Outputs" configured={connections.openai} />
         <ProviderCard name="DeepSeek" icon={<Zap size={20} />} className="deepseek-card" model="deepseek-v4-flash" hint="Chat Completions · JSON Output" configured={connections.deepseek} />
       </div>
       <section className="setting-card"><header><div className="setting-icon"><Bot size={18} /></div><div><h3>功能模型分配</h3><p>不同任务可以分别选择模型，以平衡质量、速度和成本。</p></div></header><div className="assignment-table"><div><span>客户分析</span><small>总结、阶段、异议和下一步建议</small><ProviderSelect value={analysisProvider} onChange={setAnalysisProvider} /></div><div><span>AI 翻译</span><small>商务翻译和术语保护</small><ProviderSelect value={translationProvider} onChange={setTranslationProvider} /></div><div><span>知识库整理</span><small>提取标签和整理内容</small><ProviderSelect value={analysisProvider} onChange={setAnalysisProvider} /></div></div></section>

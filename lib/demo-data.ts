@@ -59,6 +59,8 @@ export const demoReport: AnalysisReport = {
   ],
   suggestedReply:
     "I understand why you want to verify this before a first order. The document we provide will be matched to the batch prepared for your order, and I can mark the batch details clearly for you. Would you prefer to confirm the payment option or the delivery timeline next?",
+  suggestedReplyTranslation:
+    "我理解您在首次下单前希望核实这一点。我们提供的文件会与为您订单准备的批次相对应，我也可以为您清楚标注批次信息。您希望下一步先确认付款方式，还是配送时效？",
   confidence: 0.88,
 };
 

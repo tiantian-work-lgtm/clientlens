@@ -44,6 +44,7 @@ export interface AnalysisReport {
   improvements: string[];
   nextActions: string[];
   suggestedReply: string;
+  suggestedReplyTranslation: string;
   confidence: number;
 }
 
