@@ -101,12 +101,6 @@ function objectionStatusClass(status: CustomerTask["report"]["objections"][numbe
   return "unresolved";
 }
 
-function profileParts(value: string) {
-  const fullWidthSeparator = value.indexOf("：");
-  const separator = fullWidthSeparator >= 0 ? fullWidthSeparator : value.indexOf(":");
-  return separator < 0 ? ["画像特征", value] : [value.slice(0, separator), value.slice(separator + 1)];
-}
-
 function normalizeReport(value: unknown, conversation = ""): CustomerTask["report"] {
   const report = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
   const profile = stringList(report.profile);
@@ -690,10 +684,7 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
           </ReportCard>
 
           <ReportCard icon={UserRound} title="客户画像" tone="blue">
-            <div className="profile-grid">{activeTask.report.profile.map((item, index) => {
-              const [label, detail] = profileParts(item);
-              return <div key={`${label}-${index}`}><small>{label}</small><strong className={detail === "待确认" ? "unknown" : ""}>{detail}</strong></div>;
-            })}</div>
+            <div className="profile-tags">{activeTask.report.profile.map((item, index) => <span key={`${item}-${index}`}>{item}</span>)}</div>
           </ReportCard>
           </>}
 

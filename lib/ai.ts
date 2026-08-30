@@ -11,7 +11,7 @@ const customerSchema = {
   required: ["summary", "profile", "emotionProfile", "stage", "parallelStages", "stageReason", "confidence"],
   properties: {
     summary: { type: "string" },
-    profile: { type: "array", minItems: 10, maxItems: 10, items: { type: "string" } },
+    profile: { type: "array", items: { type: "string" } },
     emotionProfile: {
       type: "object",
       additionalProperties: false,
@@ -299,7 +299,7 @@ const checklistSchema = {
 };
 
 const analysisPrompts: Record<AnalysisModule, string> = {
-  customer: `${commonPrompt}\n只返回对话总结、10维客户画像和销售阶段。profile 严格按“身份与组织、客户类型与经验、核心需求与目标、产品兴趣、决策权与流程、采购意向、价格敏感度、信任状态、核心关注与风险偏好、沟通风格与下一步倾向”的顺序，以“维度：结论”返回10项；未知写待确认。stage 只能使用规定七阶段，第一至三阶段可并行。`,
+  customer: `${commonPrompt}\n只返回对话总结、客户画像标签和销售阶段。profile 由模型根据真实聊天自由提炼为简洁、具体、可独立阅读的画像标签，不预设分类、数量、顺序或“分类：内容”格式；没有原文依据的特征不得输出，不得为了凑数量重复。stage 只能使用规定七阶段，第一至三阶段可并行。`,
   psychology: `${commonPrompt}\n只返回 emotionProfile。依据客户真实原文分析当前情绪、变化、沟通性格倾向、敏感点、沟通和决策方式，并作非临床心理研判：当前心理状态、核心驱动力、信任需求、防御或回避模式、压力反应。使用“可能、倾向”等限定语，不诊断疾病或人格障碍，不推断隐私；evidence 只引用客户消息的真实 M 编号和逐字原文，证据不足就明确说明并降低 confidence。`,
   objections: `${commonPrompt}\n只返回 objections。仅保留有客户逐字原文证据的明确异议或犹豫，禁止占位标题。未正面回答或客户再次追问=未解决；销售正面回答且客户未再追问=未追问-基本解决；销售回答后客户明确认可=客户肯定-完全解决。解决证据必须发生在异议之后；沉默、礼貌致谢和话题切换不算肯定。`,
   checklist: `${commonPrompt}\n只返回 confirmations，必须且只按顺序返回 role、seeding、medical、scammed、coa、packaging、company、feedback、logistics、payment_method 共10项。每项只使用统一精简字段：conclusion 是该项结论，detail 是方向或具体说明，source 是谁提出，handling 是销售是否处理，reaction 是客户反应，advice 是下一步建议。seeding 结论只能“需要种草/无需种草”；medical 只能“需要提供建议/无需提供建议”；scammed 只能“有被骗经历/无被骗经历”。其他项目 conclusion 简洁概括。已处理必须引用销售原文；客户明确肯定、满意或异议必须引用客户原文并符合消息顺序。未提及的字段使用未提及、未确认或不适用，不得虚构证据。只有真实成交障碍才标 risk。`,
@@ -603,14 +603,13 @@ function cleanStringArray(value: unknown, fallback: string[] = ["信息不足"])
 
 function normalizeCustomerResult(value: unknown): CustomerModuleResult {
   const raw = value && typeof value === "object" ? value as Partial<CustomerModuleResult> : {};
-  const profile = profileDimensions.map((dimension, index) => {
-    const candidate = Array.isArray(raw.profile) ? raw.profile[index] : "";
-    return typeof candidate === "string" && new RegExp(`^${dimension}[：:]`).test(candidate.trim()) ? candidate.trim() : `${dimension}：待确认`;
-  });
+  const profile = Array.isArray(raw.profile)
+    ? raw.profile.filter((item): item is string => typeof item === "string" && Boolean(item.trim())).map((item) => item.trim())
+    : [];
   const confidence = Number(raw.confidence);
   return {
     summary: raw.summary?.trim() || "当前对话信息不足，建议结合原始聊天人工核对。",
-    profile,
+    profile: profile.length ? profile : ["当前对话信息不足，暂未形成明确画像"],
     stage: stages.includes(raw.stage || "") ? raw.stage as SalesStage : "初次询盘与客户背调",
     parallelStages: Array.isArray(raw.parallelStages) ? raw.parallelStages.filter((stage): stage is SalesStage => stages.includes(stage)).slice(0, 3) : [],
     stageReason: raw.stageReason?.trim() || "当前信息不足，暂按初次询盘阶段处理。",
