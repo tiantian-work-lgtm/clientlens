@@ -389,9 +389,46 @@ interface DeepSeekResponse {
   }>;
 }
 
+function removeTrailingJsonCommas(content: string) {
+  let result = "";
+  let inString = false;
+  let escaped = false;
+  for (let index = 0; index < content.length; index += 1) {
+    const character = content[index];
+    if (inString) {
+      result += character;
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === '"') inString = false;
+      continue;
+    }
+    if (character === '"') {
+      inString = true;
+      result += character;
+      continue;
+    }
+    if (character === ",") {
+      let next = index + 1;
+      while (next < content.length && /\s/.test(content[next])) next += 1;
+      if (content[next] === "}" || content[next] === "]") continue;
+    }
+    result += character;
+  }
+  return result;
+}
+
 function parseJsonContent<T>(content: string): T {
-  const cleaned = content.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
-  return JSON.parse(cleaned) as T;
+  const unfenced = content.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+  const start = unfenced.indexOf("{");
+  const end = unfenced.lastIndexOf("}");
+  const cleaned = start >= 0 && end > start ? unfenced.slice(start, end + 1) : unfenced;
+  try {
+    return JSON.parse(cleaned) as T;
+  } catch (initialError) {
+    const repaired = removeTrailingJsonCommas(cleaned);
+    if (repaired === cleaned) throw initialError;
+    return JSON.parse(repaired) as T;
+  }
 }
 
 async function requestDeepSeekJson<T>(
@@ -400,10 +437,11 @@ async function requestDeepSeekJson<T>(
   maxTokens: number,
 ): Promise<T> {
   let lastFinishReason = "unknown";
+  let lastFailure = "返回内容为空";
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const retryMessages = attempt === 0 ? messages : [
       ...messages,
-      { role: "user" as const, content: "上一次返回内容为空。请立即输出一个完整、非空、可由 JSON.parse 解析的 JSON 对象，不要输出 Markdown。" },
+      { role: "user" as const, content: `上一次输出未通过 JSON 解析：${lastFailure}。请从头重新输出一个完整、非空、语法严格合法的 JSON 对象。所有字段名和字符串必须使用双引号，最后一个字段或数组元素后禁止保留逗号，不要输出 Markdown。` },
     ];
     const response = await fetch(`${config.baseUrl || "https://api.deepseek.com"}/chat/completions`, {
       method: "POST",
@@ -427,9 +465,17 @@ async function requestDeepSeekJson<T>(
     const choice = data.choices?.[0];
     lastFinishReason = choice?.finish_reason || "unknown";
     const content = choice?.message?.content?.trim();
-    if (content) return parseJsonContent<T>(content);
+    if (!content) {
+      lastFailure = `返回内容为空（finish_reason: ${lastFinishReason}）`;
+      continue;
+    }
+    try {
+      return parseJsonContent<T>(content);
+    } catch (error) {
+      lastFailure = error instanceof Error ? error.message : "JSON 语法错误";
+    }
   }
-  throw new Error(`DeepSeek 连续两次返回空内容（finish_reason: ${lastFinishReason}）。请切换 deepseek-v4-pro 或暂时改用 OpenAI。`);
+  throw new Error(`DeepSeek 连续两次未返回合法 JSON（${lastFailure}；finish_reason: ${lastFinishReason}）。请重试该模块或暂时改用 OpenAI。`);
 }
 
 async function requestOpenAIJson<T>(config: RuntimeProviderConfig, schema: Record<string, unknown>, schemaName: string, instructions: string, input: string): Promise<T> {
@@ -1076,7 +1122,7 @@ async function requestModuleOnce(config: RuntimeProviderConfig, provider: Provid
   if (provider === "openai") {
     return requestOpenAIJson<AnalysisModuleResult>(config, moduleSchema(module), `customer_${module}_analysis`, instruction, input);
   }
-  const tokens = module === "checklist" ? 4200 : module === "psychology" ? 2600 : module === "customer" ? 2200 : module === "objections" ? 2800 : 2400;
+  const tokens = module === "checklist" ? 4200 : module === "psychology" ? 4500 : module === "customer" ? 2200 : module === "objections" ? 2800 : 2400;
   const schema = JSON.stringify(moduleSchema(module));
   const example = JSON.stringify(deepSeekJsonExample(module));
   return requestDeepSeekJson<AnalysisModuleResult>(config, [{
