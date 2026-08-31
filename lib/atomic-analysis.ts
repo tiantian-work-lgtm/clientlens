@@ -1,6 +1,5 @@
 import { buildNumberedConversationChunks, parseConversationMessages, type ParsedConversationMessage } from "./conversation";
 import { getRuntimeProviderConfig, type RuntimeProviderConfig } from "./provider-config";
-import { formatScriptKnowledgeContext, recordScriptUsage, retrieveRelevantScripts, toScriptReferences } from "./script-knowledge";
 import type { AnalysisModule, BuyingDriver, CommunicationImprovement, CommunicationTrait, DealBlocker, EmotionEvidence, EmotionTurningPoint, KnowledgeScriptReference, NextStepStrategy, ProductMention, Provider } from "./types";
 
 export type BlockerAssessment = Pick<DealBlocker, "evidenceMessageId" | "handlingStatus" | "salesEvidenceMessageId" | "salesEvidenceQuote" | "salesEvidenceTranslation" | "resolutionEvidenceMessageId" | "resolutionEvidenceQuote" | "resolutionEvidenceTranslation" | "solutionDirection">;
@@ -56,7 +55,7 @@ const prompts: Record<AnalysisModule, string> = {
   blocker_status: "独立通读完整聊天，找出每个客户阻力原文，并按消息顺序判断销售处理状态。没有正面回答或客户再次追问=未解决；销售回答后客户未追问=已回答-客户未追问；销售回答后客户明确认可=客户明确认可。礼貌致谢、沉默和换话题不算认可。evidenceMessageId 必须是阻力客户消息编号。",
   improvements: "评估本次销售沟通质量，最多6项，按高、中、低排序。每项三段：issue 说明发生了什么及影响；handling 客观总结销售如何处理，未处理写销售尚未处理；recommendation 说明应该怎样处理。不重复罗列客户阻力，不生成完整回复。不得仅因缺少医疗免责声明或未建议咨询医生而生成问题。",
   strategy: "根据上游结果生成唯一的下一步成交策略。必须综合总结、沟通性格、决策方式、核心下单驱动力、成交阻力及其处理状态、沟通不足。给出一个核心目标、原因、1-5步顺序、沟通方式和暂时不要做的事，不得机械复述板块。",
-  reply: "根据上游策略生成一段可直接发送的自然回复，沿用客户语言；同时返回自然简体中文核对。可参考话术知识库，但不得把知识库示例当作客户事实；knowledgeReferenceIds 只列实际采用的话术ID。",
+  reply: "根据上游策略生成一段可直接发送的自然回复，沿用客户语言；同时返回自然简体中文核对。不得读取、引用或模仿话术库内容；knowledgeReferenceIds 固定返回空数组。",
 };
 
 function parseJson<T>(text: string): T {
@@ -158,19 +157,14 @@ export async function analyzeAtomicModuleWithProvider(provider: Provider, conver
   if (!config) return null;
   const messages = parseConversationMessages(conversation);
   const dependent = module === "strategy" || module === "reply";
-  const scripts = module === "reply" ? await retrieveRelevantScripts(conversation) : [];
-  const extra = module === "reply" ? formatScriptKnowledgeContext(scripts) : "";
   const upstream = analysisContext ? `\n\n上游分析结果（只用于综合，不得覆盖原始聊天）：\n${JSON.stringify(analysisContext)}` : "";
   const chunks = buildNumberedConversationChunks(conversation);
   const inputs = dependent ? [chunks.join("\n") + upstream] : chunks;
-  const rawResults = await Promise.all(inputs.map((input) => requestJson(config, provider, module, input, extra)));
+  const rawResults = await Promise.all(inputs.map((input) => requestJson(config, provider, module, input, "")));
   const normalizedResults = rawResults.map((result) => normalizeResult(module, result, messages));
   const result = combine(module, normalizedResults, messages);
   if (module !== "reply") return result;
   const reply = result as Extract<AtomicAnalysisResult, { suggestedReply: string }>;
   if (!reply.suggestedReply || !reply.suggestedReplyTranslation) throw new Error("建议回复模块字段不完整");
-  const allowed = new Set(scripts.map((script) => script.id));
-  const ids = reply.knowledgeReferenceIds.filter((id, index, all) => allowed.has(id) && all.indexOf(id) === index);
-  await recordScriptUsage(ids);
-  return { ...reply, knowledgeReferenceIds: ids, knowledgeReferences: toScriptReferences(scripts, ids) };
+  return { ...reply, knowledgeReferenceIds: [], knowledgeReferences: [] };
 }
