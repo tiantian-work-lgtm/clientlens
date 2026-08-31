@@ -1,9 +1,8 @@
-import type { AnalysisModule, AnalysisReport, BuyingDriver, CommunicationImprovement, ConfirmationItem, CustomerEmotionProfile, DealBlocker, DealDecisionMap, KnowledgeScript, KnowledgeScriptReference, NextStepStrategy, Objection, ProductMention, Provider, SalesStage } from "./types";
+import type { AnalysisModule, AnalysisReport, BuyingDriver, CommunicationImprovement, ConfirmationItem, CustomerEmotionProfile, DealBlocker, DealDecisionMap, KnowledgeScript, KnowledgeScriptReference, NextStepStrategy, Objection, ProductMention, Provider } from "./types";
 import { getRuntimeProviderConfig, type RuntimeProviderConfig } from "./provider-config";
 import { buildNumberedConversationChunks, parseConversationMessages, type ParsedConversationMessage } from "./conversation";
 import { formatScriptKnowledgeContext, recordScriptUsage, retrieveRelevantScripts, toScriptReferences } from "./script-knowledge";
 
-const stages = ["初次询盘与客户背调", "信任建立", "产品与订单匹配", "决策推进", "等待付款", "已成交", "售后与复购"];
 const profileDimensions = ["身份与组织", "客户类型与经验", "核心需求与目标", "产品兴趣", "决策权与流程", "采购意向", "价格敏感度", "信任状态", "核心关注与风险偏好", "沟通风格与下一步倾向"];
 
 const productMentionsProperty = {
@@ -38,7 +37,7 @@ function emotionEvidenceSchema() {
 const customerSchema = {
   type: "object",
   additionalProperties: false,
-  required: ["summary", "profile", "productMentions", "emotionProfile", "stage", "parallelStages", "stageReason", "confidence"],
+  required: ["summary", "profile", "productMentions", "emotionProfile", "confidence"],
   properties: {
     summary: { type: "string" },
     profile: { type: "array", items: { type: "string" } },
@@ -75,9 +74,6 @@ const customerSchema = {
         confidence: { type: "number", minimum: 0, maximum: 1 },
       },
     },
-    stage: { type: "string", enum: stages },
-    parallelStages: { type: "array", items: { type: "string", enum: stages } },
-    stageReason: { type: "string" },
     confidence: { type: "number", minimum: 0, maximum: 1 },
   },
 };
@@ -235,7 +231,7 @@ const actionSchema = {
 const commonPrompt = `你是一名严谨的 B2B 销售对话分析师。判断与事实必须分开，不确定的信息不能当成事实。输入中的每条消息都有稳定编号 M00001 等。不得虚构消息、客户背景、公司资料或公开背调信息。所有分析字段使用中文。`;
 
 const legacyModulePrompts = {
-  customer: `${commonPrompt}\n只分析：对话总结、客户画像、销售阶段和总体置信度。客户画像 profile 必须严格返回 10 项，并按以下顺序和“维度：结论”格式填写：身份与组织、客户类型与经验、核心需求与目标、产品兴趣、决策权与流程、采购意向、价格敏感度、信任状态、核心关注与风险偏好、沟通风格与下一步倾向。每项应尽量具体，但只能依据聊天内容；聊天没有提供的维度必须写“维度：待确认”，禁止用常识补全或虚构。销售阶段只能从七阶段中选择；主阶段取最接近当前成交里程碑的一项，第1至3阶段可以同时放入 parallelStages。`,
+  customer: `${commonPrompt}\n只分析对话总结、客户画像和对话中提及的产品，不判断销售阶段。客户画像必须严格依据原始聊天，禁止用常识补全或虚构。`,
   risk: `${commonPrompt}\n只分析异议、犹豫点、风险和确认清单，JSON 根对象只能包含 objections 和 confirmations。异议必须有真实客户原文，禁止“待确认异议1”等占位标题。按消息顺序判断：未正面回答、回避或客户再次追问=未解决；销售正面回答且客户未再追问=未追问-基本解决；销售回答后客户明确认可=客户肯定-完全解决。基本解决引用销售回答，完全解决引用客户后续肯定；沉默、礼貌致谢或话题切换不算肯定。确认清单必须且只返回 10 项：role、seeding、medical、scammed、coa、packaging、company、feedback、logistics、payment_method，禁止返回 education。只有明确顾虑或成交阻碍才能标记 risk，没谈到应标记 unknown。所有 evidenceQuote 必须逐字引用对应 M 编号原文。seeding 必须在需要种草/无需种草中二选一：需要时填写客户改善期望或痛点方向、销售是否已种草、客户是否在种草后明确肯定及下一步建议；已种草必须引用销售原话，客户明确肯定必须引用更晚的客户原话；非 seeding 项的全部 seeding 字段为空。medical 必须在需要提供建议/无需提供建议中二选一：客户提出剂量、用法、不良反应、禁忌、身体状况、疗效预期等需求时判为需要；需要时填写需求方向、是否已解答、客户是否在解答后明确肯定及下一步建议；已解答必须引用销售原话，客户明确肯定必须引用更晚的客户原话。不得仅因为销售没有写“非医疗建议”免责声明或没有建议咨询医生，就判定为未解答、风险或沟通问题；非 medical 项的全部 medical 字段为空。`,
   action: `${commonPrompt}\n分析“本次沟通可改善和不足”、下一步行动和建议回复。improvements 最多 6 项，按高、中、低优先级排列并语义去重，每项固定三段：issue 说明发生了什么以及影响；handling 客观总结销售如何处理，未处理必须写“销售尚未处理”；recommendation 说明应该怎么处理。前两段只能依据原始对话，不能使用知识库补充事实；recommendation 可以借鉴话术知识库。客户事实必须引用真实客户消息，销售处理必须引用真实销售消息；没有对应证据的字段返回空字符串，不得虚构。此模块评估销售沟通质量，不重复罗列客户异议，也不在改善项中生成完整回复。suggestedReply 沿用客户语言，suggestedReplyTranslation 返回自然简体中文翻译。不得仅因为销售没有写医疗免责声明或没有建议咨询医生而生成改善项。`,
 };
@@ -250,14 +246,11 @@ const paymentPromptAddon = `\npayment_method（支付方式与付款安全）必
 
 const profileSchema = {
   type: "object", additionalProperties: false,
-  required: ["summary", "profile", "productMentions", "stage", "parallelStages", "stageReason", "confidence"],
+  required: ["summary", "profile", "productMentions", "confidence"],
   properties: {
     summary: customerSchema.properties.summary,
     profile: customerSchema.properties.profile,
     productMentions: productMentionsProperty,
-    stage: customerSchema.properties.stage,
-    parallelStages: customerSchema.properties.parallelStages,
-    stageReason: customerSchema.properties.stageReason,
     confidence: customerSchema.properties.confidence,
   },
 };
@@ -317,7 +310,7 @@ const checklistSchema = {
 };
 
 const analysisPrompts: Record<AnalysisModule, string> = {
-  customer: `${commonPrompt}\n只返回对话总结、客户画像标签、对话提及产品和销售阶段。profile 由模型根据真实聊天自由提炼为简洁、具体、可独立阅读的画像标签，不预设分类、固定数量、顺序或“分类：内容”格式；应尽可能覆盖聊天中有证据的身份、经验、需求、关注点、信任、价格、决策和沟通特征，使画像足够丰富，通常可提炼 5 至 12 个标签，证据确实较少时允许更少。没有原文依据的特征不得输出，不得为了凑数量重复。productMentions 必须列出聊天中出现的每一个具体产品、多肽或药物并去重。公司名、厂家名、店铺名以及仅代表供应方的品牌名称不得作为产品输出；若商品名本身明确指向一种具体产品或药物，则应按具体产品保留。mentionedBy 判断客户、销售或双方提及；customerAwareness 依据客户原话判断不了解、初步了解、有使用经验、明确熟悉或无法判断；customerInterest 判断明确感兴趣、可能感兴趣、未表现兴趣、明确拒绝或无法判断；awarenessReason 说明判断依据。evidenceMessageId 和 evidenceQuote 必须引用包含该产品名或能直接证明客户了解程度的真实消息编号及逐字原文。仅由销售提及而客户未回应时，客户了解程度和兴趣必须填无法判断。stage 只能使用规定七阶段，第一至三阶段可并行。`,
+  customer: `${commonPrompt}\n只返回对话总结、客户画像标签和对话提及产品，不判断或输出任何销售阶段。profile 由模型根据真实聊天自由提炼为简洁、具体、可独立阅读的画像标签，不预设分类、固定数量、顺序或“分类：内容”格式；应尽可能覆盖聊天中有证据的身份、经验、需求、关注点、信任、价格、决策和沟通特征，使画像足够丰富，通常可提炼 5 至 12 个标签，证据确实较少时允许更少。没有原文依据的特征不得输出，不得为了凑数量重复。productMentions 必须列出聊天中出现的每一个具体产品、多肽或药物并去重。公司名、厂家名、店铺名以及仅代表供应方的品牌名称不得作为产品输出；若商品名本身明确指向一种具体产品或药物，则应按具体产品保留。mentionedBy 判断客户、销售或双方提及；customerAwareness 依据客户原话判断不了解、初步了解、有使用经验、明确熟悉或无法判断；customerInterest 判断明确感兴趣、可能感兴趣、未表现兴趣、明确拒绝或无法判断；awarenessReason 说明判断依据。evidenceMessageId 和 evidenceQuote 必须引用包含该产品名或能直接证明客户了解程度的真实消息编号及逐字原文。仅由销售提及而客户未回应时，客户了解程度和兴趣必须填无法判断。`,
   psychology: `${commonPrompt}\n只返回 emotionProfile，并严格按 JSON 示例字段输出。\n1. currentState 将客户当前情绪与可从表达观察到的心理状态合并成一段结论；不要诊断疾病、人格障碍或贴 MBTI 标签。currentStateEvidence 必须给出支持结论的真实客户消息。\n2. emotionTurningPoints 按聊天先后顺序提取真正发生变化的 0-8 个情绪转折点。score 只能为 -2 到 2；label 是简短情绪标签，reason 说明转折原因。没有明显转折时返回 []，不得虚构。\n3. personalitySummary 用一句自然中文概括全部可观察沟通性格；personalityTraits 再列具体倾向，每项包含 trait、explanation 和自己的 evidence；不输出敏感点或防御/回避模式。\n4. decisionStyle 总结决策方式；decisionFactors 写主要考虑因素；decisionPace 写决策节奏；communicationApproach 写适合的沟通方式；decisionEvidence 必须直接支撑判断。\n5. 每条 evidence 必须引用真实客户消息的 M 编号与逐字原文，并提供忠实中文翻译和解释。禁止改写、拼接或引用销售消息。信息不足时明确说明并降低 confidence。`,
   objections: `${commonPrompt}\n只返回 objections。仅保留有客户逐字原文证据的明确异议或犹豫，禁止占位标题。未正面回答或客户再次追问=未解决；销售正面回答且客户未再追问=未追问-基本解决；销售回答后客户明确认可=客户肯定-完全解决。解决证据必须发生在异议之后；沉默、礼貌致谢和话题切换不算肯定。`,
   checklist: `${commonPrompt}\n业务上只返回 decisionMap（成交决策地图），禁止返回 offensePoints、defensePoints、confirmations 或独立 objections。它只回答：客户为什么想买、为什么还没买、当前最需要解决什么。\nbuyingDrivers 只保留真正推动购买的核心原因，最多3项；相同目标、需求、购买意向、直接货源诉求必须语义合并，禁止拆成近义卡片。每项必须由客户原文支撑，并区分想获得的结果、痛点或期望、驱动力强度、购买意愿和推动成交的原因。\nblockers 合并所有明确异议、产品疑问、价格预算、质量COA、公司信任、包装交付、物流、支付、决策时机和内部审批问题。一个语义问题只输出一次。客户疑问即使代表兴趣，只要尚未解决并可能阻碍决定，就只能进入 blockers，不能同时进入 buyingDrivers。\nhandlingStatus 严格按消息顺序判断：没有销售正面处理或客户再次追问=未解决；销售正面处理后客户未再追问=已回答-客户未追问；销售处理后客户明确认可=客户明确认可。礼貌致谢、沉默和换话题不算明确认可。销售处理存在时必须提供更晚的销售原文；客户明确认可时还必须提供销售处理之后的客户认可原文。不存在的销售处理或认可证据字段全部返回空字符串。\n每个 driver 和 blocker 都必须引用一个可核验客户 M 编号及逐字原文和忠实中文翻译，禁止拼接、改写或虚构。decisionMap 顶部给出总体下单动力、最大阻力、成交准备度和一句首要任务。这里只输出诊断和解决方向，不生成完整回复话术；完整回复属于 action 模块。`,
@@ -328,9 +321,6 @@ export interface CustomerModuleResult {
   summary: string;
   profile: string[];
   productMentions: ProductMention[];
-  stage: SalesStage;
-  parallelStages: SalesStage[];
-  stageReason: string;
   confidence: number;
 }
 
@@ -479,9 +469,6 @@ function deepSeekJsonExample(module: AnalysisModule): Record<string, unknown> {
     summary: "根据完整对话生成的中文总结",
     profile: ["有原文依据的画像标签一", "有原文依据的画像标签二", "有原文依据的画像标签三"],
     productMentions: [{ name: "对话中的真实产品名", mentionedBy: "客户", customerAwareness: "初步了解", customerInterest: "明确感兴趣", awarenessReason: "根据客户原话说明判断", evidenceMessageId: "M00001", evidenceQuote: "必须替换成对应消息中的逐字原文" }],
-    stage: "初次询盘与客户背调",
-    parallelStages: ["信任建立"],
-    stageReason: "根据客户真实表达说明阶段判断依据",
     confidence: 0.8,
   };
   if (module === "psychology") return {
@@ -725,9 +712,6 @@ function normalizeCustomerResult(value: unknown, messages: ParsedConversationMes
     summary: raw.summary?.trim() || "当前对话信息不足，建议结合原始聊天人工核对。",
     profile: profile.length ? profile : ["当前对话信息不足，暂未形成明确画像"],
     productMentions,
-    stage: stages.includes(raw.stage || "") ? raw.stage as SalesStage : "初次询盘与客户背调",
-    parallelStages: Array.isArray(raw.parallelStages) ? raw.parallelStages.filter((stage): stage is SalesStage => stages.includes(stage)).slice(0, 3) : [],
-    stageReason: raw.stageReason?.trim() || "当前信息不足，暂按初次询盘阶段处理。",
     confidence: Number.isFinite(confidence) ? Math.min(1, Math.max(0, confidence)) : 0.25,
   };
 }
@@ -740,10 +724,8 @@ function requireRawModuleResult(module: AnalysisModule, value: unknown, messages
   if (module === "customer") {
     const summary = typeof raw.summary === "string" ? raw.summary.trim() : "";
     const profile = Array.isArray(raw.profile) ? raw.profile.filter((item) => typeof item === "string" && item.trim()) : [];
-    const stage = typeof raw.stage === "string" ? raw.stage : "";
-    const stageReason = typeof raw.stageReason === "string" ? raw.stageReason.trim() : "";
-    if (!summary || profile.length < 1 || !stages.includes(stage) || !stageReason || !Number.isFinite(Number(raw.confidence))) {
-      throw new Error("客户总结或画像字段不完整（需要总结、有效画像标签、阶段、阶段依据和置信度）");
+    if (!summary || profile.length < 1 || !Number.isFinite(Number(raw.confidence))) {
+      throw new Error("客户总结或画像字段不完整（需要总结、有效画像标签和置信度）");
     }
     return;
   }
@@ -963,7 +945,7 @@ function validateLegacyModuleResult(module: "customer" | "risk" | "action", valu
   if (!value || typeof value !== "object") throw new Error(`${module} 模块返回空结果`);
   if (module === "customer") {
     const result = value as CustomerModuleResult & PsychologyModuleResult;
-    if (!result.summary?.trim() || !stages.includes(result.stage) || !Number.isFinite(result.confidence)) throw new Error("客户画像模块字段不完整");
+    if (!result.summary?.trim() || !result.profile.length || !Number.isFinite(result.confidence)) throw new Error("客户画像模块字段不完整");
     if (!Array.isArray(result.profile) || result.profile.length !== profileDimensions.length) throw new Error("客户画像必须完整覆盖 10 个维度");
     if (result.profile.some((item, index) => !new RegExp(`^${profileDimensions[index]}[：:]`).test(item?.trim()))) throw new Error("客户画像维度缺失或顺序不正确");
     const emotion = result.emotionProfile;

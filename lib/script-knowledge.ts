@@ -5,7 +5,6 @@ interface ScriptRow {
   id: string;
   title: string;
   scenario: string;
-  stage: KnowledgeScript["stage"];
   products: unknown;
   customer_roles: unknown;
   trigger_text: string;
@@ -29,7 +28,6 @@ export function mapScriptRow(row: ScriptRow): KnowledgeScript {
     id: row.id,
     title: row.title,
     scenario: row.scenario,
-    stage: row.stage,
     products: stringArray(row.products),
     customerRoles: stringArray(row.customer_roles),
     triggerText: row.trigger_text,
@@ -62,7 +60,7 @@ function containsScore(source: string, searchTokens: string[], weight: number) {
 export async function retrieveRelevantScripts(conversation: string, limit = 6): Promise<KnowledgeScript[]> {
   if (!process.env.DATABASE_URL) return [];
   try {
-    const result = await query<ScriptRow>(`SELECT id, title, scenario, stage, products, customer_roles, trigger_text, content,
+    const result = await query<ScriptRow>(`SELECT id, title, scenario, products, customer_roles, trigger_text, content,
       translation, language, tags, status, priority, usage_count, created_at, updated_at
       FROM sales_scripts WHERE status = 'published' ORDER BY priority DESC, updated_at DESC LIMIT 500`);
     const searchTokens = tokens(conversation).slice(-180);
@@ -87,7 +85,7 @@ export function formatScriptKnowledgeContext(scripts: KnowledgeScript[]) {
   if (!scripts.length) return "\n当前没有检索到匹配的已发布话术。请只依据真实聊天生成回复，knowledgeReferenceIds 返回 []。";
   return `\n下面是从话术知识库检索出的参考资料。它们是表达与销售思路参考，不是客户事实；不得把其中的示例、承诺、价格或产品信息当作本次客户已确认事实。只引用确实影响最终建议回复的条目 ID。\n${scripts.map((script) => [
     `[话术 ${script.id}] ${script.title}`,
-    `场景：${script.scenario || "未分类"}；阶段：${script.stage}；产品：${script.products.join("、") || "通用"}；标签：${script.tags.join("、") || "无"}`,
+    `适用场景：${script.scenario || "未分类"}；产品：${script.products.join("、") || "通用"}；标签：${script.tags.join("、") || "无"}`,
     `触发条件：${script.triggerText || "未填写"}`,
     `参考话术：${script.content}`,
     script.translation ? `中文核对：${script.translation}` : "",
@@ -99,7 +97,7 @@ export function toScriptReferences(scripts: KnowledgeScript[], ids: string[]): K
   return scripts.filter((script) => selected.has(script.id)).map((script) => ({
     id: script.id,
     title: script.title,
-    stage: script.stage,
+    scenario: script.scenario,
     excerpt: script.content.length > 180 ? `${script.content.slice(0, 180)}…` : script.content,
   }));
 }

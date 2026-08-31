@@ -40,7 +40,7 @@ import {
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { defaultConfirmations, defaultProgress, emptyReport, initialTasks } from "@/lib/demo-data";
 import { parseConversationMessages } from "@/lib/conversation";
-import type { AnalysisModule, AnalysisModuleStatus, BuyingDriver, CommunicationImprovement, CommunicationTrait, CustomerTask, DealBlocker, DealDecisionMap, DefensePoint, EmotionEvidence, EmotionTurningPoint, ImportPreview, KnowledgeScript, KnowledgeScriptReference, OffensePoint, ProductMention, Provider, SalesStage, SourceType } from "@/lib/types";
+import type { AnalysisModule, AnalysisModuleStatus, BuyingDriver, CommunicationImprovement, CommunicationTrait, CustomerTask, DealBlocker, DealDecisionMap, DefensePoint, EmotionEvidence, EmotionTurningPoint, ImportPreview, KnowledgeScript, KnowledgeScriptReference, OffensePoint, ProductMention, Provider, SourceType } from "@/lib/types";
 import SettingsManager from "@/app/components/settings-manager";
 
 type View = "analysis" | "scripts" | "products" | "translate" | "settings";
@@ -60,18 +60,8 @@ const sourceMeta: Record<SourceType, { label: string; icon: typeof Cloud; color:
   excel: { label: "Excel", icon: FileSpreadsheet, color: "green" },
 };
 
-const salesStages: SalesStage[] = ["初次询盘与客户背调", "信任建立", "产品与订单匹配", "决策推进", "等待付款", "已成交", "售后与复购"];
-
 type ReportSectionId = "summary" | "profile" | "psychology" | "objections" | "checklist" | "improvements" | "next-actions";
 const ReportCollapseContext = createContext<{ collapsed: Record<string, boolean>; toggle: (id: ReportSectionId) => void }>({ collapsed: {}, toggle: () => undefined });
-
-function normalizeStage(value?: string): SalesStage {
-  if (salesStages.includes(value as SalesStage)) return value as SalesStage;
-  if (value?.includes("付款")) return "等待付款";
-  if (value?.includes("信任") || value?.includes("异议")) return "信任建立";
-  if (value?.includes("成交")) return "已成交";
-  return "初次询盘与客户背调";
-}
 
 function stringValue(value: unknown, fallback = "") {
   return typeof value === "string" && value.trim() ? value.trim() : fallback;
@@ -110,9 +100,6 @@ function objectionStatusClass(status: CustomerTask["report"]["objections"][numbe
 function normalizeReport(value: unknown, conversation = ""): CustomerTask["report"] {
   const report = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
   const profile = stringList(report.profile);
-  const parallelStages = stringList(report.parallelStages)
-    .map((stage) => normalizeStage(stage))
-    .filter((stage, index, items) => items.indexOf(stage) === index);
   const rawObjections = Array.isArray(report.objections) ? report.objections : [];
   const parsedMessages = parseConversationMessages(conversation);
   const messageById = new Map(parsedMessages.map((message) => [message.id, message]));
@@ -418,7 +405,7 @@ function normalizeReport(value: unknown, conversation = ""): CustomerTask["repor
     const id = stringValue(item.id);
     const title = stringValue(item.title);
     if (!id || !title) return [];
-    return [{ id, title, stage: stringValue(item.stage), excerpt: stringValue(item.excerpt) }];
+    return [{ id, title, scenario: stringValue(item.scenario), excerpt: stringValue(item.excerpt) }];
   }) : [];
   const priorityRank = { "高": 0, "中": 1, "低": 2 } as const;
   const improvements: CommunicationImprovement[] = Array.isArray(report.improvements) ? report.improvements.flatMap((value) => {
@@ -446,9 +433,6 @@ function normalizeReport(value: unknown, conversation = ""): CustomerTask["repor
     profile,
     emotionProfile,
     productMentions,
-    stage: normalizeStage(stringValue(report.stage)),
-    parallelStages,
-    stageReason: stringValue(report.stageReason, "当前聊天记录不足以支持更具体的阶段判断。"),
     objections,
     decisionMap,
     offensePoints,
@@ -464,11 +448,11 @@ function normalizeReport(value: unknown, conversation = ""): CustomerTask["repor
 }
 
 const analysisModules: AnalysisModule[] = ["customer", "psychology", "checklist", "action"];
-const analysisModuleLabels: Record<AnalysisModule, string> = { customer: "总结、画像与阶段", psychology: "情绪、性格与心理", objections: "历史异议分析", checklist: "成交决策地图", action: "行动与回复" };
+const analysisModuleLabels: Record<AnalysisModule, string> = { customer: "总结、画像与产品", psychology: "情绪、性格与心理", objections: "历史异议分析", checklist: "成交决策地图", action: "行动与回复" };
 
 function mergeAnalysisModule(report: CustomerTask["report"], module: AnalysisModule, result: unknown, conversation: string) {
   const value = result && typeof result === "object" ? result as Record<string, unknown> : {};
-  if (module === "customer") return normalizeReport({ ...report, summary: value.summary, profile: value.profile, productMentions: value.productMentions, stage: value.stage, parallelStages: value.parallelStages, stageReason: value.stageReason, confidence: value.confidence }, conversation);
+  if (module === "customer") return normalizeReport({ ...report, summary: value.summary, profile: value.profile, productMentions: value.productMentions, confidence: value.confidence }, conversation);
   if (module === "psychology") return normalizeReport({ ...report, emotionProfile: value.emotionProfile }, conversation);
   if (module === "objections") return normalizeReport({ ...report, objections: value.objections }, conversation);
   if (module === "checklist") return normalizeReport({ ...report, decisionMap: value.decisionMap, objections: [], offensePoints: [], defensePoints: [], confirmations: [] }, conversation);
@@ -485,9 +469,6 @@ async function analyzeConcurrently(task: CustomerTask, conversation: string, onU
       ...(requestedModules.includes("customer") ? {
         summary: emptyReport.summary,
         profile: [],
-        stage: emptyReport.stage,
-        parallelStages: [],
-        stageReason: emptyReport.stageReason,
         confidence: 0,
       } : {}),
       ...(requestedModules.includes("psychology") ? { emotionProfile: { ...emptyReport.emotionProfile, currentStateEvidence: [], emotionTurningPoints: [], personalityTraits: [], decisionEvidence: [] } } : {}),
@@ -507,7 +488,7 @@ async function analyzeConcurrently(task: CustomerTask, conversation: string, onU
   onUpdate(latest);
   const runModule = async (module: AnalysisModule) => {
     try {
-      const analysisContext = module === "action" ? { summary: report.summary, profile: report.profile, emotionProfile: report.emotionProfile, stage: report.stage, stageReason: report.stageReason, decisionMap: report.decisionMap, improvements: report.improvements } : undefined;
+      const analysisContext = module === "action" ? { summary: report.summary, profile: report.profile, emotionProfile: report.emotionProfile, decisionMap: report.decisionMap, improvements: report.improvements } : undefined;
       const response = await fetch("/api/analyze", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ conversation, module, analysisContext }) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || `${analysisModuleLabels[module]}分析失败`);
@@ -863,7 +844,7 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
                 <div className="task-meta"><span>{meta.label}</span><span>·</span><span>{task.updatedAt}</span></div>
                 <div className="task-bottom">
                   <span className={`status-dot ${task.status}`} />
-                  <span>{task.status === "stale" ? "有新消息，需更新" : task.status === "analyzing" ? "分析中" : task.status === "failed" ? "分析失败" : task.report.stage}</span>
+                  <span>{task.status === "stale" ? "有新消息，需更新" : task.status === "analyzing" ? "分析中" : task.status === "failed" ? "分析失败" : "分析完成"}</span>
                 </div>
               </button>
             );
@@ -956,7 +937,7 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
               <section><small>推荐推进顺序</small><div className="action-list">{activeTask.report.nextStrategy.actions.map((item, i) => <div key={`${item}-${i}`}><span>{i + 1}</span><p>{item}</p></div>)}</div></section>
               {activeTask.report.nextStrategy.avoidActions.length > 0 && <section className="strategy-avoid"><small>暂时不要做</small><ul>{activeTask.report.nextStrategy.avoidActions.map((item) => <li key={item}>{item}</li>)}</ul></section>}
             </div>
-            <div className="reply-box"><div><Bot size={16} /><strong>建议回复</strong><button onClick={() => navigator.clipboard.writeText(activeTask.report.suggestedReply)}><Copy size={14} />复制原文</button></div><p>{activeTask.report.suggestedReply}</p><div className="reply-translation"><span>中文核对</span><p>{activeTask.report.suggestedReplyTranslation}</p></div>{activeTask.report.knowledgeReferences.length > 0 && <div className="knowledge-references"><strong><BookOpen size={13} />本次参考了 {activeTask.report.knowledgeReferences.length} 条已发布话术</strong><div>{activeTask.report.knowledgeReferences.map((reference) => <article className="knowledge-reference" key={reference.id}><span>{reference.title} · {reference.stage}</span><small>{reference.excerpt}</small></article>)}</div></div>}</div>
+            <div className="reply-box"><div><Bot size={16} /><strong>建议回复</strong><button onClick={() => navigator.clipboard.writeText(activeTask.report.suggestedReply)}><Copy size={14} />复制原文</button></div><p>{activeTask.report.suggestedReply}</p><div className="reply-translation"><span>中文核对</span><p>{activeTask.report.suggestedReplyTranslation}</p></div>{activeTask.report.knowledgeReferences.length > 0 && <div className="knowledge-references"><strong><BookOpen size={13} />本次参考了 {activeTask.report.knowledgeReferences.length} 条已发布话术</strong><div>{activeTask.report.knowledgeReferences.map((reference) => <article className="knowledge-reference" key={reference.id}><span>{reference.title}{reference.scenario ? ` · ${reference.scenario}` : ""}</span><small>{reference.excerpt}</small></article>)}</div></div>}</div>
           </ReportCard>
           </>}
         </div></ReportCollapseContext.Provider>}
@@ -1585,7 +1566,7 @@ function KnowledgeView({ kind, isAdmin }: { kind: "scripts" | "products"; isAdmi
 }
 
 type ScriptDraft = Omit<KnowledgeScript, "id" | "usageCount" | "createdAt" | "updatedAt">;
-const emptyScriptDraft: ScriptDraft = { title: "", scenario: "", stage: "初次询盘与客户背调", products: [], customerRoles: [], triggerText: "", content: "", translation: "", language: "EN", tags: [], status: "draft", priority: 50 };
+const emptyScriptDraft: ScriptDraft = { title: "", scenario: "", products: [], customerRoles: [], triggerText: "", content: "", translation: "", language: "EN", tags: [], status: "draft", priority: 50 };
 
 function ScriptKnowledgeView({ isAdmin }: { isAdmin: boolean }) {
   const [items, setItems] = useState<KnowledgeScript[]>([]);
@@ -1616,7 +1597,7 @@ function ScriptKnowledgeView({ isAdmin }: { isAdmin: boolean }) {
   const openEditor = (script?: KnowledgeScript) => {
     setError("");
     if (!script) { setEditing("new"); setDraft({ ...emptyScriptDraft, products: [], customerRoles: [], tags: [] }); return; }
-    setEditing(script); setDraft({ title: script.title, scenario: script.scenario, stage: script.stage, products: [...script.products], customerRoles: [...script.customerRoles], triggerText: script.triggerText, content: script.content, translation: script.translation, language: script.language, tags: [...script.tags], status: script.status, priority: script.priority });
+    setEditing(script); setDraft({ title: script.title, scenario: script.scenario, products: [...script.products], customerRoles: [...script.customerRoles], triggerText: script.triggerText, content: script.content, translation: script.translation, language: script.language, tags: [...script.tags], status: script.status, priority: script.priority });
   };
   const listChange = (key: "products" | "customerRoles" | "tags", value: string) => setDraft((current) => ({ ...current, [key]: value.split(/[,，;；]/).map((item) => item.trim()).filter(Boolean) }));
   const save = async () => {
@@ -1649,14 +1630,13 @@ function ScriptKnowledgeView({ isAdmin }: { isAdmin: boolean }) {
     <div className="table-card">
       <div className="table-toolbar"><label className="search-box"><Search size={16} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索标题、场景、产品、标签或正文" /></label><select className="filter-select" value={status} onChange={(event) => setStatus(event.target.value as typeof status)}><option value="">全部状态</option><option value="published">已发布</option><option value="draft">草稿</option></select><span className="rag-status"><Sparkles size={14} />已发布内容自动供 AI 检索</span></div>
       {error && !editing && <div className="knowledge-error"><CircleAlert size={15} />{error}</div>}
-      {loading ? <div className="knowledge-empty"><RefreshCw className="spin" size={18} />正在读取话术库…</div> : !items.length ? <div className="knowledge-empty"><BookOpen size={24} /><strong>还没有符合条件的话术</strong><span>新建并发布后，AI 才会在生成建议回复时检索引用。</span></div> : <table className="script-table"><thead><tr><th>话术名称</th><th>销售阶段</th><th>关联产品</th><th>标签</th><th>状态</th><th>AI 引用</th></tr></thead><tbody>{items.map((row) => <tr key={row.id} onClick={() => openEditor(row)}><td><div className="name-cell"><span className="doc-icon"><FileText size={16} /></span><div><strong>{row.title}</strong><small>{row.scenario || row.triggerText || "未填写使用场景"}</small></div></div></td><td><span className="table-tag">{row.stage}</span></td><td>{row.products.join("、") || "通用"}</td><td><div className="knowledge-tags">{row.tags.slice(0, 3).map((tag) => <span key={tag}>{tag}</span>)}{row.tags.length > 3 && <small>+{row.tags.length - 3}</small>}</div></td><td><span className={`script-publish-state ${row.status}`}>{row.status === "published" ? "已发布" : "草稿"}</span></td><td>{row.usageCount}</td></tr>)}</tbody></table>}
+      {loading ? <div className="knowledge-empty"><RefreshCw className="spin" size={18} />正在读取话术库…</div> : !items.length ? <div className="knowledge-empty"><BookOpen size={24} /><strong>还没有符合条件的话术</strong><span>新建并发布后，AI 才会在生成建议回复时检索引用。</span></div> : <table className="script-table"><thead><tr><th>话术名称</th><th>适用场景</th><th>关联产品</th><th>标签</th><th>状态</th><th>AI 引用</th></tr></thead><tbody>{items.map((row) => <tr key={row.id} onClick={() => openEditor(row)}><td><div className="name-cell"><span className="doc-icon"><FileText size={16} /></span><div><strong>{row.title}</strong><small>{row.triggerText || "未填写触发条件"}</small></div></div></td><td><span className="table-tag">{row.scenario || "通用场景"}</span></td><td>{row.products.join("、") || "通用"}</td><td><div className="knowledge-tags">{row.tags.slice(0, 3).map((tag) => <span key={tag}>{tag}</span>)}{row.tags.length > 3 && <small>+{row.tags.length - 3}</small>}</div></td><td><span className={`script-publish-state ${row.status}`}>{row.status === "published" ? "已发布" : "草稿"}</span></td><td>{row.usageCount}</td></tr>)}</tbody></table>}
     </div>
     {editing && <div className="script-editor-wrap"><div className="overlay" onClick={() => !saving && setEditing(null)} /><section className="script-editor">
       <header><div><span className="eyebrow">{editing === "new" ? "NEW SCRIPT" : "SCRIPT DETAIL"}</span><h2>{editing === "new" ? "新建话术" : "查看与编辑话术"}</h2><p>保存为草稿仅供人工查看；发布后才会进入 AI 检索。</p></div><button className="icon-button" onClick={() => setEditing(null)} disabled={saving}><X size={19} /></button></header>
       <div className="script-editor-body">
         <label className="script-field wide-field"><span>话术名称 *</span><input value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} placeholder="例如：客户认为价格太高" /></label>
         <label className="script-field"><span>使用场景</span><input value={draft.scenario} onChange={(event) => setDraft({ ...draft, scenario: event.target.value })} placeholder="价格异议、首次询盘…" /></label>
-        <label className="script-field"><span>销售阶段</span><select value={draft.stage} onChange={(event) => setDraft({ ...draft, stage: event.target.value as SalesStage })}>{salesStages.map((stage) => <option key={stage}>{stage}</option>)}</select></label>
         <label className="script-field"><span>关联产品（逗号分隔）</span><input value={draft.products.join("，")} onChange={(event) => listChange("products", event.target.value)} placeholder="通用，Reta" /></label>
         <label className="script-field"><span>客户角色（逗号分隔）</span><input value={draft.customerRoles.join("，")} onChange={(event) => listChange("customerRoles", event.target.value)} placeholder="新手个人，经销商" /></label>
         <label className="script-field wide-field"><span>触发条件 / 客户常见说法</span><textarea value={draft.triggerText} onChange={(event) => setDraft({ ...draft, triggerText: event.target.value })} placeholder="客户说价格太高、需要考虑、担心首次付款安全……" /></label>

@@ -2,14 +2,6 @@ export type SourceType = "salesmartly" | "text" | "excel";
 export type TaskStatus = "ready" | "analyzing" | "stale" | "failed";
 export type Provider = "openai" | "deepseek";
 export type IntegrationProvider = Provider | "salesmartly";
-export type SalesStage =
-  | "初次询盘与客户背调"
-  | "信任建立"
-  | "产品与订单匹配"
-  | "决策推进"
-  | "等待付款"
-  | "已成交"
-  | "售后与复购";
 export type ConfirmationStatus = "confirmed" | "unknown" | "risk" | "na";
 export type AnalysisModule = "customer" | "psychology" | "objections" | "checklist" | "action";
 export type AnalysisModuleStatus = "pending" | "analyzing" | "done" | "failed";
@@ -17,7 +9,7 @@ export type AnalysisModuleStatus = "pending" | "analyzing" | "done" | "failed";
 export interface KnowledgeScriptReference {
   id: string;
   title: string;
-  stage: string;
+  scenario: string;
   excerpt: string;
 }
 
@@ -25,7 +17,6 @@ export interface KnowledgeScript {
   id: string;
   title: string;
   scenario: string;
-  stage: SalesStage;
   products: string[];
   customerRoles: string[];
   triggerText: string;
@@ -315,9 +306,6 @@ export interface AnalysisReport {
   profile: string[];
   emotionProfile: CustomerEmotionProfile;
   productMentions: ProductMention[];
-  stage: SalesStage;
-  parallelStages: SalesStage[];
-  stageReason: string;
   objections: Objection[];
   decisionMap: DealDecisionMap;
   /** @deprecated 旧版进攻点数据，仅用于兼容浏览器中已保存的历史任务。 */
