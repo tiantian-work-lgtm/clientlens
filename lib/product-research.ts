@@ -16,10 +16,49 @@ const productResearchSchema = {
   },
 };
 
-function extractResponseText(payload: unknown) {
-  const data = payload as { output_text?: string; output?: Array<{ content?: Array<{ type?: string; text?: string }> }> };
-  if (data.output_text) return data.output_text;
-  return data.output?.flatMap((item) => item.content ?? []).find((item) => item.type === "output_text")?.text ?? "";
+interface ResponseContentPart { type?: string; text?: string; annotations?: unknown[] }
+interface ResponseOutputItem { type?: string; status?: string; content?: ResponseContentPart[]; action?: unknown }
+interface ResponsesPayload {
+  status?: string;
+  error?: { message?: string } | null;
+  incomplete_details?: { reason?: string } | null;
+  output_text?: string;
+  output?: ResponseOutputItem[];
+}
+
+function collectHttpUrls(value: unknown, urls = new Set<string>()) {
+  if (typeof value === "string") {
+    for (const match of value.match(/https?:\/\/[^\s<>"']+/g) ?? []) {
+      const clean = match.replace(/[),.;!?\]}]+$/, "");
+      if (isHttpUrl(clean)) urls.add(clean);
+    }
+  } else if (Array.isArray(value)) {
+    for (const item of value) collectHttpUrls(item, urls);
+  } else if (value && typeof value === "object") {
+    for (const item of Object.values(value as Record<string, unknown>)) collectHttpUrls(item, urls);
+  }
+  return urls;
+}
+
+function extractFinalResponse(payload: unknown) {
+  const data = payload as ResponsesPayload;
+  if (data.status === "failed") throw new Error(`DeepSeek 联网搜索执行失败${data.error?.message ? `：${data.error.message}` : ""}`);
+  if (data.status === "incomplete") throw new Error(`DeepSeek 联网搜索未完成${data.incomplete_details?.reason ? `：${data.incomplete_details.reason}` : ""}`);
+  const output = Array.isArray(data.output) ? data.output : [];
+  const webSearchCalls = output.filter((item) => item.type === "web_search_call" && item.status !== "incomplete").length;
+  let lastSearchIndex = -1;
+  output.forEach((item, index) => { if (item.type === "web_search_call") lastSearchIndex = index; });
+  const messages = output.filter((item, index) => item.type === "message" && (lastSearchIndex < 0 || index > lastSearchIndex));
+  const fallbackMessages = output.filter((item) => item.type === "message");
+  const selectedMessages = messages.length ? messages : fallbackMessages.slice(-1);
+  const parts = selectedMessages.flatMap((item) => item.content ?? []).filter((part) => part.type === "output_text" && part.text?.trim());
+  let content = parts.map((part) => part.text?.trim()).filter(Boolean).join("\n\n").trim();
+  if (!content) content = data.output_text?.trim() || "";
+  const urls = collectHttpUrls(selectedMessages.flatMap((item) => item.content ?? []));
+  for (const url of collectHttpUrls(output.filter((item) => item.type === "web_search_call").map((item) => item.action))) urls.add(url);
+  for (const url of collectHttpUrls(content)) urls.add(url);
+  if (urls.size && !Array.from(urls).every((url) => content.includes(url))) content += `\n\n可核验来源 URL：\n${Array.from(urls).map((url) => `- ${url}`).join("\n")}`;
+  return { content, webSearchCalls, urls: Array.from(urls) };
 }
 
 function parseJsonObject(content: string) {
@@ -34,6 +73,7 @@ function parseJsonObject(content: string) {
 
 function cleanBaseUrl(baseUrl?: string) { return (baseUrl || "https://api.deepseek.com").replace(/\/$/, "").replace(/\/v1$/, ""); }
 function isHttpUrl(value: string) { try { const url = new URL(value); return url.protocol === "https:" || url.protocol === "http:"; } catch { return false; } }
+export function hasHttpUrl(value: string) { return collectHttpUrls(value).size > 0; }
 function numberedConversation(conversation: string) {
   return parseConversationMessages(conversation).map((message) => `${message.id} [${message.role === "customer" ? "客户" : message.role === "sales" ? "销售" : "系统"}] ${message.content}`).join("\n");
 }
@@ -41,12 +81,13 @@ function numberedConversation(conversation: string) {
 export async function searchProductEvidence(productName: string, conversation: string): Promise<string | null> {
   const config = await getRuntimeProviderConfig("deepseek");
   if (!config) return null;
-  const response = await fetch(`${cleanBaseUrl(config.baseUrl)}/responses`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${config.apiKey}`, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: config.model,
-      instructions: `你是一名产品情报搜索员。必须使用 web_search 对“${productName}”进行多轮中英文搜索，先弄清楚它是什么产品或什么多肽，再调查成分、益处、作用方向和适合沟通的客户价值。输出一份中文产品情报资料包，不要输出 JSON。
+  const requestOnce = async (retry = false) => {
+    const response = await fetch(`${cleanBaseUrl(config.baseUrl)}/responses`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${config.apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: config.model,
+        instructions: `你是一名产品情报搜索员。必须使用 web_search 对“${productName}”进行多轮中英文搜索，先弄清楚它是什么产品或什么多肽，再调查成分、益处、作用方向和适合沟通的客户价值。输出一份中文产品情报资料包，不要输出 JSON，也不要只回复“将会调查”或描述准备采取的步骤。
 
 必须主动组合并搜索这些关键词：
 - ${productName} peptide / ${productName} 是什么多肽 / ${productName} 多肽
@@ -65,16 +106,24 @@ export async function searchProductEvidence(productName: string, conversation: s
 5. 证据素材：每条资料给出完整标题、完整 http/https URL、来源级别、简短摘录，以及它能支持什么说法。
 6. 销售素材：提炼客户容易理解的通俗说法、可以自然追问的问题，以及哪些内容不宜夸大。
 
-优先产品官网或说明书、同行评审论文、政府、监管或研究机构资料，其次可靠厂商资料。不得编造 URL、研究、成分、规格或客户经历。必须区分“具体产品信息”和“单独成分研究”，但即使具体产品资料不完整，也要保留已确认的相关成分信息、客户价值方向和可继续核实的线索。`,
-      input: `目标产品：${productName}\n\n客户对话：\n${numberedConversation(conversation)}`,
-      tools: [{ type: "web_search" }], tool_choice: { type: "web_search" }, reasoning: { effort: "low" }, max_output_tokens: 7000,
-    }),
-    signal: AbortSignal.timeout(120_000),
-  });
-  if (!response.ok) { const detail = await response.text().catch(() => ""); throw new Error(`DeepSeek 联网搜索失败：${response.status}${detail ? ` · ${detail.slice(0, 240)}` : ""}`); }
-  const content = extractResponseText(await response.json()).trim();
-  if (!content) throw new Error("DeepSeek 联网搜索返回空内容，请重试");
-  return content;
+优先产品官网或说明书、同行评审论文、政府、监管或研究机构资料，其次可靠厂商资料。不得编造 URL、研究、成分、规格或客户经历。必须区分“具体产品信息”和“单独成分研究”，但即使具体产品资料不完整，也要保留已确认的相关成分信息、客户价值方向和可继续核实的线索。最终资料包至少列出 3 条你实际查阅过的完整 http/https URL；确实不足 3 条时，列出全部已找到的 URL 并说明。${retry ? "\n\n上一次搜索没有形成带 URL 的最终资料包。本次必须完成搜索工具调用后再输出最终报告，不要输出过程性承诺。" : ""}`,
+        input: `目标产品：${productName}\n\n客户对话：\n${numberedConversation(conversation)}`,
+        tools: [{ type: "web_search" }], tool_choice: { type: "web_search" }, reasoning: { effort: "low" }, max_output_tokens: 7000,
+      }),
+      signal: AbortSignal.timeout(120_000),
+    });
+    if (!response.ok) { const detail = await response.text().catch(() => ""); throw new Error(`DeepSeek 联网搜索失败：${response.status}${detail ? ` · ${detail.slice(0, 240)}` : ""}`); }
+    const result = extractFinalResponse(await response.json());
+    if (!result.webSearchCalls) throw new Error("DeepSeek 未实际执行联网搜索");
+    if (!result.content) throw new Error("DeepSeek 联网搜索返回空内容");
+    if (!result.urls.length) throw new Error("DeepSeek 联网搜索未返回可核验 URL");
+    return result.content;
+  };
+  try { return await requestOnce(); } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    if (message.includes("未实际执行") || message.includes("空内容") || message.includes("可核验 URL")) return requestOnce(true);
+    throw error;
+  }
 }
 
 export async function structureProductResearch(productName: string, conversation: string, searchSummary: string): Promise<ProductResearch | null> {
@@ -97,14 +146,14 @@ export async function structureProductResearch(productName: string, conversation
 3. limitations 只记录真正影响判断的资料边界，不要让它盖过客户价值和种草策略。
 4. 不生成个体化剂量、频率、周期、注射方法、联合使用方案、诊断或治疗方案；不作保证、治愈或一定有效等绝对承诺，也不自动添加固定免责声明。`;
 
-  const requestOnce = async (retry = false) => {
+  const requestOnce = async (retryReason = "") => {
     const response = await fetch(`${cleanBaseUrl(config.baseUrl)}/chat/completions`, {
       method: "POST",
       headers: { Authorization: `Bearer ${config.apiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         model: config.model,
         messages: [
-          { role: "system", content: `${instructions}\n\n必须严格遵循以下 JSON Schema：\n${JSON.stringify(productResearchSchema)}${retry ? "\n\n上一次输出无法解析。本次只返回一个完整 JSON 对象。" : ""}` },
+          { role: "system", content: `${instructions}\n\n必须严格遵循以下 JSON Schema：\n${JSON.stringify(productResearchSchema)}${retryReason ? `\n\n上一次输出未通过校验：${retryReason}。本次只返回一个完整 JSON 对象，逐字使用资料包中的真实 URL，并确保客户原文与 M 编号完全对应。` : ""}` },
           { role: "user", content: `目标产品：${productName}\n\n客户对话：\n${numberedConversation(conversation)}\n\n联网搜索资料包：\n${searchSummary.slice(0, 45_000)}\n\n请输出合法 JSON 对象。` },
         ],
         response_format: { type: "json_object" },
@@ -119,17 +168,25 @@ export async function structureProductResearch(productName: string, conversation
     return parseJsonObject(content) as Omit<ProductResearch, "searchedAt">;
   };
 
-  let parsed: Omit<ProductResearch, "searchedAt">;
-  try { parsed = await requestOnce(); } catch (error) {
-    if (error instanceof Error && (error.message.includes("JSON") || error.message.includes("空内容"))) parsed = await requestOnce(true);
-    else throw error;
+  const validate = (parsed: Omit<ProductResearch, "searchedAt">) => {
+    const messages = parseConversationMessages(conversation);
+    const evidenceMessage = messages.find((message) => message.id === parsed.customerEvidenceMessageId && message.role === "customer");
+    if (!evidenceMessage || !parsed.customerEvidenceQuote || !evidenceMessage.content.normalize("NFKC").includes(parsed.customerEvidenceQuote.normalize("NFKC"))) throw new Error("产品匹配缺少可核验的客户原文");
+    const sources = (Array.isArray(parsed.sources) ? parsed.sources : []).filter((source) => source?.title && source?.excerpt && isHttpUrl(source.url) && searchSummary.includes(source.url));
+    const sourceUrls = new Set(sources.map((source) => source.url));
+    const talkingPoints = (Array.isArray(parsed.talkingPoints) ? parsed.talkingPoints : []).map((point) => ({ ...point, sourceUrls: (Array.isArray(point.sourceUrls) ? point.sourceUrls : []).filter((url) => sourceUrls.has(url)) })).filter((point) => point.title && point.explanation && point.sourceUrls.length);
+    if (!sources.length || (parsed.matchLevel !== "资料不足" && !talkingPoints.length)) throw new Error("资料整理未返回可核验的来源");
+    return { ...parsed, productName: productName.trim(), sources, talkingPoints, searchedAt: new Date().toISOString() };
+  };
+
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try { return validate(await requestOnce(attempt ? (lastError instanceof Error ? lastError.message : "输出不完整") : "")); }
+    catch (error) {
+      lastError = error;
+      const message = error instanceof Error ? error.message : "";
+      if (attempt || message.includes("资料整理失败")) throw error;
+    }
   }
-  const messages = parseConversationMessages(conversation);
-  const evidenceMessage = messages.find((message) => message.id === parsed.customerEvidenceMessageId && message.role === "customer");
-  if (!evidenceMessage || !parsed.customerEvidenceQuote || !evidenceMessage.content.normalize("NFKC").includes(parsed.customerEvidenceQuote.normalize("NFKC"))) throw new Error("产品匹配缺少可核验的客户原文");
-  const sources = (Array.isArray(parsed.sources) ? parsed.sources : []).filter((source) => source?.title && source?.excerpt && isHttpUrl(source.url) && searchSummary.includes(source.url));
-  const sourceUrls = new Set(sources.map((source) => source.url));
-  const talkingPoints = (Array.isArray(parsed.talkingPoints) ? parsed.talkingPoints : []).map((point) => ({ ...point, sourceUrls: (Array.isArray(point.sourceUrls) ? point.sourceUrls : []).filter((url) => sourceUrls.has(url)) })).filter((point) => point.title && point.explanation && point.sourceUrls.length);
-  if (parsed.matchLevel !== "资料不足" && (!sources.length || !talkingPoints.length)) throw new Error("资料整理未返回可核验的来源，请重试搜索");
-  return { ...parsed, productName: productName.trim(), sources, talkingPoints, searchedAt: new Date().toISOString() };
+  throw lastError instanceof Error ? lastError : new Error("产品资料整理失败");
 }

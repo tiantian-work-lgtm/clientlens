@@ -1043,6 +1043,7 @@ function ProductResearchCard({ task, onUpdate, onLocate }: { task: CustomerTask;
       });
       const formatData = await formatResponse.json();
       if (!formatResponse.ok) throw new Error(formatData.error || "搜索已完成，但资料整理失败");
+      if (typeof formatData.searchSummary === "string" && formatData.searchSummary.trim()) setSearchSummary(formatData.searchSummary);
       onUpdate(normalizeTask({ ...task, report: { ...task.report, productResearch: formatData.research }, updatedAt: "刚刚" }));
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "产品联网研究失败");
