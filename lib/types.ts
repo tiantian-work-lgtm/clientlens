@@ -303,6 +303,45 @@ export interface DefensePoint {
   riskLevel: "高" | "中" | "低";
 }
 
+export interface BuyingDriver {
+  title: string;
+  desiredOutcome: string;
+  painOrExpectation: string;
+  strength: "强" | "中" | "弱";
+  purchaseIntent: "明确" | "较高" | "观察中";
+  conversionReason: string;
+  evidenceMessageId: string;
+  evidenceQuote: string;
+  evidenceTranslation: string;
+}
+
+export interface DealBlocker {
+  title: string;
+  category: "产品匹配" | "产品知识" | "价格与预算" | "质量与COA" | "公司与供应商信任" | "包装与交付" | "物流清关与时效" | "支付与资金安全" | "决策时机" | "内部审批" | "其他顾虑";
+  concern: string;
+  dealImpact: string;
+  evidenceMessageId: string;
+  evidenceQuote: string;
+  evidenceTranslation: string;
+  handlingStatus: "未解决" | "已回答-客户未追问" | "客户明确认可";
+  salesEvidenceMessageId: string;
+  salesEvidenceQuote: string;
+  salesEvidenceTranslation: string;
+  resolutionEvidenceMessageId: string;
+  resolutionEvidenceQuote: string;
+  resolutionEvidenceTranslation: string;
+  solutionDirection: string;
+}
+
+export interface DealDecisionMap {
+  motivationLevel: "强" | "中" | "弱";
+  biggestBlocker: string;
+  readiness: "高" | "中" | "低";
+  priorityTask: string;
+  buyingDrivers: BuyingDriver[];
+  blockers: DealBlocker[];
+}
+
 export interface AnalysisReport {
   summary: string;
   profile: string[];
@@ -314,7 +353,10 @@ export interface AnalysisReport {
   parallelStages: SalesStage[];
   stageReason: string;
   objections: Objection[];
+  decisionMap: DealDecisionMap;
+  /** @deprecated 旧版进攻点数据，仅用于兼容浏览器中已保存的历史任务。 */
   offensePoints: OffensePoint[];
+  /** @deprecated 旧版防守点数据，仅用于兼容浏览器中已保存的历史任务。 */
   defensePoints: DefensePoint[];
   /** @deprecated 仅用于读取升级前保存在浏览器中的旧任务；新分析保持为空数组。 */
   confirmations: ConfirmationItem[];

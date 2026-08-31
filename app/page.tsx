@@ -41,7 +41,7 @@ import {
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { defaultConfirmations, defaultProgress, emptyReport, initialTasks } from "@/lib/demo-data";
 import { parseConversationMessages } from "@/lib/conversation";
-import type { AnalysisModule, AnalysisModuleStatus, CommunicationTrait, CustomerTask, DefensePoint, EmotionEvidence, EmotionTurningPoint, HesitationSignal, ImportPreview, KnowledgeScript, KnowledgeScriptReference, OffensePoint, ProductMention, ProductResearch, Provider, SalesStage, SourceType } from "@/lib/types";
+import type { AnalysisModule, AnalysisModuleStatus, BuyingDriver, CommunicationTrait, CustomerTask, DealBlocker, DealDecisionMap, DefensePoint, EmotionEvidence, EmotionTurningPoint, HesitationSignal, ImportPreview, KnowledgeScript, KnowledgeScriptReference, OffensePoint, ProductMention, ProductResearch, Provider, SalesStage, SourceType } from "@/lib/types";
 import SettingsManager from "@/app/components/settings-manager";
 
 type View = "analysis" | "scripts" | "products" | "translate" | "settings";
@@ -284,6 +284,71 @@ function normalizeReport(value: unknown, conversation = ""): CustomerTask["repor
     const status: DefensePoint["status"] = item.status === "客户肯定-完全解决" || item.status === "未追问-基本解决" ? item.status : "未解决";
     return [{ title, risk: stringValue(item.risk), reason: stringValue(item.reason), evidenceMessageId: message.id, evidenceQuote, evidenceTranslation: stringValue(item.evidenceTranslation), status, remedy: stringValue(item.remedy), suggestedReply: stringValue(item.suggestedReply), suggestedReplyTranslation: stringValue(item.suggestedReplyTranslation), riskLevel }];
   });
+  const rawDecisionMap = report.decisionMap && typeof report.decisionMap === "object" && !Array.isArray(report.decisionMap) ? report.decisionMap as Record<string, unknown> : {};
+  const rawDrivers = Array.isArray(rawDecisionMap.buyingDrivers) ? rawDecisionMap.buyingDrivers : [];
+  const buyingDrivers: BuyingDriver[] = rawDrivers.flatMap((value): BuyingDriver[] => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+    const item = value as Record<string, unknown>;
+    const message = messageById.get(stringValue(item.evidenceMessageId));
+    const quote = normalizeEvidenceQuote(item.evidenceQuote, conversation);
+    const title = stringValue(item.title);
+    if (!title || message?.role !== "customer" || !quote || !message.content.normalize("NFKC").includes(quote.normalize("NFKC"))) return [];
+    const strength: BuyingDriver["strength"] = item.strength === "强" || item.strength === "弱" ? item.strength : "中";
+    const purchaseIntent: BuyingDriver["purchaseIntent"] = item.purchaseIntent === "明确" || item.purchaseIntent === "较高" ? item.purchaseIntent : "观察中";
+    return [{ title, desiredOutcome: stringValue(item.desiredOutcome), painOrExpectation: stringValue(item.painOrExpectation), strength, purchaseIntent, conversionReason: stringValue(item.conversionReason), evidenceMessageId: message.id, evidenceQuote: quote, evidenceTranslation: stringValue(item.evidenceTranslation) }];
+  }).slice(0, 3);
+  const blockerCategories: DealBlocker["category"][] = ["产品匹配", "产品知识", "价格与预算", "质量与COA", "公司与供应商信任", "包装与交付", "物流清关与时效", "支付与资金安全", "决策时机", "内部审批", "其他顾虑"];
+  const rawBlockers = Array.isArray(rawDecisionMap.blockers) ? rawDecisionMap.blockers : [];
+  const blockers: DealBlocker[] = rawBlockers.flatMap((value): DealBlocker[] => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+    const item = value as Record<string, unknown>;
+    const customerMessage = messageById.get(stringValue(item.evidenceMessageId));
+    const customerQuote = normalizeEvidenceQuote(item.evidenceQuote, conversation);
+    const title = stringValue(item.title);
+    if (!title || customerMessage?.role !== "customer" || !customerQuote || !customerMessage.content.normalize("NFKC").includes(customerQuote.normalize("NFKC"))) return [];
+    const salesMessage = messageById.get(stringValue(item.salesEvidenceMessageId));
+    const salesQuote = salesMessage?.role === "sales" ? normalizeEvidenceQuote(item.salesEvidenceQuote, conversation) : "";
+    const resolutionMessage = messageById.get(stringValue(item.resolutionEvidenceMessageId));
+    const resolutionQuote = resolutionMessage?.role === "customer" ? normalizeEvidenceQuote(item.resolutionEvidenceQuote, conversation) : "";
+    const issueIndex = parsedMessages.findIndex((message) => message.id === customerMessage.id);
+    const salesIndex = parsedMessages.findIndex((message) => message.id === salesMessage?.id);
+    const resolutionIndex = parsedMessages.findIndex((message) => message.id === resolutionMessage?.id);
+    const requestedStatus: DealBlocker["handlingStatus"] = item.handlingStatus === "客户明确认可" || item.handlingStatus === "已回答-客户未追问" ? item.handlingStatus : "未解决";
+    const salesAfterIssue = Boolean(salesQuote && salesIndex > issueIndex);
+    const resolutionAfterSales = Boolean(resolutionQuote && resolutionIndex > salesIndex);
+    const handlingStatus: DealBlocker["handlingStatus"] = requestedStatus === "已回答-客户未追问" && salesAfterIssue
+      ? requestedStatus
+      : requestedStatus === "客户明确认可" && salesAfterIssue && resolutionAfterSales
+        ? requestedStatus
+        : "未解决";
+    return [{
+      title,
+      category: blockerCategories.includes(item.category as DealBlocker["category"]) ? item.category as DealBlocker["category"] : "其他顾虑",
+      concern: stringValue(item.concern),
+      dealImpact: stringValue(item.dealImpact),
+      evidenceMessageId: customerMessage.id,
+      evidenceQuote: customerQuote,
+      evidenceTranslation: stringValue(item.evidenceTranslation),
+      handlingStatus,
+      salesEvidenceMessageId: handlingStatus === "未解决" ? "" : salesMessage?.id || "",
+      salesEvidenceQuote: handlingStatus === "未解决" ? "" : salesQuote,
+      salesEvidenceTranslation: handlingStatus === "未解决" ? "" : stringValue(item.salesEvidenceTranslation),
+      resolutionEvidenceMessageId: handlingStatus === "客户明确认可" ? resolutionMessage?.id || "" : "",
+      resolutionEvidenceQuote: handlingStatus === "客户明确认可" ? resolutionQuote : "",
+      resolutionEvidenceTranslation: handlingStatus === "客户明确认可" ? stringValue(item.resolutionEvidenceTranslation) : "",
+      solutionDirection: stringValue(item.solutionDirection),
+    }];
+  }).slice(0, 8);
+  const requestedBiggestBlocker = stringValue(rawDecisionMap.biggestBlocker);
+  const verifiedBiggestBlocker = blockers.find((item) => item.title.normalize("NFKC") === requestedBiggestBlocker.normalize("NFKC"))?.title;
+  const decisionMap: DealDecisionMap = {
+    motivationLevel: buyingDrivers.length ? rawDecisionMap.motivationLevel === "强" || rawDecisionMap.motivationLevel === "弱" ? rawDecisionMap.motivationLevel : "中" : "弱",
+    biggestBlocker: verifiedBiggestBlocker || blockers[0]?.title || "当前未识别到明确成交阻力",
+    readiness: buyingDrivers.length ? rawDecisionMap.readiness === "高" || rawDecisionMap.readiness === "低" ? rawDecisionMap.readiness : "中" : "低",
+    priorityTask: stringValue(rawDecisionMap.priorityTask, "继续确认客户当前最重要的决策条件。"),
+    buyingDrivers,
+    blockers,
+  };
   const rawConfirmations = Array.isArray(report.confirmations) ? report.confirmations : [];
   const confirmations = defaultConfirmations.map((fallback) => {
     const raw = rawConfirmations.find((value) => value && typeof value === "object" && !Array.isArray(value) && (value as Record<string, unknown>).id === fallback.id);
@@ -410,6 +475,7 @@ function normalizeReport(value: unknown, conversation = ""): CustomerTask["repor
     parallelStages,
     stageReason: stringValue(report.stageReason, "当前聊天记录不足以支持更具体的阶段判断。"),
     objections,
+    decisionMap,
     offensePoints,
     defensePoints,
     confirmations,
@@ -422,15 +488,15 @@ function normalizeReport(value: unknown, conversation = ""): CustomerTask["repor
   };
 }
 
-const analysisModules: AnalysisModule[] = ["customer", "psychology", "objections", "checklist", "action"];
-const analysisModuleLabels: Record<AnalysisModule, string> = { customer: "总结、画像与阶段", psychology: "情绪、性格与心理", objections: "异议与解决状态", checklist: "进攻点与防守点", action: "行动与回复" };
+const analysisModules: AnalysisModule[] = ["customer", "psychology", "checklist", "action"];
+const analysisModuleLabels: Record<AnalysisModule, string> = { customer: "总结、画像与阶段", psychology: "情绪、性格与心理", objections: "历史异议分析", checklist: "成交决策地图", action: "行动与回复" };
 
 function mergeAnalysisModule(report: CustomerTask["report"], module: AnalysisModule, result: unknown, conversation: string) {
   const value = result && typeof result === "object" ? result as Record<string, unknown> : {};
   if (module === "customer") return normalizeReport({ ...report, summary: value.summary, profile: value.profile, productMentions: value.productMentions, stage: value.stage, parallelStages: value.parallelStages, stageReason: value.stageReason, confidence: value.confidence }, conversation);
   if (module === "psychology") return normalizeReport({ ...report, emotionProfile: value.emotionProfile }, conversation);
   if (module === "objections") return normalizeReport({ ...report, objections: value.objections }, conversation);
-  if (module === "checklist") return normalizeReport({ ...report, offensePoints: value.offensePoints, defensePoints: value.defensePoints, confirmations: [] }, conversation);
+  if (module === "checklist") return normalizeReport({ ...report, decisionMap: value.decisionMap, objections: [], offensePoints: [], defensePoints: [], confirmations: [] }, conversation);
   return normalizeReport({ ...report, improvements: value.improvements, nextActions: value.nextActions, suggestedReply: value.suggestedReply, suggestedReplyTranslation: value.suggestedReplyTranslation, knowledgeReferences: value.knowledgeReferences }, conversation);
 }
 
@@ -451,7 +517,7 @@ async function analyzeConcurrently(task: CustomerTask, conversation: string, onU
       } : {}),
       ...(requestedModules.includes("psychology") ? { emotionProfile: { ...emptyReport.emotionProfile, currentStateEvidence: [], emotionTurningPoints: [], personalityTraits: [], decisionEvidence: [], advice: [...emptyReport.emotionProfile.advice] } } : {}),
       ...(requestedModules.includes("objections") ? { objections: [] } : {}),
-      ...(requestedModules.includes("checklist") ? { offensePoints: [], defensePoints: [], confirmations: [] } : {}),
+      ...(requestedModules.includes("checklist") ? { decisionMap: emptyReport.decisionMap, objections: [], offensePoints: [], defensePoints: [], confirmations: [] } : {}),
       ...(requestedModules.includes("action") ? { improvements: [], nextActions: [], suggestedReply: "", suggestedReplyTranslation: "", knowledgeReferences: [] } : {}),
     };
   let provider: Provider = task.provider;
@@ -460,6 +526,7 @@ async function analyzeConcurrently(task: CustomerTask, conversation: string, onU
   let states = { customer: "pending", psychology: "pending", objections: "pending", checklist: "pending", action: "pending", ...(task.analysisModules ?? {}) } as Record<AnalysisModule, AnalysisModuleStatus>;
   for (const module of requestedModules) states[module] = "analyzing";
   let errors: Partial<Record<AnalysisModule, string>> = { ...(task.analysisModuleErrors ?? {}) };
+  delete errors.objections;
   for (const module of requestedModules) delete errors[module];
   let latest: CustomerTask = { ...task, rawConversation: conversation, report, status: "analyzing", analysisStep: "analyzing", analysisModules: states, analysisModuleErrors: errors, analysisError: undefined };
   onUpdate(latest);
@@ -508,7 +575,6 @@ function normalizeTask(task: CustomerTask): CustomerTask {
   const normalizedErrors: Partial<Record<AnalysisModule, string>> | undefined = rawErrors ? {
     ...(rawErrors.customer ? { customer: rawErrors.customer } : {}),
     ...(rawErrors.psychology ? { psychology: rawErrors.psychology } : {}),
-    ...(rawErrors.objections || rawErrors.risk ? { objections: rawErrors.objections || rawErrors.risk } : {}),
     ...(rawErrors.checklist || rawErrors.risk ? { checklist: rawErrors.checklist || rawErrors.risk } : {}),
     ...(rawErrors.action ? { action: rawErrors.action } : {}),
   } : undefined;
@@ -722,12 +788,8 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
     const sections: Array<{ id: ReportSectionId; label: string; meta?: string }> = [];
     if (moduleVisible("customer")) sections.push({ id: "summary", label: "对话总结" }, { id: "profile", label: "客户画像" });
     if (moduleVisible("psychology")) sections.push({ id: "psychology", label: "情绪与心理" });
-    if (moduleVisible("objections")) sections.push({ id: "objections", label: "异议与犹豫", meta: String(activeTask.report.objections.length) }, { id: "hesitation", label: "深度犹豫", meta: "按需" });
     if (moduleVisible("checklist")) {
-      const strategyReport = activeTask.report as unknown as { offensePoints?: unknown[]; defensePoints?: unknown[] };
-      const offenseCount = Array.isArray(strategyReport.offensePoints) ? strategyReport.offensePoints.length : 0;
-      const defenseCount = Array.isArray(strategyReport.defensePoints) ? strategyReport.defensePoints.length : 0;
-      sections.push({ id: "checklist", label: "进攻与防守", meta: `${offenseCount}/${defenseCount}` });
+      sections.push({ id: "checklist", label: "成交决策地图", meta: `${activeTask.report.decisionMap.buyingDrivers.length}/${activeTask.report.decisionMap.blockers.length}` });
     }
     sections.push({ id: "product-research", label: "产品匹配", meta: activeTask.report.productMentions.length ? String(activeTask.report.productMentions.length) : "按需" });
     if (moduleVisible("action")) sections.push({ id: "improvements", label: "沟通改善" }, { id: "next-actions", label: "下一步建议" });
@@ -901,31 +963,8 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
           </ReportCard>
           </>}
 
-          {moduleVisible("objections") && <>
-          <ReportCard icon={CircleAlert} title={`主要异议与犹豫点 · ${activeTask.report.objections.length}`} tone="orange" sectionId="objections">
-            <div className="objection-list">
-              {!activeTask.report.objections.length && <div className="empty-objections"><CheckCircle2 size={15} />暂未识别到具有原始聊天依据的明确异议</div>}
-              {activeTask.report.objections.map((item, index) => (
-                <details key={item.title} open={index === 0}>
-                  <summary><span className={`severity ${item.severity}`}>{item.severity}</span><strong>{item.title}</strong><span className={`objection-state ${objectionStatusClass(item.status)}`}>{item.status}</span><ChevronDown size={16} /></summary>
-                  <div className="evidence">
-                    <p className="objection-basis"><span>判断依据</span>{item.evidence}</p>
-                    {item.evidenceVerified && item.evidenceQuote
-                      ? <blockquote><button type="button" className="evidence-locate" onClick={() => openRawChat(item.evidenceMessageId, item.evidenceQuote || item.evidence)} title="定位到原始聊天">已核验原文</button>“{item.evidenceQuote.replaceAll("“", "").replaceAll("”", "") }”</blockquote>
-                      : <div className="objection-unverified"><CircleAlert size={13} />未找到可逐字匹配的原始片段，请结合原始聊天人工核对</div>}
-                    <p className="resolution-basis"><span>状态判断</span>{item.resolutionReason}</p>
-                    <p><Sparkles size={14} />{item.advice}</p>
-                  </div>
-                </details>
-              ))}
-            </div>
-          </ReportCard>
-
-          <DeepHesitationCard task={activeTask} onUpdate={onUpdate} onLocate={openRawChat} />
-          </>}
-
           {moduleVisible("checklist") && <>
-          <OffenseDefensePanel task={activeTask} onLocate={openRawChat} />
+          <DecisionMapPanel task={activeTask} onUpdate={onUpdate} onLocate={openRawChat} />
           </>}
 
           <div ref={productResearchRef} className="product-research-anchor">
@@ -1045,7 +1084,7 @@ function DeepHesitationCard({ task, onUpdate, onLocate }: { task: CustomerTask; 
     {!analysis ? <div className="hesitation-cta">
       <span>按需分析 · 首次不自动运行</span>
       <h4>从客户视角重新细看整段聊天</h4>
-      <p>识别已读未回或疑似未回复、明确异议、延后说辞和有证据的潜在犹豫，并为每个问题生成独立跟进建议。</p>
+      <p>识别已读未回、延后说辞和有证据的潜在阻力，作为成交阻力的补充核查，不在这里重复生成完整回复。</p>
       <button className="primary-button" onClick={() => void runAnalysis()} disabled={loading || task.status === "analyzing"}><Search size={14} />{loading ? "正在深度分析…" : "开始深度分析"}</button>
       {error && <div className="hesitation-error"><CircleAlert size={13} />{error}</div>}
     </div> : <div className="hesitation-result">
@@ -1065,11 +1104,9 @@ function DeepHesitationCard({ task, onUpdate, onLocate }: { task: CustomerTask; 
             <blockquote><button onClick={() => onLocate(signal.evidenceMessageId, signal.evidenceQuote)}>已核验原文</button>“{signal.evidenceQuote}”</blockquote>
             <p className="signal-reasoning"><span>判断说明</span>{signal.reasoning}</p>
             <div className="follow-up-plan"><div><small>跟进目标</small><p>{signal.followUpGoal}</p></div><div><small>建议时机</small><p>{signal.followUpTiming}</p></div></div>
-            <div className="signal-message"><header><strong>建议跟进消息</strong><button onClick={() => navigator.clipboard.writeText(signal.suggestedMessage)}><Copy size={12} />复制</button></header><p>{signal.suggestedMessage}</p><div><small>中文核对</small><p>{signal.suggestedMessageTranslation}</p></div></div>
           </div>
         </article>)}
       </div>
-      <div className="hesitation-strategy"><h4>整体跟进顺序</h4>{analysis.strategy.map((item, index) => <p key={item}><span>{index + 1}</span>{item}</p>)}</div>
       {error && <div className="hesitation-error"><CircleAlert size={13} />{error}</div>}
       <p className="hesitation-disclaimer">潜在犹豫属于基于原文的销售推断，不代表已经确认客户的内心想法。</p>
     </div>}
@@ -1260,6 +1297,51 @@ function StrategyEvidence({ messageId, quote, translation, onLocate }: { message
     <blockquote>“{quote.replaceAll("“", "").replaceAll("”", "")}”</blockquote>
     {translation && <p><span>中文翻译</span>{translation}</p>}
   </div>;
+}
+
+function DecisionMapPanel({ task, onUpdate, onLocate }: { task: CustomerTask; onUpdate: (task: CustomerTask) => void; onLocate: (messageId?: string, quote?: string) => void }) {
+  const map = task.report.decisionMap;
+  const unresolved = map.blockers.filter((item) => item.handlingStatus === "未解决").length;
+  return <ReportCard icon={ListChecks} title="成交决策地图" tone="green" sectionId="checklist">
+    <div className="decision-overview">
+      <div><small>下单动力</small><strong className={`decision-level level-${map.motivationLevel}`}>{map.motivationLevel}</strong></div>
+      <div><small>成交准备度</small><strong className={`decision-level level-${map.readiness}`}>{map.readiness}</strong></div>
+      <div className="wide"><small>最大阻力</small><strong>{map.biggestBlocker}</strong></div>
+      <div className="wide priority"><small>当前首要任务</small><strong>{map.priorityTask}</strong></div>
+    </div>
+    <p className="strategy-intro">这里只判断客户为什么想买、为什么还没买。完整跟进话术统一放在“AI 下一步建议”，避免报告重复。</p>
+    <div className="strategy-columns decision-map-columns">
+      <section className="strategy-column offense-column">
+        <header><div><Zap size={17} /><strong>核心下单驱动力</strong></div><span>{map.buyingDrivers.length} 个</span></header>
+        {!map.buyingDrivers.length && <div className="strategy-empty"><CircleDashed size={17} />尚未识别到有客户原文支撑的核心下单动力</div>}
+        {map.buyingDrivers.map((item, index) => <details className="strategy-item offense-item" key={`${item.title}-${index}`} open={index === 0}>
+          <summary><span className={`strategy-level level-${item.strength === "强" ? "高" : item.strength === "弱" ? "低" : "中"}`}>{item.strength}</span><strong>{item.title}</strong><span className="driver-intent">意愿 {item.purchaseIntent}</span><ChevronDown size={15} /></summary>
+          <div className="strategy-item-body"><dl>
+            <div><dt>客户想获得什么</dt><dd>{item.desiredOutcome}</dd></div>
+            <div><dt>背后的痛点或期望</dt><dd>{item.painOrExpectation}</dd></div>
+            <div><dt>为什么能够推动成交</dt><dd>{item.conversionReason}</dd></div>
+          </dl><StrategyEvidence messageId={item.evidenceMessageId} quote={item.evidenceQuote} translation={item.evidenceTranslation} onLocate={onLocate} /></div>
+        </details>)}
+      </section>
+      <section className="strategy-column defense-column">
+        <header><div><ShieldCheck size={17} /><strong>当前成交阻力</strong></div><span>{unresolved}/{map.blockers.length} 未解决</span></header>
+        {!map.blockers.length && <div className="strategy-empty safe"><CheckCircle2 size={17} />当前未识别到有原文支撑的明确成交阻力</div>}
+        {map.blockers.map((item, index) => <details className="strategy-item defense-item" key={`${item.title}-${index}`} open={index === 0}>
+          <summary><span className="blocker-category">{item.category}</span><strong>{item.title}</strong><span className={`strategy-status blocker-status status-${item.handlingStatus}`}>{item.handlingStatus}</span><ChevronDown size={15} /></summary>
+          <div className="strategy-item-body"><dl>
+            <div><dt>客户具体担心什么</dt><dd>{item.concern}</dd></div>
+            <div><dt>对成交的影响</dt><dd>{item.dealImpact}</dd></div>
+            <div><dt>解决方向</dt><dd>{item.solutionDirection}</dd></div>
+          </dl>
+          <StrategyEvidence messageId={item.evidenceMessageId} quote={item.evidenceQuote} translation={item.evidenceTranslation} onLocate={onLocate} />
+          {item.salesEvidenceQuote && <div className="sales-handling-evidence"><strong>销售处理依据</strong><StrategyEvidence messageId={item.salesEvidenceMessageId} quote={item.salesEvidenceQuote} translation={item.salesEvidenceTranslation} onLocate={onLocate} /></div>}
+          {item.resolutionEvidenceQuote && <div className="resolution-evidence"><strong>客户认可依据</strong><StrategyEvidence messageId={item.resolutionEvidenceMessageId} quote={item.resolutionEvidenceQuote} translation={item.resolutionEvidenceTranslation} onLocate={onLocate} /></div>}
+          </div>
+        </details>)}
+      </section>
+    </div>
+    <div className="decision-deep-check"><DeepHesitationCard task={task} onUpdate={onUpdate} onLocate={onLocate} /></div>
+  </ReportCard>;
 }
 
 function OffenseDefensePanel({ task, onLocate }: { task: CustomerTask; onLocate: (messageId?: string, quote?: string) => void }) {

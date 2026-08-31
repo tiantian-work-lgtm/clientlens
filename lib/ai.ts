@@ -1,4 +1,4 @@
-import type { AnalysisModule, AnalysisReport, ConfirmationItem, CustomerEmotionProfile, DefensePoint, HesitationAnalysis, KnowledgeScript, KnowledgeScriptReference, Objection, OffensePoint, ProductMention, Provider, SalesStage } from "./types";
+import type { AnalysisModule, AnalysisReport, BuyingDriver, ConfirmationItem, CustomerEmotionProfile, DealBlocker, DealDecisionMap, HesitationAnalysis, KnowledgeScript, KnowledgeScriptReference, Objection, ProductMention, Provider, SalesStage } from "./types";
 import { getRuntimeProviderConfig, type RuntimeProviderConfig } from "./provider-config";
 import { buildNumberedConversationChunks, parseConversationMessages, type ParsedConversationMessage } from "./conversation";
 import { formatScriptKnowledgeContext, recordScriptUsage, retrieveRelevantScripts, toScriptReferences } from "./script-knowledge";
@@ -337,36 +337,17 @@ const objectionsSchema = {
 };
 
 const checklistSchema = {
-  type: "object", additionalProperties: false, required: ["offensePoints", "defensePoints"],
+  type: "object", additionalProperties: false, required: ["decisionMap"],
   properties: {
-    offensePoints: {
-      type: "array", maxItems: 12,
-      items: {
-        type: "object", additionalProperties: false,
-        required: ["title", "opportunity", "timingReason", "evidenceMessageId", "evidenceQuote", "evidenceTranslation", "direction", "suggestedReply", "suggestedReplyTranslation", "priority", "goal"],
-        properties: {
-          title: { type: "string" }, opportunity: { type: "string" }, timingReason: { type: "string" },
-          evidenceMessageId: { type: "string" }, evidenceQuote: { type: "string" }, evidenceTranslation: { type: "string" },
-          direction: { type: "string" }, suggestedReply: { type: "string" }, suggestedReplyTranslation: { type: "string" },
-          priority: { type: "string", enum: ["高", "中", "低"] },
-          goal: { type: "string", enum: ["引导需求", "建立信任", "产品匹配", "促成试单", "推动付款", "推动复购", "其他"] },
-        },
-      },
-    },
-    defensePoints: {
-      type: "array", maxItems: 12,
-      items: {
-        type: "object", additionalProperties: false,
-        required: ["title", "risk", "reason", "evidenceMessageId", "evidenceQuote", "evidenceTranslation", "status", "remedy", "suggestedReply", "suggestedReplyTranslation", "riskLevel"],
-        properties: {
-          title: { type: "string" }, risk: { type: "string" }, reason: { type: "string" },
-          evidenceMessageId: { type: "string" }, evidenceQuote: { type: "string" }, evidenceTranslation: { type: "string" },
-          status: { type: "string", enum: ["未解决", "未追问-基本解决", "客户肯定-完全解决"] },
-          remedy: { type: "string" }, suggestedReply: { type: "string" }, suggestedReplyTranslation: { type: "string" },
-          riskLevel: { type: "string", enum: ["高", "中", "低"] },
-        },
-      },
-    },
+    decisionMap: { type: "object", additionalProperties: false, required: ["motivationLevel", "biggestBlocker", "readiness", "priorityTask", "buyingDrivers", "blockers"], properties: {
+      motivationLevel: { type: "string", enum: ["强", "中", "弱"] }, biggestBlocker: { type: "string" }, readiness: { type: "string", enum: ["高", "中", "低"] }, priorityTask: { type: "string" },
+      buyingDrivers: { type: "array", maxItems: 3, items: { type: "object", additionalProperties: false, required: ["title", "desiredOutcome", "painOrExpectation", "strength", "purchaseIntent", "conversionReason", "evidenceMessageId", "evidenceQuote", "evidenceTranslation"], properties: {
+        title: { type: "string" }, desiredOutcome: { type: "string" }, painOrExpectation: { type: "string" }, strength: { type: "string", enum: ["强", "中", "弱"] }, purchaseIntent: { type: "string", enum: ["明确", "较高", "观察中"] }, conversionReason: { type: "string" }, evidenceMessageId: { type: "string" }, evidenceQuote: { type: "string" }, evidenceTranslation: { type: "string" },
+      } } },
+      blockers: { type: "array", maxItems: 8, items: { type: "object", additionalProperties: false, required: ["title", "category", "concern", "dealImpact", "evidenceMessageId", "evidenceQuote", "evidenceTranslation", "handlingStatus", "salesEvidenceMessageId", "salesEvidenceQuote", "salesEvidenceTranslation", "resolutionEvidenceMessageId", "resolutionEvidenceQuote", "resolutionEvidenceTranslation", "solutionDirection"], properties: {
+        title: { type: "string" }, category: { type: "string", enum: ["产品匹配", "产品知识", "价格与预算", "质量与COA", "公司与供应商信任", "包装与交付", "物流清关与时效", "支付与资金安全", "决策时机", "内部审批", "其他顾虑"] }, concern: { type: "string" }, dealImpact: { type: "string" }, evidenceMessageId: { type: "string" }, evidenceQuote: { type: "string" }, evidenceTranslation: { type: "string" }, handlingStatus: { type: "string", enum: ["未解决", "已回答-客户未追问", "客户明确认可"] }, salesEvidenceMessageId: { type: "string" }, salesEvidenceQuote: { type: "string" }, salesEvidenceTranslation: { type: "string" }, resolutionEvidenceMessageId: { type: "string" }, resolutionEvidenceQuote: { type: "string" }, resolutionEvidenceTranslation: { type: "string" }, solutionDirection: { type: "string" },
+      } } },
+    } },
   },
 };
 
@@ -374,7 +355,7 @@ const analysisPrompts: Record<AnalysisModule, string> = {
   customer: `${commonPrompt}\n只返回对话总结、客户画像标签、对话提及产品和销售阶段。profile 由模型根据真实聊天自由提炼为简洁、具体、可独立阅读的画像标签，不预设分类、固定数量、顺序或“分类：内容”格式；应尽可能覆盖聊天中有证据的身份、经验、需求、关注点、信任、价格、决策和沟通特征，使画像足够丰富，通常可提炼 5 至 12 个标签，证据确实较少时允许更少。没有原文依据的特征不得输出，不得为了凑数量重复。productMentions 必须列出聊天中出现的每一个具体产品、多肽或药物并去重。公司名、厂家名、店铺名以及仅代表供应方的品牌名称不得作为产品输出；若商品名本身明确指向一种具体产品或药物，则应按具体产品保留。mentionedBy 判断客户、销售或双方提及；customerAwareness 依据客户原话判断不了解、初步了解、有使用经验、明确熟悉或无法判断；customerInterest 判断明确感兴趣、可能感兴趣、未表现兴趣、明确拒绝或无法判断；awarenessReason 说明判断依据。evidenceMessageId 和 evidenceQuote 必须引用包含该产品名或能直接证明客户了解程度的真实消息编号及逐字原文。仅由销售提及而客户未回应时，客户了解程度和兴趣必须填无法判断。stage 只能使用规定七阶段，第一至三阶段可并行。`,
   psychology: `${commonPrompt}\n只返回 emotionProfile，并严格按 JSON 示例字段输出。\n1. currentState 将客户当前情绪与可从表达观察到的心理状态合并成一段结论；不要诊断疾病、人格障碍或贴 MBTI 标签。currentStateEvidence 必须给出支持结论的真实客户消息。\n2. emotionTurningPoints 按聊天先后顺序提取真正发生变化的 0-8 个情绪转折点。score 只能为 -2 到 2（-2明显消极、-1偏消极、0中性、1偏积极、2明显积极）；label 是简短情绪标签，reason 说明这句话及上下文为什么构成转折。没有明显转折时返回 []，不得为了画图虚构转折。\n3. personalityTraits 只写沟通性格倾向，每项包含 trait、explanation 和自己的 evidence；不再输出敏感点或防御/回避模式。\n4. decisionStyle 总结决策方式；decisionFactors 写主要考虑因素；decisionPace 写决策节奏；advancementConditions 写继续推进所需条件；communicationApproach 写适合的沟通方式；decisionEvidence 必须直接支撑这些判断。\n5. 每一条 evidence 必须引用真实客户消息的 M 编号与逐字原文 quote，并提供忠实中文 translation 和 interpretation。禁止改写原话、拼接不同消息或引用销售消息。信息不足时明确说明并降低 confidence，不能用常识补全。advice 给出尊重客户自主决定、可执行且不操纵的沟通建议。`,
   objections: `${commonPrompt}\n只返回 objections。仅保留有客户逐字原文证据的明确异议或犹豫，禁止占位标题。未正面回答或客户再次追问=未解决；销售正面回答且客户未再追问=未追问-基本解决；销售回答后客户明确认可=客户肯定-完全解决。解决证据必须发生在异议之后；沉默、礼貌致谢和话题切换不算肯定。`,
-  checklist: `${commonPrompt}\n此模块虽保留 checklist 技术名称用于兼容旧任务，但业务上只返回动态的 offensePoints（进攻点）和 defensePoints（防守点），禁止返回 confirmations 或固定十项清单。\n进攻点只提取当前真实存在、适合主动推进客户决策的机会，例如明确需求、痛点、感兴趣产品、已认可价值、信任基础或成交时机。每项必须说明机会判断、为什么现在适合推进、推进方向、优先级和目标，并生成沿用客户语言的 suggestedReply 及自然简体中文翻译。\n防守点只提取可能造成不信任、停止回复、延迟决定或放弃购买的真实风险，例如未解决异议、回答不足、价格/质量/COA/包装/公司/物流/支付顾虑、情绪转冷或承诺缺乏依据。状态严格按消息顺序判断：没有正面处理或再次追问=未解决；销售正面处理后客户没有继续追问=未追问-基本解决；处理后客户明确表示认可或接受=客户肯定-完全解决。礼貌致谢、沉默和换话题不算明确肯定。\n每个进攻点和防守点都必须且只能引用一条可核验的真实聊天：evidenceMessageId 填稳定 M 编号，evidenceQuote 必须逐字摘录该消息，evidenceTranslation 是忠实中文翻译。禁止拼接消息、改写原文、伪造客户原话或输出“待确认”占位点。可以引用客户或销售消息，但判断客户需求、态度、异议或肯定时必须引用客户消息。同一件事不得同时重复列为进攻点和防守点，以当前主要属性归类。没有真实点时返回空数组。`,
+  checklist: `${commonPrompt}\n业务上只返回 decisionMap（成交决策地图），禁止返回 offensePoints、defensePoints、confirmations 或独立 objections。它只回答：客户为什么想买、为什么还没买、当前最需要解决什么。\nbuyingDrivers 只保留真正推动购买的核心原因，最多3项；相同目标、需求、购买意向、直接货源诉求必须语义合并，禁止拆成近义卡片。每项必须由客户原文支撑，并区分想获得的结果、痛点或期望、驱动力强度、购买意愿和推动成交的原因。\nblockers 合并所有明确异议、产品疑问、价格预算、质量COA、公司信任、包装交付、物流、支付、决策时机和内部审批问题。一个语义问题只输出一次。客户疑问即使代表兴趣，只要尚未解决并可能阻碍决定，就只能进入 blockers，不能同时进入 buyingDrivers。\nhandlingStatus 严格按消息顺序判断：没有销售正面处理或客户再次追问=未解决；销售正面处理后客户未再追问=已回答-客户未追问；销售处理后客户明确认可=客户明确认可。礼貌致谢、沉默和换话题不算明确认可。销售处理存在时必须提供更晚的销售原文；客户明确认可时还必须提供销售处理之后的客户认可原文。不存在的销售处理或认可证据字段全部返回空字符串。\n每个 driver 和 blocker 都必须引用一个可核验客户 M 编号及逐字原文和忠实中文翻译，禁止拼接、改写或虚构。decisionMap 顶部给出总体下单动力、最大阻力、成交准备度和一句首要任务。这里只输出诊断和解决方向，不生成完整回复话术；完整回复属于 action 模块。`,
   action: `${legacyModulePrompts.action}\n如果提供了话术知识库资料，应优先借鉴与当前客户问题直接相关的表达和销售思路，但不能照搬不适用于当前客户的事实。knowledgeReferenceIds 只返回实际用于 suggestedReply 的话术 ID；没有使用时返回 []，禁止编造 ID。`,
 };
 
@@ -390,12 +371,12 @@ export interface CustomerModuleResult {
 
 export interface PsychologyModuleResult { emotionProfile: CustomerEmotionProfile }
 export interface ObjectionsModuleResult { objections: Objection[] }
-export interface ChecklistModuleResult { offensePoints: OffensePoint[]; defensePoints: DefensePoint[] }
+export interface ChecklistModuleResult { decisionMap: DealDecisionMap }
 interface RiskModuleResult { objections: Objection[]; confirmations: ConfirmationItem[] }
 export interface ActionModuleResult { improvements: string[]; nextActions: string[]; suggestedReply: string; suggestedReplyTranslation: string; knowledgeReferenceIds: string[]; knowledgeReferences?: KnowledgeScriptReference[] }
 export type AnalysisModuleResult = CustomerModuleResult | PsychologyModuleResult | ObjectionsModuleResult | ChecklistModuleResult | ActionModuleResult;
 
-interface ChecklistModelResult { offensePoints: OffensePoint[]; defensePoints: DefensePoint[] }
+interface ChecklistModelResult { decisionMap: DealDecisionMap }
 interface ChecklistModelItem {
   id: string; status: ConfirmationItem["status"]; evidence: string; evidenceMessageId: string; evidenceQuote: string; riskReason: string;
   conclusion: string; detail: string; source: "客户主动询问" | "销售主动提出" | "未提及" | "不适用";
@@ -556,8 +537,11 @@ function deepSeekJsonExample(module: AnalysisModule): Record<string, unknown> {
   };
   if (module === "objections") return { objections: [] };
   if (module === "checklist") return {
-    offensePoints: [{ title: "真实的推进机会", opportunity: "说明客户已经表现出的机会", timingReason: "说明为什么现在适合推进", evidenceMessageId: "M00001", evidenceQuote: "必须替换为对应消息的逐字原文", evidenceTranslation: "忠实中文翻译", direction: "具体推进方向", suggestedReply: "A natural reply in the customer's language.", suggestedReplyTranslation: "自然简体中文翻译。", priority: "高", goal: "建立信任" }],
-    defensePoints: [{ title: "真实的成交风险", risk: "说明可能造成的影响", reason: "说明触发原因", evidenceMessageId: "M00001", evidenceQuote: "必须替换为对应消息的逐字原文", evidenceTranslation: "忠实中文翻译", status: "未解决", remedy: "具体补救动作", suggestedReply: "A natural reply in the customer's language.", suggestedReplyTranslation: "自然简体中文翻译。", riskLevel: "高" }],
+    decisionMap: {
+      motivationLevel: "强", biggestBlocker: "当前最主要的真实成交阻力", readiness: "中", priorityTask: "当前只做的一项首要任务",
+      buyingDrivers: [{ title: "合并后的核心下单驱动力", desiredOutcome: "客户想获得的结果", painOrExpectation: "客户痛点或期望", strength: "强", purchaseIntent: "较高", conversionReason: "为什么能推动成交", evidenceMessageId: "M00001", evidenceQuote: "必须替换为对应客户消息的逐字原文", evidenceTranslation: "忠实中文翻译" }],
+      blockers: [{ title: "唯一且具体的成交阻力", category: "支付与资金安全", concern: "客户具体担心什么", dealImpact: "该问题如何影响成交", evidenceMessageId: "M00002", evidenceQuote: "必须替换为对应客户消息的逐字原文", evidenceTranslation: "忠实中文翻译", handlingStatus: "未解决", salesEvidenceMessageId: "", salesEvidenceQuote: "", salesEvidenceTranslation: "", resolutionEvidenceMessageId: "", resolutionEvidenceQuote: "", resolutionEvidenceTranslation: "", solutionDirection: "不包含完整话术的解决方向" }],
+    },
   };
   return {
     improvements: ["结合真实对话指出一项可改善之处"],
@@ -832,7 +816,8 @@ function requireRawModuleResult(module: AnalysisModule, value: unknown, messages
     return;
   }
   if (module === "checklist") {
-    if (!Array.isArray(raw.offensePoints) || !Array.isArray(raw.defensePoints)) throw new Error("进攻点与防守点模块字段不完整");
+    const decisionMap = raw.decisionMap as Record<string, unknown> | undefined;
+    if (!decisionMap || !Array.isArray(decisionMap.buyingDrivers) || !Array.isArray(decisionMap.blockers)) throw new Error("成交决策地图字段不完整");
     return;
   }
   const improvements = Array.isArray(raw.improvements) ? raw.improvements.filter((item) => typeof item === "string" && item.trim()) : [];
@@ -860,9 +845,9 @@ function requireNormalizedModuleResult(module: AnalysisModule, value: AnalysisMo
   }
   if (module === "checklist") {
     const result = value as ChecklistModuleResult;
-    const invalidOffense = result.offensePoints.some((item) => !item.title || !item.opportunity || !item.timingReason || !item.direction || !item.suggestedReply || !item.suggestedReplyTranslation || !item.evidenceMessageId || !item.evidenceQuote);
-    const invalidDefense = result.defensePoints.some((item) => !item.title || !item.risk || !item.reason || !item.remedy || !item.suggestedReply || !item.suggestedReplyTranslation || !item.evidenceMessageId || !item.evidenceQuote);
-    if (invalidOffense || invalidDefense) throw new Error("进攻点与防守点包含无法核验或不完整的结果");
+    const invalidDriver = result.decisionMap.buyingDrivers.some((item) => !item.title || !item.desiredOutcome || !item.conversionReason || !item.evidenceMessageId || !item.evidenceQuote);
+    const invalidBlocker = result.decisionMap.blockers.some((item) => !item.title || !item.concern || !item.dealImpact || !item.solutionDirection || !item.evidenceMessageId || !item.evidenceQuote);
+    if (!result.decisionMap.priorityTask || invalidDriver || invalidBlocker) throw new Error("成交决策地图包含无法核验或不完整的结果");
   }
 }
 
@@ -974,63 +959,43 @@ function normalizeLegacyChecklistResult(value: unknown, messages: ParsedConversa
 
 function normalizeChecklistResult(value: unknown, messages: ParsedConversationMessage[]): ChecklistModuleResult {
   const raw = value && typeof value === "object" ? value as Partial<ChecklistModelResult> : {};
+  const source = raw.decisionMap && typeof raw.decisionMap === "object" ? raw.decisionMap as DealDecisionMap : undefined;
   const messageById = new Map(messages.map((message) => [message.id, message]));
+  const customerMessageById = new Map(messages.filter((message) => message.role === "customer").map((message) => [message.id, message]));
   const cleanText = (value: unknown) => typeof value === "string" ? value.trim() : "";
-  const evidenceIsValid = (item: { evidenceMessageId?: unknown; evidenceQuote?: unknown }) => {
+  const evidenceIsValid = (items: Map<string, ParsedConversationMessage>, item: { evidenceMessageId?: unknown; evidenceQuote?: unknown }) => {
     const messageId = cleanText(item.evidenceMessageId);
     const quote = cleanText(item.evidenceQuote);
-    return Boolean(messageId && quote && hasVerifiedEvidence(messageById, messageId, quote));
+    return Boolean(messageId && quote && hasVerifiedEvidence(items, messageId, quote));
   };
-  const offensePoints = (Array.isArray(raw.offensePoints) ? raw.offensePoints : []).flatMap((candidate): OffensePoint[] => {
-    if (!candidate || typeof candidate !== "object" || !evidenceIsValid(candidate)) return [];
-    const item = candidate as Partial<OffensePoint>;
-    const message = messageById.get(cleanText(item.evidenceMessageId));
-    const title = cleanText(item.title);
-    const opportunity = cleanText(item.opportunity);
-    const timingReason = cleanText(item.timingReason);
-    const direction = cleanText(item.direction);
-    const evidenceTranslation = cleanText(item.evidenceTranslation);
-    const suggestedReply = cleanText(item.suggestedReply);
-    const suggestedReplyTranslation = cleanText(item.suggestedReplyTranslation);
-    if (!title || !opportunity || !timingReason || !direction || !evidenceTranslation || !suggestedReply || !suggestedReplyTranslation) return [];
-    // 客户态度、需求或认可只能由客户原话支撑，销售消息只能支撑“已提供了什么”。
-    if (message?.role !== "customer" && /客户(?:需要|希望|关注|认可|同意|感兴趣|愿意|决定)/.test(`${opportunity}${timingReason}`)) return [];
-    return [{
-      title, opportunity, timingReason,
-      evidenceMessageId: cleanText(item.evidenceMessageId), evidenceQuote: cleanText(item.evidenceQuote),
-      evidenceTranslation, direction, suggestedReply, suggestedReplyTranslation,
-      priority: item.priority === "高" || item.priority === "低" ? item.priority : "中",
-      goal: ["引导需求", "建立信任", "产品匹配", "促成试单", "推动付款", "推动复购", "其他"].includes(item.goal || "") ? item.goal as OffensePoint["goal"] : "其他",
-    }];
-  }).slice(0, 12);
-  const defensePoints = (Array.isArray(raw.defensePoints) ? raw.defensePoints : []).flatMap((candidate): DefensePoint[] => {
-    if (!candidate || typeof candidate !== "object" || !evidenceIsValid(candidate)) return [];
-    const item = candidate as Partial<DefensePoint>;
-    const message = messageById.get(cleanText(item.evidenceMessageId));
-    const title = cleanText(item.title);
-    const risk = cleanText(item.risk);
-    const reason = cleanText(item.reason);
-    const remedy = cleanText(item.remedy);
-    const evidenceTranslation = cleanText(item.evidenceTranslation);
-    const suggestedReply = cleanText(item.suggestedReply);
-    const suggestedReplyTranslation = cleanText(item.suggestedReplyTranslation);
-    if (!title || !risk || !reason || !remedy || !evidenceTranslation || !suggestedReply || !suggestedReplyTranslation) return [];
-    // 异议、情绪或肯定属于客户状态，不能仅凭销售自述成立。
-    if (message?.role !== "customer" && /客户(?:担心|质疑|不信任|不满|拒绝|犹豫|认可|肯定)/.test(`${title}${risk}${reason}`)) return [];
-    return [{
-      title, risk, reason,
-      evidenceMessageId: cleanText(item.evidenceMessageId), evidenceQuote: cleanText(item.evidenceQuote),
-      evidenceTranslation,
-      status: item.status === "未追问-基本解决" || item.status === "客户肯定-完全解决" ? item.status : "未解决",
-      remedy, suggestedReply, suggestedReplyTranslation,
-      riskLevel: item.riskLevel === "高" || item.riskLevel === "低" ? item.riskLevel : "中",
-    }];
-  }).slice(0, 12);
-  const defenseTitles = new Set(defensePoints.map((item) => item.title.replace(/\s+/g, "").toLowerCase()));
-  return {
-    offensePoints: offensePoints.filter((item) => !defenseTitles.has(item.title.replace(/\s+/g, "").toLowerCase())),
-    defensePoints,
-  };
+  const buyingDrivers = (Array.isArray(source?.buyingDrivers) ? source.buyingDrivers : []).flatMap((candidate): BuyingDriver[] => {
+    if (!candidate || typeof candidate !== "object" || !evidenceIsValid(customerMessageById, candidate)) return [];
+    const item = candidate as Partial<BuyingDriver>;
+    const title = cleanText(item.title), desiredOutcome = cleanText(item.desiredOutcome), painOrExpectation = cleanText(item.painOrExpectation), conversionReason = cleanText(item.conversionReason), evidenceTranslation = cleanText(item.evidenceTranslation);
+    if (!title || !desiredOutcome || !painOrExpectation || !conversionReason || !evidenceTranslation) return [];
+    return [{ title, desiredOutcome, painOrExpectation, strength: item.strength === "强" || item.strength === "弱" ? item.strength : "中", purchaseIntent: item.purchaseIntent === "明确" || item.purchaseIntent === "较高" ? item.purchaseIntent : "观察中", conversionReason, evidenceMessageId: cleanText(item.evidenceMessageId), evidenceQuote: cleanText(item.evidenceQuote), evidenceTranslation }];
+  }).filter((item, index, items) => items.findIndex((other) => normalizeEvidenceText(other.title) === normalizeEvidenceText(item.title) || (other.evidenceMessageId === item.evidenceMessageId && normalizeEvidenceText(other.desiredOutcome) === normalizeEvidenceText(item.desiredOutcome))) === index).slice(0, 3);
+  const blockerCategories: DealBlocker["category"][] = ["产品匹配", "产品知识", "价格与预算", "质量与COA", "公司与供应商信任", "包装与交付", "物流清关与时效", "支付与资金安全", "决策时机", "内部审批", "其他顾虑"];
+  const blockers = (Array.isArray(source?.blockers) ? source.blockers : []).flatMap((candidate): DealBlocker[] => {
+    if (!candidate || typeof candidate !== "object" || !evidenceIsValid(customerMessageById, candidate)) return [];
+    const item = candidate as Partial<DealBlocker>;
+    const title = cleanText(item.title), concern = cleanText(item.concern), dealImpact = cleanText(item.dealImpact), evidenceTranslation = cleanText(item.evidenceTranslation), solutionDirection = cleanText(item.solutionDirection);
+    if (!title || !concern || !dealImpact || !evidenceTranslation || !solutionDirection) return [];
+    const requestedStatus = item.handlingStatus === "已回答-客户未追问" || item.handlingStatus === "客户明确认可" ? item.handlingStatus : "未解决";
+    const salesValid = evidenceIsValid(messageById, { evidenceMessageId: item.salesEvidenceMessageId, evidenceQuote: item.salesEvidenceQuote }) && messageById.get(cleanText(item.salesEvidenceMessageId))?.role === "sales";
+    const resolutionValid = evidenceIsValid(customerMessageById, { evidenceMessageId: item.resolutionEvidenceMessageId, evidenceQuote: item.resolutionEvidenceQuote });
+    const issueIndex = messages.findIndex((message) => message.id === cleanText(item.evidenceMessageId));
+    const salesIndex = messages.findIndex((message) => message.id === cleanText(item.salesEvidenceMessageId));
+    const resolutionIndex = messages.findIndex((message) => message.id === cleanText(item.resolutionEvidenceMessageId));
+    const statusValid = requestedStatus === "未解决" || (requestedStatus === "已回答-客户未追问" && salesValid && salesIndex > issueIndex) || (requestedStatus === "客户明确认可" && salesValid && resolutionValid && salesIndex > issueIndex && resolutionIndex > salesIndex);
+    const handlingStatus: DealBlocker["handlingStatus"] = statusValid ? requestedStatus : "未解决";
+    return [{ title, category: blockerCategories.includes(item.category as DealBlocker["category"]) ? item.category as DealBlocker["category"] : "其他顾虑", concern, dealImpact, evidenceMessageId: cleanText(item.evidenceMessageId), evidenceQuote: cleanText(item.evidenceQuote), evidenceTranslation, handlingStatus, salesEvidenceMessageId: handlingStatus === "未解决" ? "" : cleanText(item.salesEvidenceMessageId), salesEvidenceQuote: handlingStatus === "未解决" ? "" : cleanText(item.salesEvidenceQuote), salesEvidenceTranslation: handlingStatus === "未解决" ? "" : cleanText(item.salesEvidenceTranslation), resolutionEvidenceMessageId: handlingStatus === "客户明确认可" ? cleanText(item.resolutionEvidenceMessageId) : "", resolutionEvidenceQuote: handlingStatus === "客户明确认可" ? cleanText(item.resolutionEvidenceQuote) : "", resolutionEvidenceTranslation: handlingStatus === "客户明确认可" ? cleanText(item.resolutionEvidenceTranslation) : "", solutionDirection }];
+  }).filter((item, index, items) => items.findIndex((other) => normalizeEvidenceText(other.title) === normalizeEvidenceText(item.title) || (other.evidenceMessageId === item.evidenceMessageId && other.category === item.category)) === index).slice(0, 8);
+  const motivationLevel: DealDecisionMap["motivationLevel"] = buyingDrivers.length ? source?.motivationLevel === "强" || source?.motivationLevel === "弱" ? source.motivationLevel : "中" : "弱";
+  const readiness: DealDecisionMap["readiness"] = buyingDrivers.length ? source?.readiness === "高" || source?.readiness === "低" ? source.readiness : "中" : "低";
+  const requestedBiggestBlocker = cleanText(source?.biggestBlocker);
+  const verifiedBiggestBlocker = blockers.find((item) => normalizeEvidenceText(item.title) === normalizeEvidenceText(requestedBiggestBlocker))?.title;
+  return { decisionMap: { motivationLevel, biggestBlocker: verifiedBiggestBlocker || blockers[0]?.title || "当前未识别到明确成交阻力", readiness, priorityTask: cleanText(source?.priorityTask) || "继续确认客户当前最重要的决策条件。", buyingDrivers, blockers } };
 }
 
 function validateLegacyModuleResult(module: "customer" | "risk" | "action", value: AnalysisModuleResult, messages: ParsedConversationMessage[] = []) {
@@ -1283,17 +1248,15 @@ export async function analyzeWithProvider(provider: Provider, conversation: stri
   const results = await Promise.all([
     analyzeModuleWithProvider(provider, conversation, "customer"),
     analyzeModuleWithProvider(provider, conversation, "psychology"),
-    analyzeModuleWithProvider(provider, conversation, "objections"),
     analyzeModuleWithProvider(provider, conversation, "checklist"),
     analyzeModuleWithProvider(provider, conversation, "action"),
   ]);
   if (results.some((result) => !result)) return null;
   const customer = results[0] as CustomerModuleResult;
   const psychology = results[1] as PsychologyModuleResult;
-  const objections = results[2] as ObjectionsModuleResult;
-  const checklist = results[3] as ChecklistModuleResult;
-  const action = results[4] as ActionModuleResult;
-  return { ...customer, ...psychology, ...objections, ...checklist, ...action, confirmations: [], knowledgeReferences: action.knowledgeReferences ?? [] };
+  const checklist = results[2] as ChecklistModuleResult;
+  const action = results[3] as ActionModuleResult;
+  return { ...customer, ...psychology, ...checklist, ...action, objections: [], offensePoints: [], defensePoints: [], confirmations: [], knowledgeReferences: action.knowledgeReferences ?? [] };
 }
 
 type HesitationModelResult = Omit<HesitationAnalysis, "analyzedAt">;
