@@ -65,8 +65,29 @@ export async function ensureSchema() {
           successful BOOLEAN NOT NULL DEFAULT FALSE,
           created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
+        CREATE TABLE IF NOT EXISTS sales_scripts (
+          id TEXT PRIMARY KEY,
+          title TEXT NOT NULL,
+          scenario TEXT NOT NULL DEFAULT '',
+          stage TEXT NOT NULL DEFAULT '初次询盘与客户背调',
+          products JSONB NOT NULL DEFAULT '[]'::jsonb,
+          customer_roles JSONB NOT NULL DEFAULT '[]'::jsonb,
+          trigger_text TEXT NOT NULL DEFAULT '',
+          content TEXT NOT NULL,
+          translation TEXT NOT NULL DEFAULT '',
+          language TEXT NOT NULL DEFAULT 'EN',
+          tags JSONB NOT NULL DEFAULT '[]'::jsonb,
+          status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'published')),
+          priority INTEGER NOT NULL DEFAULT 50 CHECK (priority BETWEEN 0 AND 100),
+          usage_count INTEGER NOT NULL DEFAULT 0,
+          created_by TEXT REFERENCES app_users(id) ON DELETE SET NULL,
+          updated_by TEXT REFERENCES app_users(id) ON DELETE SET NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
         CREATE INDEX IF NOT EXISTS audit_logs_created_at_idx ON audit_logs(created_at DESC);
         CREATE INDEX IF NOT EXISTS auth_attempts_lookup_idx ON auth_attempts(email, ip_address, created_at DESC);
+        CREATE INDEX IF NOT EXISTS sales_scripts_status_updated_idx ON sales_scripts(status, updated_at DESC);
       `);
     })().catch((error) => {
       globalForDb.clientLensSchema = undefined;

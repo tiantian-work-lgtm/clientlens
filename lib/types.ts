@@ -14,6 +14,32 @@ export type ConfirmationStatus = "confirmed" | "unknown" | "risk" | "na";
 export type AnalysisModule = "customer" | "psychology" | "objections" | "checklist" | "action";
 export type AnalysisModuleStatus = "pending" | "analyzing" | "done" | "failed";
 
+export interface KnowledgeScriptReference {
+  id: string;
+  title: string;
+  stage: string;
+  excerpt: string;
+}
+
+export interface KnowledgeScript {
+  id: string;
+  title: string;
+  scenario: string;
+  stage: SalesStage;
+  products: string[];
+  customerRoles: string[];
+  triggerText: string;
+  content: string;
+  translation: string;
+  language: string;
+  tags: string[];
+  status: "draft" | "published";
+  priority: number;
+  usageCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface ImportPreviewMessage {
   id: string;
   role: "customer" | "sales" | "unknown" | "system";
@@ -253,6 +279,7 @@ export interface AnalysisReport {
   nextActions: string[];
   suggestedReply: string;
   suggestedReplyTranslation: string;
+  knowledgeReferences: KnowledgeScriptReference[];
   confidence: number;
 }
 

@@ -1,6 +1,7 @@
-import type { AnalysisModule, AnalysisReport, ConfirmationItem, CustomerEmotionProfile, HesitationAnalysis, Objection, ProductMention, Provider, SalesStage } from "./types";
+import type { AnalysisModule, AnalysisReport, ConfirmationItem, CustomerEmotionProfile, HesitationAnalysis, KnowledgeScript, KnowledgeScriptReference, Objection, ProductMention, Provider, SalesStage } from "./types";
 import { getRuntimeProviderConfig, type RuntimeProviderConfig } from "./provider-config";
 import { buildNumberedConversationChunks, parseConversationMessages, type ParsedConversationMessage } from "./conversation";
+import { formatScriptKnowledgeContext, recordScriptUsage, retrieveRelevantScripts, toScriptReferences } from "./script-knowledge";
 
 const stages = ["初次询盘与客户背调", "信任建立", "产品与订单匹配", "决策推进", "等待付款", "已成交", "售后与复购"];
 const profileDimensions = ["身份与组织", "客户类型与经验", "核心需求与目标", "产品兴趣", "决策权与流程", "采购意向", "价格敏感度", "信任状态", "核心关注与风险偏好", "沟通风格与下一步倾向"];
@@ -202,12 +203,13 @@ const riskSchema = {
 const actionSchema = {
   type: "object",
   additionalProperties: false,
-  required: ["improvements", "nextActions", "suggestedReply", "suggestedReplyTranslation"],
+  required: ["improvements", "nextActions", "suggestedReply", "suggestedReplyTranslation", "knowledgeReferenceIds"],
   properties: {
     improvements: { type: "array", items: { type: "string" } },
     nextActions: { type: "array", items: { type: "string" } },
     suggestedReply: { type: "string" },
     suggestedReplyTranslation: { type: "string" },
+    knowledgeReferenceIds: { type: "array", items: { type: "string" } },
   },
 };
 
@@ -319,7 +321,7 @@ const analysisPrompts: Record<AnalysisModule, string> = {
   psychology: `${commonPrompt}\n只返回 emotionProfile。依据客户真实原文分析当前情绪、变化、沟通性格倾向、敏感点和决策方式，并作非临床心理研判：当前心理状态、核心驱动力、信任需求、防御或回避模式、压力反应。使用“可能、倾向”等限定语，不诊断疾病或人格障碍，不推断隐私；evidence 只引用客户消息的真实 M 编号和逐字原文，证据不足就明确说明并降低 confidence。`,
   objections: `${commonPrompt}\n只返回 objections。仅保留有客户逐字原文证据的明确异议或犹豫，禁止占位标题。未正面回答或客户再次追问=未解决；销售正面回答且客户未再追问=未追问-基本解决；销售回答后客户明确认可=客户肯定-完全解决。解决证据必须发生在异议之后；沉默、礼貌致谢和话题切换不算肯定。`,
   checklist: `${commonPrompt}\n只返回 confirmations，必须且只按顺序返回 role、seeding、medical、scammed、coa、packaging、company、feedback、logistics、payment_method 共10项。每项只使用统一精简字段：conclusion 是该项结论，detail 是方向或具体说明，source 是谁提出，handling 是销售是否处理，reaction 是客户反应，advice 是下一步建议。seeding 结论只能“需要种草/无需种草”；medical 只能“需要提供建议/无需提供建议”；scammed 只能“有被骗经历/无被骗经历”。其他项目 conclusion 简洁概括。已处理必须引用销售原文；客户明确肯定、满意或异议必须引用客户原文并符合消息顺序。未提及的字段使用未提及、未确认或不适用，不得虚构证据。只有真实成交障碍才标 risk。`,
-  action: legacyModulePrompts.action,
+  action: `${legacyModulePrompts.action}\n如果提供了话术知识库资料，应优先借鉴与当前客户问题直接相关的表达和销售思路，但不能照搬不适用于当前客户的事实。knowledgeReferenceIds 只返回实际用于 suggestedReply 的话术 ID；没有使用时返回 []，禁止编造 ID。`,
 };
 
 export interface CustomerModuleResult {
@@ -336,7 +338,7 @@ export interface PsychologyModuleResult { emotionProfile: CustomerEmotionProfile
 export interface ObjectionsModuleResult { objections: Objection[] }
 export interface ChecklistModuleResult { confirmations: ConfirmationItem[] }
 interface RiskModuleResult { objections: Objection[]; confirmations: ConfirmationItem[] }
-export interface ActionModuleResult { improvements: string[]; nextActions: string[]; suggestedReply: string; suggestedReplyTranslation: string }
+export interface ActionModuleResult { improvements: string[]; nextActions: string[]; suggestedReply: string; suggestedReplyTranslation: string; knowledgeReferenceIds: string[]; knowledgeReferences?: KnowledgeScriptReference[] }
 export type AnalysisModuleResult = CustomerModuleResult | PsychologyModuleResult | ObjectionsModuleResult | ChecklistModuleResult | ActionModuleResult;
 
 interface ChecklistModelItem {
@@ -491,6 +493,7 @@ function deepSeekJsonExample(module: AnalysisModule): Record<string, unknown> {
     nextActions: ["结合当前进度给出一项明确行动"],
     suggestedReply: "A natural reply in the customer's language.",
     suggestedReplyTranslation: "上一条建议回复的自然简体中文翻译。",
+    knowledgeReferenceIds: [],
   };
 }
 
@@ -757,7 +760,7 @@ function requireRawModuleResult(module: AnalysisModule, value: unknown, messages
   }
   const improvements = Array.isArray(raw.improvements) ? raw.improvements.filter((item) => typeof item === "string" && item.trim()) : [];
   const nextActions = Array.isArray(raw.nextActions) ? raw.nextActions.filter((item) => typeof item === "string" && item.trim()) : [];
-  if (!improvements.length || !nextActions.length || typeof raw.suggestedReply !== "string" || !raw.suggestedReply.trim() || typeof raw.suggestedReplyTranslation !== "string" || !raw.suggestedReplyTranslation.trim()) {
+  if (!improvements.length || !nextActions.length || typeof raw.suggestedReply !== "string" || !raw.suggestedReply.trim() || typeof raw.suggestedReplyTranslation !== "string" || !raw.suggestedReplyTranslation.trim() || !Array.isArray(raw.knowledgeReferenceIds)) {
     throw new Error("行动建议模块字段不完整");
   }
 }
@@ -1025,11 +1028,12 @@ function normalizeModuleResult(module: AnalysisModule, value: unknown, messages:
     nextActions: cleanStringArray(raw.nextActions, ["先确认客户当前最关心的问题，再推进一个明确的下一步。"]),
     suggestedReply: raw.suggestedReply?.trim() || "Could you tell me which point you would like to confirm first?",
     suggestedReplyTranslation: raw.suggestedReplyTranslation?.trim() || "您可以告诉我，您想先确认哪一点吗？",
+    knowledgeReferenceIds: cleanStringArray(raw.knowledgeReferenceIds),
   };
 }
 
-async function requestModuleOnce(config: RuntimeProviderConfig, provider: Provider, module: AnalysisModule, input: string, merge = false): Promise<AnalysisModuleResult> {
-  const instruction = `${analysisPrompts[module]}${merge ? "\n下面是分段分析结果，请去重并合并为一个最终结果。消息编号与原文必须原样保留。" : ""}`;
+async function requestModuleOnce(config: RuntimeProviderConfig, provider: Provider, module: AnalysisModule, input: string, merge = false, knowledgeContext = ""): Promise<AnalysisModuleResult> {
+  const instruction = `${analysisPrompts[module]}${module === "action" ? knowledgeContext : ""}${merge ? "\n下面是分段分析结果，请去重并合并为一个最终结果。消息编号与原文必须原样保留。" : ""}`;
   if (provider === "openai") {
     return requestOpenAIJson<AnalysisModuleResult>(config, moduleSchema(module), `customer_${module}_analysis`, instruction, input);
   }
@@ -1047,6 +1051,16 @@ export async function analyzeModuleWithProvider(provider: Provider, conversation
   if (!config) return null;
   const chunks = buildNumberedConversationChunks(conversation);
   const messages = parseConversationMessages(conversation);
+  const knowledgeScripts: KnowledgeScript[] = module === "action" ? await retrieveRelevantScripts(conversation) : [];
+  const knowledgeContext = module === "action" ? formatScriptKnowledgeContext(knowledgeScripts) : "";
+  const attachKnowledge = async (value: AnalysisModuleResult) => {
+    if (module !== "action") return value;
+    const action = value as ActionModuleResult;
+    const allowedIds = new Set(knowledgeScripts.map((script) => script.id));
+    const ids = action.knowledgeReferenceIds.filter((id, index, items) => allowedIds.has(id) && items.indexOf(id) === index);
+    await recordScriptUsage(ids);
+    return { ...action, knowledgeReferenceIds: ids, knowledgeReferences: toScriptReferences(knowledgeScripts, ids) } as AnalysisModuleResult;
+  };
   let lastError: unknown;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
@@ -1054,18 +1068,18 @@ export async function analyzeModuleWithProvider(provider: Provider, conversation
       const previousError = lastError instanceof Error ? lastError.message : "字段或原文核验未通过";
       const retryPrefix = attempt ? `上一次结果失败，具体原因：${previousError}。请依据 JSON Schema 修正并补全所有必填字段；无法找到直接原文的异议必须删除，不得用占位内容代替。\n\n` : "";
       for (const chunk of chunks) {
-        const rawResult = await requestModuleOnce(config, provider, module, `${retryPrefix}${chunk}`);
+        const rawResult = await requestModuleOnce(config, provider, module, `${retryPrefix}${chunk}`, false, knowledgeContext);
         requireRawModuleResult(module, rawResult, messages);
         const normalizedChunk = normalizeModuleResult(module, rawResult, messages);
         requireNormalizedModuleResult(module, normalizedChunk, messages);
         chunkResults.push(normalizedChunk);
       }
-      if (chunkResults.length === 1) return chunkResults[0];
-      const mergedRaw = await requestModuleOnce(config, provider, module, JSON.stringify(chunkResults), true);
+      if (chunkResults.length === 1) return attachKnowledge(chunkResults[0]);
+      const mergedRaw = await requestModuleOnce(config, provider, module, JSON.stringify(chunkResults), true, knowledgeContext);
       requireRawModuleResult(module, mergedRaw, messages);
       const result = normalizeModuleResult(module, mergedRaw, messages);
       requireNormalizedModuleResult(module, result, messages);
-      return result;
+      return attachKnowledge(result);
     } catch (error) {
       lastError = error;
     }
@@ -1087,7 +1101,7 @@ export async function analyzeWithProvider(provider: Provider, conversation: stri
   const objections = results[2] as ObjectionsModuleResult;
   const checklist = results[3] as ChecklistModuleResult;
   const action = results[4] as ActionModuleResult;
-  return { ...customer, ...psychology, ...objections, ...checklist, ...action };
+  return { ...customer, ...psychology, ...objections, ...checklist, ...action, knowledgeReferences: action.knowledgeReferences ?? [] };
 }
 
 type HesitationModelResult = Omit<HesitationAnalysis, "analyzedAt">;
@@ -1211,7 +1225,8 @@ export async function generateChecklistSuggestion(provider: Provider, conversati
   const instruction = mode === "hook"
     ? `根据当前对话，生成一句自然、不审问客户的探询钩子，用于确认“${item}”。`
     : `根据当前对话，生成一段简短、可信、可直接发送的说明，用于阐述“${item}”。不得虚构公司、产品或客户反馈。`;
-  const prompt = `${commonPrompt}\n${instruction}\n沿用客户使用的语言生成 text，并为其提供自然简体中文翻译 translation。只输出包含 text 和 translation 的合法 JSON。\n\n对话：\n${conversation}`;
+  const knowledgeScripts = await retrieveRelevantScripts(`${conversation}\n确认项：${item}`, 4);
+  const prompt = `${commonPrompt}\n${instruction}\n沿用客户使用的语言生成 text，并为其提供自然简体中文翻译 translation。可以借鉴下方知识库话术的表达思路，但不得把不属于当前客户的示例信息当作事实。只输出包含 text 和 translation 的合法 JSON。${formatScriptKnowledgeContext(knowledgeScripts)}\n\n对话：\n${conversation}`;
   const config = await getRuntimeProviderConfig(provider);
   if (!config) return null;
   if (provider === "openai") {

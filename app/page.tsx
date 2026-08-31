@@ -24,12 +24,14 @@ import {
   ListChecks,
   LockKeyhole,
   LogOut,
+  Pencil,
   Plus,
   RefreshCw,
   Search,
   Settings,
   ShieldCheck,
   Sparkles,
+  Trash2,
   Upload,
   UserRound,
   UsersRound,
@@ -39,7 +41,7 @@ import {
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { defaultConfirmations, defaultProgress, emptyReport, initialTasks } from "@/lib/demo-data";
 import { parseConversationMessages } from "@/lib/conversation";
-import type { AnalysisModule, AnalysisModuleStatus, ConfirmationItem, ConfirmationStatus, CustomerTask, HesitationSignal, ImportPreview, ProductMention, ProductResearch, Provider, SalesStage, SourceType } from "@/lib/types";
+import type { AnalysisModule, AnalysisModuleStatus, ConfirmationItem, ConfirmationStatus, CustomerTask, HesitationSignal, ImportPreview, KnowledgeScript, KnowledgeScriptReference, ProductMention, ProductResearch, Provider, SalesStage, SourceType } from "@/lib/types";
 import SettingsManager from "@/app/components/settings-manager";
 
 type View = "analysis" | "scripts" | "products" | "translate" | "settings";
@@ -348,6 +350,14 @@ function normalizeReport(value: unknown, conversation = ""): CustomerTask["repor
     };
   });
   const confidence = Number(report.confidence);
+  const knowledgeReferences: KnowledgeScriptReference[] = Array.isArray(report.knowledgeReferences) ? report.knowledgeReferences.flatMap((value) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+    const item = value as Record<string, unknown>;
+    const id = stringValue(item.id);
+    const title = stringValue(item.title);
+    if (!id || !title) return [];
+    return [{ id, title, stage: stringValue(item.stage), excerpt: stringValue(item.excerpt) }];
+  }) : [];
   return {
     summary: stringValue(report.summary, "AI 未返回有效的对话总结。"),
     profile,
@@ -364,6 +374,7 @@ function normalizeReport(value: unknown, conversation = ""): CustomerTask["repor
     nextActions: stringList(report.nextActions),
     suggestedReply: stringValue(report.suggestedReply),
     suggestedReplyTranslation: stringValue(report.suggestedReplyTranslation),
+    knowledgeReferences,
     confidence: Number.isFinite(confidence) ? Math.min(1, Math.max(0, confidence)) : 0,
   };
 }
@@ -377,7 +388,7 @@ function mergeAnalysisModule(report: CustomerTask["report"], module: AnalysisMod
   if (module === "psychology") return normalizeReport({ ...report, emotionProfile: value.emotionProfile }, conversation);
   if (module === "objections") return normalizeReport({ ...report, objections: value.objections }, conversation);
   if (module === "checklist") return normalizeReport({ ...report, confirmations: value.confirmations }, conversation);
-  return normalizeReport({ ...report, improvements: value.improvements, nextActions: value.nextActions, suggestedReply: value.suggestedReply, suggestedReplyTranslation: value.suggestedReplyTranslation }, conversation);
+  return normalizeReport({ ...report, improvements: value.improvements, nextActions: value.nextActions, suggestedReply: value.suggestedReply, suggestedReplyTranslation: value.suggestedReplyTranslation, knowledgeReferences: value.knowledgeReferences }, conversation);
 }
 
 async function analyzeConcurrently(task: CustomerTask, conversation: string, onUpdate: (task: CustomerTask) => void, requestedModules: AnalysisModule[] = analysisModules) {
@@ -398,7 +409,7 @@ async function analyzeConcurrently(task: CustomerTask, conversation: string, onU
       ...(requestedModules.includes("psychology") ? { emotionProfile: { ...emptyReport.emotionProfile, evidence: [], advice: [...emptyReport.emotionProfile.advice] } } : {}),
       ...(requestedModules.includes("objections") ? { objections: [] } : {}),
       ...(requestedModules.includes("checklist") ? { confirmations: defaultConfirmations.map((item) => ({ ...item })) } : {}),
-      ...(requestedModules.includes("action") ? { improvements: [], nextActions: [], suggestedReply: "", suggestedReplyTranslation: "" } : {}),
+      ...(requestedModules.includes("action") ? { improvements: [], nextActions: [], suggestedReply: "", suggestedReplyTranslation: "", knowledgeReferences: [] } : {}),
     };
   let provider: Provider = task.provider;
   let completed = 0;
@@ -466,14 +477,6 @@ function normalizeTask(task: CustomerTask): CustomerTask {
     progress: hasNewProgress ? task.progress : defaultProgress.map((item) => ({ ...item })),
   };
 }
-
-const scriptRows = [
-  { title: "首次询盘 · 确认客户需求", stage: "初次询盘与客户背调", product: "通用", language: "EN", status: "已发布", used: 128 },
-  { title: "客户认为价格太高", stage: "决策推进", product: "通用", language: "EN", status: "已发布", used: 86 },
-  { title: "解释批次与 COA 的对应关系", stage: "信任建立", product: "Product A", language: "EN", status: "已发布", used: 52 },
-  { title: "报价后 24 小时简短跟进", stage: "决策推进", product: "通用", language: "EN", status: "草稿", used: 19 },
-  { title: "首次订单付款安全说明", stage: "等待付款", product: "通用", language: "EN", status: "审核中", used: 34 },
-];
 
 const productRows = [
   { name: "Product A", category: "核心产品", docs: 6, scripts: 12, updated: "今天 09:30", completeness: 92 },
@@ -563,8 +566,8 @@ export default function Home() {
           onNew={() => setShowNewTask(true)}
         />
       )}
-      {view === "scripts" && <KnowledgeView kind="scripts" />}
-      {view === "products" && <KnowledgeView kind="products" />}
+      {view === "scripts" && <KnowledgeView kind="scripts" isAdmin={session?.role === "admin"} />}
+      {view === "products" && <KnowledgeView kind="products" isAdmin={session?.role === "admin"} />}
       {view === "translate" && <TranslateView />}
       {view === "settings" && session?.role === "admin" && <SettingsView />}
 
@@ -869,7 +872,7 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
 
           <ReportCard icon={Sparkles} title="AI 下一步建议" tone="violet" featured sectionId="next-actions">
             <div className="action-list">{activeTask.report.nextActions.map((item, i) => <div key={item}><span>{i + 1}</span><p>{item}</p></div>)}</div>
-            <div className="reply-box"><div><Bot size={16} /><strong>建议回复</strong><button onClick={() => navigator.clipboard.writeText(activeTask.report.suggestedReply)}><Copy size={14} />复制原文</button></div><p>{activeTask.report.suggestedReply}</p><div className="reply-translation"><span>中文核对</span><p>{activeTask.report.suggestedReplyTranslation}</p></div></div>
+            <div className="reply-box"><div><Bot size={16} /><strong>建议回复</strong><button onClick={() => navigator.clipboard.writeText(activeTask.report.suggestedReply)}><Copy size={14} />复制原文</button></div><p>{activeTask.report.suggestedReply}</p><div className="reply-translation"><span>中文核对</span><p>{activeTask.report.suggestedReplyTranslation}</p></div>{activeTask.report.knowledgeReferences.length > 0 && <div className="knowledge-references"><strong><BookOpen size={13} />本次参考了 {activeTask.report.knowledgeReferences.length} 条已发布话术</strong><div>{activeTask.report.knowledgeReferences.map((reference) => <article className="knowledge-reference" key={reference.id}><span>{reference.title} · {reference.stage}</span><small>{reference.excerpt}</small></article>)}</div></div>}</div>
           </ReportCard>
           </>}
         </div></ReportCollapseContext.Provider>}
@@ -1580,17 +1583,107 @@ function NewTaskModal({ onClose, onCreate, onUpdate }: { onClose: () => void; on
   );
 }
 
-function KnowledgeView({ kind }: { kind: "scripts" | "products" }) {
+function KnowledgeView({ kind, isAdmin }: { kind: "scripts" | "products"; isAdmin: boolean }) {
   const scripts = kind === "scripts";
+  if (scripts) return <ScriptKnowledgeView isAdmin={isAdmin} />;
   return <section className="page-view">
-    <div className="page-header"><div><span className="eyebrow">KNOWLEDGE BASE</span><h1>{scripts ? "话术知识库" : "产品知识库"}</h1><p>{scripts ? "让每一条销售建议都有可靠、可复用的话术依据。" : "统一维护产品事实、文件和可对外表达的内容。"}</p></div><button className="primary-button"><Plus size={17} />{scripts ? "新建话术" : "新建产品"}</button></div>
+    <div className="page-header"><div><span className="eyebrow">KNOWLEDGE BASE</span><h1>产品知识库</h1><p>统一维护产品事实、文件和可对外表达的内容。</p></div><button className="primary-button"><Plus size={17} />新建产品</button></div>
     <div className="stats-row">
-      {(scripts ? [["已发布话术", "84", "+6 本月"], ["平均采纳率", "72%", "+4.8%"], ["待审核", "9", "需要处理"], ["本周调用", "1,286", "+18%"]] : [["产品总数", "26", "+2 本月"], ["资料完整", "18", "69%"], ["关联话术", "127", "+8"], ["待更新文件", "6", "需要处理"]]).map(([label, value, note], i) => <div className="stat-card" key={label}><span>{label}</span><strong>{value}</strong><small className={i === 2 || i === 3 && !scripts ? "warning" : ""}>{note}</small></div>)}
+      {[["产品总数", "26", "+2 本月"], ["资料完整", "18", "69%"], ["关联话术", "127", "+8"], ["待更新文件", "6", "需要处理"]].map(([label, value, note], i) => <div className="stat-card" key={label}><span>{label}</span><strong>{value}</strong><small className={i === 2 || i === 3 ? "warning" : ""}>{note}</small></div>)}
     </div>
     <div className="table-card">
-      <div className="table-toolbar"><label className="search-box"><Search size={16} /><input placeholder={scripts ? "搜索话术、场景或标签" : "搜索产品或分类"} /></label><button className="filter-button">全部分类 <ChevronDown size={14} /></button><button className="filter-button">全部状态 <ChevronDown size={14} /></button><button className="secondary-button"><Upload size={16} />批量导入</button></div>
-      {scripts ? <table><thead><tr><th>话术名称</th><th>销售阶段</th><th>关联产品</th><th>语言</th><th>状态</th><th>使用次数</th></tr></thead><tbody>{scriptRows.map((row) => <tr key={row.title}><td><div className="name-cell"><span className="doc-icon"><FileText size={16} /></span><strong>{row.title}</strong></div></td><td><span className="table-tag">{row.stage}</span></td><td>{row.product}</td><td>{row.language}</td><td><span className={`publish-state ${row.status}`}>{row.status}</span></td><td>{row.used}</td></tr>)}</tbody></table> : <table><thead><tr><th>产品名称</th><th>分类</th><th>关联文件</th><th>关联话术</th><th>资料完整度</th><th>最后更新</th></tr></thead><tbody>{productRows.map((row) => <tr key={row.name}><td><div className="name-cell"><span className="product-icon"><FlaskConical size={16} /></span><strong>{row.name}</strong></div></td><td><span className="table-tag">{row.category}</span></td><td>{row.docs} 个</td><td>{row.scripts} 条</td><td><div className="completion"><i><b style={{ width: `${row.completeness}%` }} /></i><span>{row.completeness}%</span></div></td><td>{row.updated}</td></tr>)}</tbody></table>}
+      <div className="table-toolbar"><label className="search-box"><Search size={16} /><input placeholder="搜索产品或分类" /></label><button className="filter-button">全部分类 <ChevronDown size={14} /></button><button className="filter-button">全部状态 <ChevronDown size={14} /></button><button className="secondary-button"><Upload size={16} />批量导入</button></div>
+      <table><thead><tr><th>产品名称</th><th>分类</th><th>关联文件</th><th>关联话术</th><th>资料完整度</th><th>最后更新</th></tr></thead><tbody>{productRows.map((row) => <tr key={row.name}><td><div className="name-cell"><span className="product-icon"><FlaskConical size={16} /></span><strong>{row.name}</strong></div></td><td><span className="table-tag">{row.category}</span></td><td>{row.docs} 个</td><td>{row.scripts} 条</td><td><div className="completion"><i><b style={{ width: `${row.completeness}%` }} /></i><span>{row.completeness}%</span></div></td><td>{row.updated}</td></tr>)}</tbody></table>
     </div>
+  </section>;
+}
+
+type ScriptDraft = Omit<KnowledgeScript, "id" | "usageCount" | "createdAt" | "updatedAt">;
+const emptyScriptDraft: ScriptDraft = { title: "", scenario: "", stage: "初次询盘与客户背调", products: [], customerRoles: [], triggerText: "", content: "", translation: "", language: "EN", tags: [], status: "draft", priority: 50 };
+
+function ScriptKnowledgeView({ isAdmin }: { isAdmin: boolean }) {
+  const [items, setItems] = useState<KnowledgeScript[]>([]);
+  const [stats, setStats] = useState({ total: 0, published: 0, draft: 0, usage: 0 });
+  const [search, setSearch] = useState("");
+  const [status, setStatus] = useState<"" | "draft" | "published">("");
+  const [editing, setEditing] = useState<KnowledgeScript | null | "new">(null);
+  const [draft, setDraft] = useState<ScriptDraft>(emptyScriptDraft);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const loadScripts = async () => {
+    setLoading(true); setError("");
+    try {
+      const params = new URLSearchParams();
+      if (search.trim()) params.set("search", search.trim());
+      if (status) params.set("status", status);
+      const response = await fetch(`/api/knowledge/scripts?${params}`, { cache: "no-store" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "读取话术失败");
+      setItems(data.scripts ?? []); setStats(data.stats ?? { total: 0, published: 0, draft: 0, usage: 0 });
+    } catch (loadError) { setError(loadError instanceof Error ? loadError.message : "读取话术失败"); }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { const timer = window.setTimeout(() => void loadScripts(), 220); return () => window.clearTimeout(timer); }, [search, status]);
+
+  const openEditor = (script?: KnowledgeScript) => {
+    setError("");
+    if (!script) { setEditing("new"); setDraft({ ...emptyScriptDraft, products: [], customerRoles: [], tags: [] }); return; }
+    setEditing(script); setDraft({ title: script.title, scenario: script.scenario, stage: script.stage, products: [...script.products], customerRoles: [...script.customerRoles], triggerText: script.triggerText, content: script.content, translation: script.translation, language: script.language, tags: [...script.tags], status: script.status, priority: script.priority });
+  };
+  const listChange = (key: "products" | "customerRoles" | "tags", value: string) => setDraft((current) => ({ ...current, [key]: value.split(/[,，;；]/).map((item) => item.trim()).filter(Boolean) }));
+  const save = async () => {
+    if (!draft.title.trim() || !draft.content.trim()) { setError("请填写话术标题和正文"); return; }
+    setSaving(true); setError("");
+    try {
+      const isNew = editing === "new";
+      const response = await fetch(isNew ? "/api/knowledge/scripts" : `/api/knowledge/scripts/${(editing as KnowledgeScript).id}`, { method: isNew ? "POST" : "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(draft) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "保存话术失败");
+      setEditing(null); await loadScripts();
+    } catch (saveError) { setError(saveError instanceof Error ? saveError.message : "保存话术失败"); }
+    finally { setSaving(false); }
+  };
+  const remove = async () => {
+    if (!isAdmin || !editing || editing === "new" || !window.confirm(`确定删除“${editing.title}”吗？`)) return;
+    setSaving(true); setError("");
+    try {
+      const response = await fetch(`/api/knowledge/scripts/${editing.id}`, { method: "DELETE" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "删除话术失败");
+      setEditing(null); await loadScripts();
+    } catch (removeError) { setError(removeError instanceof Error ? removeError.message : "删除话术失败"); }
+    finally { setSaving(false); }
+  };
+
+  return <section className="page-view script-library-view">
+    <div className="page-header"><div><span className="eyebrow">KNOWLEDGE BASE</span><h1>话术知识库</h1><p>销售可以查看和复用；AI 只检索已发布话术，并在建议回复中标记引用。</p></div><button className="primary-button" onClick={() => openEditor()}><Plus size={17} />新建话术</button></div>
+    <div className="stats-row">{[["话术总数", stats.total, "全部内容"], ["已发布", stats.published, "可供 AI 参考"], ["草稿", stats.draft, "不会进入 AI"], ["累计引用", stats.usage, "AI 实际采用"]].map(([label, value, note], index) => <div className="stat-card" key={label}><span>{label}</span><strong>{value}</strong><small className={index === 2 && Number(value) > 0 ? "warning" : ""}>{note}</small></div>)}</div>
+    <div className="table-card">
+      <div className="table-toolbar"><label className="search-box"><Search size={16} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索标题、场景、产品、标签或正文" /></label><select className="filter-select" value={status} onChange={(event) => setStatus(event.target.value as typeof status)}><option value="">全部状态</option><option value="published">已发布</option><option value="draft">草稿</option></select><span className="rag-status"><Sparkles size={14} />已发布内容自动供 AI 检索</span></div>
+      {error && !editing && <div className="knowledge-error"><CircleAlert size={15} />{error}</div>}
+      {loading ? <div className="knowledge-empty"><RefreshCw className="spin" size={18} />正在读取话术库…</div> : !items.length ? <div className="knowledge-empty"><BookOpen size={24} /><strong>还没有符合条件的话术</strong><span>新建并发布后，AI 才会在生成建议回复时检索引用。</span></div> : <table className="script-table"><thead><tr><th>话术名称</th><th>销售阶段</th><th>关联产品</th><th>标签</th><th>状态</th><th>AI 引用</th></tr></thead><tbody>{items.map((row) => <tr key={row.id} onClick={() => openEditor(row)}><td><div className="name-cell"><span className="doc-icon"><FileText size={16} /></span><div><strong>{row.title}</strong><small>{row.scenario || row.triggerText || "未填写使用场景"}</small></div></div></td><td><span className="table-tag">{row.stage}</span></td><td>{row.products.join("、") || "通用"}</td><td><div className="knowledge-tags">{row.tags.slice(0, 3).map((tag) => <span key={tag}>{tag}</span>)}{row.tags.length > 3 && <small>+{row.tags.length - 3}</small>}</div></td><td><span className={`script-publish-state ${row.status}`}>{row.status === "published" ? "已发布" : "草稿"}</span></td><td>{row.usageCount}</td></tr>)}</tbody></table>}
+    </div>
+    {editing && <div className="script-editor-wrap"><div className="overlay" onClick={() => !saving && setEditing(null)} /><section className="script-editor">
+      <header><div><span className="eyebrow">{editing === "new" ? "NEW SCRIPT" : "SCRIPT DETAIL"}</span><h2>{editing === "new" ? "新建话术" : "查看与编辑话术"}</h2><p>保存为草稿仅供人工查看；发布后才会进入 AI 检索。</p></div><button className="icon-button" onClick={() => setEditing(null)} disabled={saving}><X size={19} /></button></header>
+      <div className="script-editor-body">
+        <label className="script-field wide-field"><span>话术名称 *</span><input value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} placeholder="例如：客户认为价格太高" /></label>
+        <label className="script-field"><span>使用场景</span><input value={draft.scenario} onChange={(event) => setDraft({ ...draft, scenario: event.target.value })} placeholder="价格异议、首次询盘…" /></label>
+        <label className="script-field"><span>销售阶段</span><select value={draft.stage} onChange={(event) => setDraft({ ...draft, stage: event.target.value as SalesStage })}>{salesStages.map((stage) => <option key={stage}>{stage}</option>)}</select></label>
+        <label className="script-field"><span>关联产品（逗号分隔）</span><input value={draft.products.join("，")} onChange={(event) => listChange("products", event.target.value)} placeholder="通用，Reta" /></label>
+        <label className="script-field"><span>客户角色（逗号分隔）</span><input value={draft.customerRoles.join("，")} onChange={(event) => listChange("customerRoles", event.target.value)} placeholder="新手个人，经销商" /></label>
+        <label className="script-field wide-field"><span>触发条件 / 客户常见说法</span><textarea value={draft.triggerText} onChange={(event) => setDraft({ ...draft, triggerText: event.target.value })} placeholder="客户说价格太高、需要考虑、担心首次付款安全……" /></label>
+        <label className="script-field wide-field"><span>推荐话术原文 *</span><textarea className="script-content-input" value={draft.content} onChange={(event) => setDraft({ ...draft, content: event.target.value })} placeholder="填写销售可以直接参考或改写的话术" /></label>
+        <label className="script-field wide-field"><span>中文核对翻译</span><textarea value={draft.translation} onChange={(event) => setDraft({ ...draft, translation: event.target.value })} placeholder="用于人工检查英文话术含义" /></label>
+        <label className="script-field"><span>标签（逗号分隔）</span><input value={draft.tags.join("，")} onChange={(event) => listChange("tags", event.target.value)} placeholder="价格，信任，首单" /></label>
+        <label className="script-field"><span>语言</span><input value={draft.language} onChange={(event) => setDraft({ ...draft, language: event.target.value })} placeholder="EN" /></label>
+        <label className="script-field"><span>优先级 0–100</span><input type="number" min={0} max={100} value={draft.priority} onChange={(event) => setDraft({ ...draft, priority: Number(event.target.value) })} /></label>
+        <label className="script-field"><span>状态</span><select value={draft.status} onChange={(event) => setDraft({ ...draft, status: event.target.value as ScriptDraft["status"] })}><option value="draft">草稿 · 仅人工查看</option><option value="published">已发布 · AI 可参考</option></select></label>
+      </div>
+      {error && <div className="script-editor-error"><CircleAlert size={14} />{error}</div>}
+      <footer>{isAdmin && editing !== "new" && <button className="danger-button" onClick={() => void remove()} disabled={saving}><Trash2 size={15} />删除</button>}<span /><button className="secondary-button" onClick={() => setEditing(null)} disabled={saving}>取消</button><button className="primary-button" onClick={() => void save()} disabled={saving}>{saving ? <RefreshCw className="spin" size={15} /> : <Pencil size={15} />}{saving ? "保存中…" : "保存话术"}</button></footer>
+    </section></div>}
   </section>;
 }
 
