@@ -37,6 +37,18 @@
 .communication-review-body section > small { display: block; margin-bottom: 6px; color: #777d8b; font-weight: 800; }
 .communication-review-body section > p { margin: 0; color: #4e5360; line-height: 1.7; }
 .communication-review-body .review-recommendation { background: #f2efff; border-left: 3px solid var(--violet); }
+.next-strategy { display: grid; gap: 12px; margin-bottom: 16px; }
+.next-strategy > section, .strategy-grid > section { padding: 14px 16px; border: 1px solid var(--line); border-radius: 11px; background: #fff; }
+.next-strategy small { display: block; margin-bottom: 7px; color: #777d8b; font-weight: 800; }
+.next-strategy p, .next-strategy ul { margin: 0; color: #505563; line-height: 1.7; }
+.strategy-summary { background: linear-gradient(135deg, #f0edff, #faf9ff) !important; border-color: #ddd6ff !important; }
+.strategy-summary strong { color: #4f43b9; font-size: 14px; line-height: 1.6; }
+.strategy-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.strategy-grid strong { line-height: 1.6; }
+.strategy-reasoning { background: #f8f9fc !important; }
+.strategy-avoid { background: #fff8ed !important; border-color: #f1d8ac !important; }
+.strategy-avoid li + li { margin-top: 5px; }
+@media (max-width: 760px) { .strategy-grid { grid-template-columns: 1fr; } }
 
 * { box-sizing: border-box; }
 html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--ink); }

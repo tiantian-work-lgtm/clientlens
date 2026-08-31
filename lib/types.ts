@@ -113,6 +113,16 @@ export interface CommunicationImprovement {
   recommendation: string;
 }
 
+export interface NextStepStrategy {
+  strategySummary: string;
+  primaryGoal: string;
+  reasoning: string;
+  actions: string[];
+  communicationMethod: string;
+  avoidActions: string[];
+  evidence: EmotionEvidence[];
+}
+
 export interface ProductMention {
   name: string;
   mentionedBy: "客户" | "销售" | "双方";
@@ -317,7 +327,7 @@ export interface AnalysisReport {
   /** @deprecated 仅用于读取升级前保存在浏览器中的旧任务；新分析保持为空数组。 */
   confirmations: ConfirmationItem[];
   improvements: CommunicationImprovement[];
-  nextActions: string[];
+  nextStrategy: NextStepStrategy;
   suggestedReply: string;
   suggestedReplyTranslation: string;
   knowledgeReferences: KnowledgeScriptReference[];

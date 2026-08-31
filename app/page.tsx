@@ -431,6 +431,16 @@ function normalizeReport(value: unknown, conversation = ""): CustomerTask["repor
     const priority: CommunicationImprovement["priority"] = item.priority === "高" || item.priority === "低" ? item.priority : "中";
     return [{ title, priority, issue, customerEvidenceMessageId: stringValue(item.customerEvidenceMessageId), customerEvidenceQuote: normalizeEvidenceQuote(item.customerEvidenceQuote, conversation), customerEvidenceTranslation: stringValue(item.customerEvidenceTranslation), handling: stringValue(item.handling, "销售尚未处理"), salesEvidenceMessageId: stringValue(item.salesEvidenceMessageId), salesEvidenceQuote: normalizeEvidenceQuote(item.salesEvidenceQuote, conversation), salesEvidenceTranslation: stringValue(item.salesEvidenceTranslation), recommendation }];
   }).sort((a, b) => priorityRank[a.priority] - priorityRank[b.priority]) : [];
+  const rawNextStrategy = report.nextStrategy && typeof report.nextStrategy === "object" && !Array.isArray(report.nextStrategy) ? report.nextStrategy as Record<string, unknown> : {};
+  const nextStrategy: CustomerTask["report"]["nextStrategy"] = {
+    strategySummary: stringValue(rawNextStrategy.strategySummary, "待生成综合推进策略"),
+    primaryGoal: stringValue(rawNextStrategy.primaryGoal, "待确认本轮核心目标"),
+    reasoning: stringValue(rawNextStrategy.reasoning),
+    actions: stringList(rawNextStrategy.actions, []),
+    communicationMethod: stringValue(rawNextStrategy.communicationMethod),
+    avoidActions: stringList(rawNextStrategy.avoidActions, []),
+    evidence: normalizeEmotionEvidence(rawNextStrategy.evidence, 5),
+  };
   return {
     summary: stringValue(report.summary, "AI 未返回有效的对话总结。"),
     profile,
@@ -445,7 +455,7 @@ function normalizeReport(value: unknown, conversation = ""): CustomerTask["repor
     defensePoints,
     confirmations,
     improvements,
-    nextActions: stringList(report.nextActions),
+    nextStrategy,
     suggestedReply: stringValue(report.suggestedReply),
     suggestedReplyTranslation: stringValue(report.suggestedReplyTranslation),
     knowledgeReferences,
@@ -462,7 +472,7 @@ function mergeAnalysisModule(report: CustomerTask["report"], module: AnalysisMod
   if (module === "psychology") return normalizeReport({ ...report, emotionProfile: value.emotionProfile }, conversation);
   if (module === "objections") return normalizeReport({ ...report, objections: value.objections }, conversation);
   if (module === "checklist") return normalizeReport({ ...report, decisionMap: value.decisionMap, objections: [], offensePoints: [], defensePoints: [], confirmations: [] }, conversation);
-  return normalizeReport({ ...report, improvements: value.improvements, nextActions: value.nextActions, suggestedReply: value.suggestedReply, suggestedReplyTranslation: value.suggestedReplyTranslation, knowledgeReferences: value.knowledgeReferences }, conversation);
+  return normalizeReport({ ...report, improvements: value.improvements, nextStrategy: value.nextStrategy, suggestedReply: value.suggestedReply, suggestedReplyTranslation: value.suggestedReplyTranslation, knowledgeReferences: value.knowledgeReferences }, conversation);
 }
 
 async function analyzeConcurrently(task: CustomerTask, conversation: string, onUpdate: (task: CustomerTask) => void, requestedModules: AnalysisModule[] = analysisModules) {
@@ -483,7 +493,7 @@ async function analyzeConcurrently(task: CustomerTask, conversation: string, onU
       ...(requestedModules.includes("psychology") ? { emotionProfile: { ...emptyReport.emotionProfile, currentStateEvidence: [], emotionTurningPoints: [], personalityTraits: [], decisionEvidence: [] } } : {}),
       ...(requestedModules.includes("objections") ? { objections: [] } : {}),
       ...(requestedModules.includes("checklist") ? { decisionMap: emptyReport.decisionMap, objections: [], offensePoints: [], defensePoints: [], confirmations: [] } : {}),
-      ...(requestedModules.includes("action") ? { improvements: [], nextActions: [], suggestedReply: "", suggestedReplyTranslation: "", knowledgeReferences: [] } : {}),
+      ...(requestedModules.includes("action") ? { improvements: [], nextStrategy: { ...emptyReport.nextStrategy, actions: [], avoidActions: [], evidence: [] }, suggestedReply: "", suggestedReplyTranslation: "", knowledgeReferences: [] } : {}),
     };
   let provider: Provider = task.provider;
   let completed = 0;
@@ -495,9 +505,10 @@ async function analyzeConcurrently(task: CustomerTask, conversation: string, onU
   for (const module of requestedModules) delete errors[module];
   let latest: CustomerTask = { ...task, rawConversation: conversation, report, status: "analyzing", analysisStep: "analyzing", analysisModules: states, analysisModuleErrors: errors, analysisError: undefined };
   onUpdate(latest);
-  await Promise.all(requestedModules.map(async (module) => {
+  const runModule = async (module: AnalysisModule) => {
     try {
-      const response = await fetch("/api/analyze", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ conversation, module }) });
+      const analysisContext = module === "action" ? { summary: report.summary, profile: report.profile, emotionProfile: report.emotionProfile, stage: report.stage, stageReason: report.stageReason, decisionMap: report.decisionMap, improvements: report.improvements } : undefined;
+      const response = await fetch("/api/analyze", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ conversation, module, analysisContext }) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || `${analysisModuleLabels[module]}分析失败`);
       provider = data.provider === "deepseek" ? "deepseek" : "openai";
@@ -522,7 +533,10 @@ async function analyzeConcurrently(task: CustomerTask, conversation: string, onU
       updatedAt: "刚刚",
     });
     onUpdate(latest);
-  }));
+  };
+  const foundationModules = requestedModules.filter((module) => module !== "action");
+  await Promise.all(foundationModules.map(runModule));
+  if (requestedModules.includes("action")) await runModule("action");
   return latest;
 }
 
@@ -935,7 +949,13 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
           </ReportCard>
 
           <ReportCard icon={Sparkles} title="AI 下一步建议" tone="violet" featured sectionId="next-actions">
-            <div className="action-list">{activeTask.report.nextActions.map((item, i) => <div key={item}><span>{i + 1}</span><p>{item}</p></div>)}</div>
+            <div className="next-strategy">
+              <section className="strategy-summary"><small>当前策略判断</small><strong>{activeTask.report.nextStrategy.strategySummary}</strong></section>
+              <div className="strategy-grid"><section><small>下一步核心目标</small><strong>{activeTask.report.nextStrategy.primaryGoal}</strong></section><section><small>推荐沟通方式</small><p>{activeTask.report.nextStrategy.communicationMethod}</p></section></div>
+              <section className="strategy-reasoning"><small>为什么这样推进</small><p>{activeTask.report.nextStrategy.reasoning}</p><EmotionEvidenceDisclosure evidence={activeTask.report.nextStrategy.evidence} onLocate={openRawChat} compact /></section>
+              <section><small>推荐推进顺序</small><div className="action-list">{activeTask.report.nextStrategy.actions.map((item, i) => <div key={`${item}-${i}`}><span>{i + 1}</span><p>{item}</p></div>)}</div></section>
+              {activeTask.report.nextStrategy.avoidActions.length > 0 && <section className="strategy-avoid"><small>暂时不要做</small><ul>{activeTask.report.nextStrategy.avoidActions.map((item) => <li key={item}>{item}</li>)}</ul></section>}
+            </div>
             <div className="reply-box"><div><Bot size={16} /><strong>建议回复</strong><button onClick={() => navigator.clipboard.writeText(activeTask.report.suggestedReply)}><Copy size={14} />复制原文</button></div><p>{activeTask.report.suggestedReply}</p><div className="reply-translation"><span>中文核对</span><p>{activeTask.report.suggestedReplyTranslation}</p></div>{activeTask.report.knowledgeReferences.length > 0 && <div className="knowledge-references"><strong><BookOpen size={13} />本次参考了 {activeTask.report.knowledgeReferences.length} 条已发布话术</strong><div>{activeTask.report.knowledgeReferences.map((reference) => <article className="knowledge-reference" key={reference.id}><span>{reference.title} · {reference.stage}</span><small>{reference.excerpt}</small></article>)}</div></div>}</div>
           </ReportCard>
           </>}

@@ -1,4 +1,4 @@
-import type { AnalysisModule, AnalysisReport, BuyingDriver, CommunicationImprovement, ConfirmationItem, CustomerEmotionProfile, DealBlocker, DealDecisionMap, KnowledgeScript, KnowledgeScriptReference, Objection, ProductMention, Provider, SalesStage } from "./types";
+import type { AnalysisModule, AnalysisReport, BuyingDriver, CommunicationImprovement, ConfirmationItem, CustomerEmotionProfile, DealBlocker, DealDecisionMap, KnowledgeScript, KnowledgeScriptReference, NextStepStrategy, Objection, ProductMention, Provider, SalesStage } from "./types";
 import { getRuntimeProviderConfig, type RuntimeProviderConfig } from "./provider-config";
 import { buildNumberedConversationChunks, parseConversationMessages, type ParsedConversationMessage } from "./conversation";
 import { formatScriptKnowledgeContext, recordScriptUsage, retrieveRelevantScripts, toScriptReferences } from "./script-knowledge";
@@ -216,14 +216,16 @@ const riskSchema = {
 const actionSchema = {
   type: "object",
   additionalProperties: false,
-  required: ["improvements", "nextActions", "suggestedReply", "suggestedReplyTranslation", "knowledgeReferenceIds"],
+  required: ["improvements", "nextStrategy", "suggestedReply", "suggestedReplyTranslation", "knowledgeReferenceIds"],
   properties: {
     improvements: { type: "array", maxItems: 6, items: { type: "object", additionalProperties: false, required: ["title", "priority", "issue", "customerEvidenceMessageId", "customerEvidenceQuote", "customerEvidenceTranslation", "handling", "salesEvidenceMessageId", "salesEvidenceQuote", "salesEvidenceTranslation", "recommendation"], properties: {
       title: { type: "string" }, priority: { type: "string", enum: ["高", "中", "低"] }, issue: { type: "string" },
       customerEvidenceMessageId: { type: "string" }, customerEvidenceQuote: { type: "string" }, customerEvidenceTranslation: { type: "string" },
       handling: { type: "string" }, salesEvidenceMessageId: { type: "string" }, salesEvidenceQuote: { type: "string" }, salesEvidenceTranslation: { type: "string" }, recommendation: { type: "string" },
     } } },
-    nextActions: { type: "array", items: { type: "string" } },
+    nextStrategy: { type: "object", additionalProperties: false, required: ["strategySummary", "primaryGoal", "reasoning", "actions", "communicationMethod", "avoidActions", "evidence"], properties: {
+      strategySummary: { type: "string" }, primaryGoal: { type: "string" }, reasoning: { type: "string" }, actions: { type: "array", minItems: 1, maxItems: 5, items: { type: "string" } }, communicationMethod: { type: "string" }, avoidActions: { type: "array", maxItems: 4, items: { type: "string" } }, evidence: { type: "array", maxItems: 5, items: emotionEvidenceSchema() },
+    } },
     suggestedReply: { type: "string" },
     suggestedReplyTranslation: { type: "string" },
     knowledgeReferenceIds: { type: "array", items: { type: "string" } },
@@ -319,7 +321,7 @@ const analysisPrompts: Record<AnalysisModule, string> = {
   psychology: `${commonPrompt}\n只返回 emotionProfile，并严格按 JSON 示例字段输出。\n1. currentState 将客户当前情绪与可从表达观察到的心理状态合并成一段结论；不要诊断疾病、人格障碍或贴 MBTI 标签。currentStateEvidence 必须给出支持结论的真实客户消息。\n2. emotionTurningPoints 按聊天先后顺序提取真正发生变化的 0-8 个情绪转折点。score 只能为 -2 到 2；label 是简短情绪标签，reason 说明转折原因。没有明显转折时返回 []，不得虚构。\n3. personalitySummary 用一句自然中文概括全部可观察沟通性格；personalityTraits 再列具体倾向，每项包含 trait、explanation 和自己的 evidence；不输出敏感点或防御/回避模式。\n4. decisionStyle 总结决策方式；decisionFactors 写主要考虑因素；decisionPace 写决策节奏；communicationApproach 写适合的沟通方式；decisionEvidence 必须直接支撑判断。\n5. 每条 evidence 必须引用真实客户消息的 M 编号与逐字原文，并提供忠实中文翻译和解释。禁止改写、拼接或引用销售消息。信息不足时明确说明并降低 confidence。`,
   objections: `${commonPrompt}\n只返回 objections。仅保留有客户逐字原文证据的明确异议或犹豫，禁止占位标题。未正面回答或客户再次追问=未解决；销售正面回答且客户未再追问=未追问-基本解决；销售回答后客户明确认可=客户肯定-完全解决。解决证据必须发生在异议之后；沉默、礼貌致谢和话题切换不算肯定。`,
   checklist: `${commonPrompt}\n业务上只返回 decisionMap（成交决策地图），禁止返回 offensePoints、defensePoints、confirmations 或独立 objections。它只回答：客户为什么想买、为什么还没买、当前最需要解决什么。\nbuyingDrivers 只保留真正推动购买的核心原因，最多3项；相同目标、需求、购买意向、直接货源诉求必须语义合并，禁止拆成近义卡片。每项必须由客户原文支撑，并区分想获得的结果、痛点或期望、驱动力强度、购买意愿和推动成交的原因。\nblockers 合并所有明确异议、产品疑问、价格预算、质量COA、公司信任、包装交付、物流、支付、决策时机和内部审批问题。一个语义问题只输出一次。客户疑问即使代表兴趣，只要尚未解决并可能阻碍决定，就只能进入 blockers，不能同时进入 buyingDrivers。\nhandlingStatus 严格按消息顺序判断：没有销售正面处理或客户再次追问=未解决；销售正面处理后客户未再追问=已回答-客户未追问；销售处理后客户明确认可=客户明确认可。礼貌致谢、沉默和换话题不算明确认可。销售处理存在时必须提供更晚的销售原文；客户明确认可时还必须提供销售处理之后的客户认可原文。不存在的销售处理或认可证据字段全部返回空字符串。\n每个 driver 和 blocker 都必须引用一个可核验客户 M 编号及逐字原文和忠实中文翻译，禁止拼接、改写或虚构。decisionMap 顶部给出总体下单动力、最大阻力、成交准备度和一句首要任务。这里只输出诊断和解决方向，不生成完整回复话术；完整回复属于 action 模块。`,
-  action: `${legacyModulePrompts.action}\n如果提供了话术知识库资料，应优先借鉴与当前客户问题直接相关的表达和销售思路，但不能照搬不适用于当前客户的事实。knowledgeReferenceIds 只返回实际用于 suggestedReply 的话术 ID；没有使用时返回 []，禁止编造 ID。`,
+  action: `${legacyModulePrompts.action}\n你会同时收到“上游分析结果”，必须综合其中的对话总结、沟通性格倾向、决策方式、核心下单驱动力、成交阻力和沟通不足生成 nextStrategy。strategySummary 用一句话给出当前最合适的成交推进策略；primaryGoal 只保留本轮唯一核心目标；reasoning 解释该策略如何匹配客户性格与决策方式、如何放大真实下单驱动力并优先解决最大成交阻力；actions 按执行顺序列出 1-5 步；communicationMethod 明确表达风格和推进节奏；avoidActions 列出此刻不要做的事。evidence 只引用支撑关键策略判断的真实客户原话。不得机械复述所有分析板块，也不得同时设置多个核心目标。\n如果提供了话术知识库资料，应优先借鉴与当前客户问题直接相关的表达和销售思路，但不能照搬不适用于当前客户的事实。knowledgeReferenceIds 只返回实际用于 suggestedReply 的话术 ID；没有使用时返回 []，禁止编造 ID。`,
 };
 
 export interface CustomerModuleResult {
@@ -336,7 +338,7 @@ export interface PsychologyModuleResult { emotionProfile: CustomerEmotionProfile
 export interface ObjectionsModuleResult { objections: Objection[] }
 export interface ChecklistModuleResult { decisionMap: DealDecisionMap }
 interface RiskModuleResult { objections: Objection[]; confirmations: ConfirmationItem[] }
-export interface ActionModuleResult { improvements: CommunicationImprovement[]; nextActions: string[]; suggestedReply: string; suggestedReplyTranslation: string; knowledgeReferenceIds: string[]; knowledgeReferences?: KnowledgeScriptReference[] }
+export interface ActionModuleResult { improvements: CommunicationImprovement[]; nextStrategy: NextStepStrategy; suggestedReply: string; suggestedReplyTranslation: string; knowledgeReferenceIds: string[]; knowledgeReferences?: KnowledgeScriptReference[] }
 export type AnalysisModuleResult = CustomerModuleResult | PsychologyModuleResult | ObjectionsModuleResult | ChecklistModuleResult | ActionModuleResult;
 
 interface ChecklistModelResult { decisionMap: DealDecisionMap }
@@ -507,7 +509,7 @@ function deepSeekJsonExample(module: AnalysisModule): Record<string, unknown> {
   };
   return {
     improvements: [{ title: "未直接回应关键问题", priority: "高", issue: "客户提出关键问题，但回复未正面覆盖，可能降低沟通效率。", customerEvidenceMessageId: "M00001", customerEvidenceQuote: "客户逐字原文", customerEvidenceTranslation: "忠实中文翻译", handling: "销售尚未处理", salesEvidenceMessageId: "", salesEvidenceQuote: "", salesEvidenceTranslation: "", recommendation: "先直接回答问题，再补充必要背景。" }],
-    nextActions: ["结合当前进度给出一项明确行动"],
+    nextStrategy: { strategySummary: "一句话说明当前最合适的推进策略", primaryGoal: "本轮唯一核心目标", reasoning: "说明如何匹配沟通性格、决策方式、下单驱动力和成交阻力", actions: ["第一步具体行动"], communicationMethod: "适合客户的表达方式与节奏", avoidActions: ["此刻不要做的事"], evidence: [{ messageId: "M00001", quote: "客户逐字原文", translation: "忠实中文翻译", interpretation: "如何支撑策略判断" }] },
     suggestedReply: "A natural reply in the customer's language.",
     suggestedReplyTranslation: "上一条建议回复的自然简体中文翻译。",
     knowledgeReferenceIds: [],
@@ -781,8 +783,8 @@ function requireRawModuleResult(module: AnalysisModule, value: unknown, messages
     return;
   }
   const improvements = Array.isArray(raw.improvements) ? raw.improvements.filter((item) => item && typeof item === "object" && !Array.isArray(item)) : [];
-  const nextActions = Array.isArray(raw.nextActions) ? raw.nextActions.filter((item) => typeof item === "string" && item.trim()) : [];
-  if (!improvements.length || !nextActions.length || typeof raw.suggestedReply !== "string" || !raw.suggestedReply.trim() || typeof raw.suggestedReplyTranslation !== "string" || !raw.suggestedReplyTranslation.trim() || !Array.isArray(raw.knowledgeReferenceIds)) {
+  const nextStrategy = raw.nextStrategy && typeof raw.nextStrategy === "object" && !Array.isArray(raw.nextStrategy) ? raw.nextStrategy as unknown as Record<string, unknown> : {};
+  if (!improvements.length || typeof nextStrategy.strategySummary !== "string" || !nextStrategy.strategySummary.trim() || typeof nextStrategy.primaryGoal !== "string" || !nextStrategy.primaryGoal.trim() || !Array.isArray(nextStrategy.actions) || !nextStrategy.actions.length || typeof raw.suggestedReply !== "string" || !raw.suggestedReply.trim() || typeof raw.suggestedReplyTranslation !== "string" || !raw.suggestedReplyTranslation.trim() || !Array.isArray(raw.knowledgeReferenceIds)) {
     throw new Error("行动建议模块字段不完整");
   }
 }
@@ -1133,7 +1135,19 @@ function normalizeModuleResult(module: AnalysisModule, value: unknown, messages:
   }).filter((item, index, all) => all.findIndex((other) => other.title === item.title) === index).sort((a, b) => priorityRank[a.priority] - priorityRank[b.priority]).slice(0, 6);
   return {
     improvements,
-    nextActions: cleanStringArray(raw.nextActions, ["先确认客户当前最关心的问题，再推进一个明确的下一步。"]),
+    nextStrategy: (() => {
+      const strategy = raw.nextStrategy && typeof raw.nextStrategy === "object" && !Array.isArray(raw.nextStrategy) ? raw.nextStrategy as unknown as Record<string, unknown> : {};
+      const customerMessages = new Map(messages.filter((message) => message.role === "customer").map((message) => [message.id, message]));
+      const evidence = (Array.isArray(strategy.evidence) ? strategy.evidence : []).flatMap((candidate) => {
+        if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return [];
+        const item = candidate as Record<string, unknown>;
+        const messageId = typeof item.messageId === "string" ? item.messageId : "";
+        const quote = typeof item.quote === "string" ? item.quote : "";
+        if (!hasVerifiedEvidence(customerMessages, messageId, quote)) return [];
+        return [{ messageId, quote, translation: typeof item.translation === "string" ? item.translation.trim() : "", interpretation: typeof item.interpretation === "string" ? item.interpretation.trim() : "支持当前推进策略的客户原文。" }];
+      }).slice(0, 5);
+      return { strategySummary: typeof strategy.strategySummary === "string" ? strategy.strategySummary.trim() : "围绕客户当前最大的成交阻力推进一个明确下一步。", primaryGoal: typeof strategy.primaryGoal === "string" ? strategy.primaryGoal.trim() : "解决当前最关键的成交阻力", reasoning: typeof strategy.reasoning === "string" ? strategy.reasoning.trim() : "结合客户的表达方式与当前成交进度，优先降低决策不确定性。", actions: cleanStringArray(strategy.actions, ["先直接处理客户当前最关心的问题。"]), communicationMethod: typeof strategy.communicationMethod === "string" ? strategy.communicationMethod.trim() : "表达直接、信息清晰，每次只推进一个目标。", avoidActions: cleanStringArray(strategy.avoidActions, []), evidence };
+    })(),
     suggestedReply: raw.suggestedReply?.trim() || "Could you tell me which point you would like to confirm first?",
     suggestedReplyTranslation: raw.suggestedReplyTranslation?.trim() || "您可以告诉我，您想先确认哪一点吗？",
     knowledgeReferenceIds: cleanStringArray(raw.knowledgeReferenceIds),
@@ -1181,7 +1195,7 @@ async function requestModuleOnce(config: RuntimeProviderConfig, provider: Provid
   }, { role: "user", content: input }], tokens);
 }
 
-export async function analyzeModuleWithProvider(provider: Provider, conversation: string, module: AnalysisModule): Promise<AnalysisModuleResult | null> {
+export async function analyzeModuleWithProvider(provider: Provider, conversation: string, module: AnalysisModule, analysisContext?: unknown): Promise<AnalysisModuleResult | null> {
   const config = await getRuntimeProviderConfig(provider);
   if (!config) return null;
   const chunks = buildNumberedConversationChunks(conversation);
@@ -1203,7 +1217,8 @@ export async function analyzeModuleWithProvider(provider: Provider, conversation
       const previousError = lastError instanceof Error ? lastError.message : "字段或原文核验未通过";
       const retryPrefix = attempt ? `上一次结果失败，具体原因：${previousError}。请依据 JSON Schema 修正并补全所有必填字段；无法找到直接原文的异议必须删除，不得用占位内容代替。\n\n` : "";
       for (const chunk of chunks) {
-        const rawResult = await requestModuleOnce(config, provider, module, `${retryPrefix}${chunk}`, false, knowledgeContext);
+        const upstreamContext = module === "action" && analysisContext ? `\n\n上游分析结果（只用于综合策略，不得覆盖原始聊天事实）：\n${JSON.stringify(analysisContext)}` : "";
+        const rawResult = await requestModuleOnce(config, provider, module, `${retryPrefix}${chunk}${upstreamContext}`, false, knowledgeContext);
         requireRawModuleResult(module, rawResult, messages);
         const normalizedChunk = normalizeModuleResult(module, rawResult, messages);
         requireNormalizedModuleResult(module, normalizedChunk, messages);
@@ -1227,13 +1242,13 @@ export async function analyzeWithProvider(provider: Provider, conversation: stri
     analyzeModuleWithProvider(provider, conversation, "customer"),
     analyzeModuleWithProvider(provider, conversation, "psychology"),
     analyzeModuleWithProvider(provider, conversation, "checklist"),
-    analyzeModuleWithProvider(provider, conversation, "action"),
   ]);
   if (results.some((result) => !result)) return null;
   const customer = results[0] as CustomerModuleResult;
   const psychology = results[1] as PsychologyModuleResult;
   const checklist = results[2] as ChecklistModuleResult;
-  const action = results[3] as ActionModuleResult;
+  const action = await analyzeModuleWithProvider(provider, conversation, "action", { ...customer, ...psychology, ...checklist }) as ActionModuleResult | null;
+  if (!action) return null;
   return { ...customer, ...psychology, ...checklist, ...action, objections: [], offensePoints: [], defensePoints: [], confirmations: [], knowledgeReferences: action.knowledgeReferences ?? [] };
 }
 

@@ -7,12 +7,12 @@ export const runtime = "nodejs";
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json() as { conversation?: string; provider?: Provider; module?: AnalysisModule };
+    const body = await request.json() as { conversation?: string; provider?: Provider; module?: AnalysisModule; analysisContext?: unknown };
     if (!body.conversation?.trim()) return NextResponse.json({ error: "缺少聊天记录" }, { status: 400 });
     const assignments = await getModelAssignments();
     const provider = body.provider === "deepseek" || body.provider === "openai" ? body.provider : assignments.analysisProvider;
     if (body.module === "customer" || body.module === "psychology" || body.module === "objections" || body.module === "checklist" || body.module === "action") {
-      const result = await analyzeModuleWithProvider(provider, body.conversation, body.module);
+      const result = await analyzeModuleWithProvider(provider, body.conversation, body.module, body.analysisContext);
       if (!result) {
         return NextResponse.json({ error: `尚未配置或启用 ${provider === "openai" ? "OpenAI" : "DeepSeek"} 分析服务。` }, { status: 400 });
       }

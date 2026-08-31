@@ -51,7 +51,7 @@ export const emptyReport: AnalysisReport = {
   defensePoints: [],
   confirmations: defaultConfirmations,
   improvements: [],
-  nextActions: [],
+  nextStrategy: { strategySummary: "待分析", primaryGoal: "待分析", reasoning: "待分析", actions: [], communicationMethod: "待分析", avoidActions: [], evidence: [] },
   suggestedReply: "",
   suggestedReplyTranslation: "",
   knowledgeReferences: [],
@@ -191,11 +191,7 @@ export const demoReport: AnalysisReport = {
   ],
   confirmations: demoConfirmations,
   improvements: [{ title: "关键问题未被直接回答", priority: "高", issue: "客户询问 COA 是否对应实际交付批次，这直接影响首单信任。", customerEvidenceMessageId: "M00001", customerEvidenceQuote: "Is the COA from the same batch I will receive?", customerEvidenceTranslation: "COA 是否来自我将收到的同一批次？", handling: "销售尚未处理", salesEvidenceMessageId: "", salesEvidenceQuote: "", salesEvidenceTranslation: "", recommendation: "先明确说明文件与交付批次的对应关系，并提供可核验的批次信息。" }],
-  nextActions: [
-    "先发送与拟交付批次相符的文件，并标注批次信息。",
-    "询问客户希望先确认付款方式还是物流时效。",
-    "若 24 小时未回复，用一句简短问题跟进，不重复整段介绍。",
-  ],
+  nextStrategy: { strategySummary: "用可核验的批次资料降低首单不确定性，再推动客户确认一个下一步。", primaryGoal: "解决客户对 COA 与交付批次一致性的疑虑", reasoning: "客户证据导向且决策谨慎，真实下单动力已经存在；当前应先处理最大信任阻力，而不是继续介绍产品。", actions: ["发送与拟交付批次相符的文件并标注批次信息。", "确认客户是否还需要核实付款方式或配送时效。", "客户确认后推进具体数量和订单信息。"], communicationMethod: "直接、简洁、证据化；一次只处理一个关键问题并给出清晰选择。", avoidActions: ["不要重复发送大段公司或产品介绍。", "不要在信任问题未解决前连续催单。"], evidence: [{ messageId: "M00001", quote: "Is the COA from the same batch I will receive?", translation: "COA 是否来自我将收到的同一批次？", interpretation: "客户将批次一致性视为继续推进前的关键条件。" }] },
   suggestedReply:
     "I understand why you want to verify this before a first order. The document we provide will be matched to the batch prepared for your order, and I can mark the batch details clearly for you. Would you prefer to confirm the payment option or the delivery timeline next?",
   suggestedReplyTranslation:
