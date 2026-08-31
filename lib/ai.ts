@@ -51,7 +51,7 @@ const customerSchema = {
         currentState: { type: "string" },
         currentStateEvidence: { type: "array", minItems: 1, maxItems: 3, items: emotionEvidenceSchema() },
         emotionTurningPoints: {
-          type: "array", minItems: 1, maxItems: 8,
+          type: "array", maxItems: 8,
           items: {
             type: "object", additionalProperties: false,
             required: ["messageId", "quote", "translation", "interpretation", "label", "score", "reason"],
@@ -363,7 +363,7 @@ const checklistSchema = {
 
 const analysisPrompts: Record<AnalysisModule, string> = {
   customer: `${commonPrompt}\n只返回对话总结、客户画像标签、对话提及产品和销售阶段。profile 由模型根据真实聊天自由提炼为简洁、具体、可独立阅读的画像标签，不预设分类、固定数量、顺序或“分类：内容”格式；应尽可能覆盖聊天中有证据的身份、经验、需求、关注点、信任、价格、决策和沟通特征，使画像足够丰富，通常可提炼 5 至 12 个标签，证据确实较少时允许更少。没有原文依据的特征不得输出，不得为了凑数量重复。productMentions 必须列出聊天中出现的每一个具体产品、多肽或药物并去重。公司名、厂家名、店铺名以及仅代表供应方的品牌名称不得作为产品输出；若商品名本身明确指向一种具体产品或药物，则应按具体产品保留。mentionedBy 判断客户、销售或双方提及；customerAwareness 依据客户原话判断不了解、初步了解、有使用经验、明确熟悉或无法判断；customerInterest 判断明确感兴趣、可能感兴趣、未表现兴趣、明确拒绝或无法判断；awarenessReason 说明判断依据。evidenceMessageId 和 evidenceQuote 必须引用包含该产品名或能直接证明客户了解程度的真实消息编号及逐字原文。仅由销售提及而客户未回应时，客户了解程度和兴趣必须填无法判断。stage 只能使用规定七阶段，第一至三阶段可并行。`,
-  psychology: `${commonPrompt}\n只返回 emotionProfile，并严格按 JSON 示例字段输出。\n1. currentState 将客户当前情绪与可从表达观察到的心理状态合并成一段结论；不要诊断疾病、人格障碍或贴 MBTI 标签。currentStateEvidence 必须给出支持结论的真实客户消息。\n2. emotionTurningPoints 按聊天先后顺序提取真正发生变化的 1-8 个情绪转折点。score 只能为 -2 到 2（-2明显消极、-1偏消极、0中性、1偏积极、2明显积极）；label 是简短情绪标签，reason 说明这句话及上下文为什么构成转折。不得为了画图虚构转折。\n3. personalityTraits 只写沟通性格倾向，每项包含 trait、explanation 和自己的 evidence；不再输出敏感点或防御/回避模式。\n4. decisionStyle 总结决策方式；decisionFactors 写主要考虑因素；decisionPace 写决策节奏；advancementConditions 写继续推进所需条件；communicationApproach 写适合的沟通方式；decisionEvidence 必须直接支撑这些判断。\n5. 每一条 evidence 必须引用真实客户消息的 M 编号与逐字原文 quote，并提供忠实中文 translation 和 interpretation。禁止改写原话、拼接不同消息或引用销售消息。信息不足时明确说明并降低 confidence，不能用常识补全。advice 给出尊重客户自主决定、可执行且不操纵的沟通建议。`,
+  psychology: `${commonPrompt}\n只返回 emotionProfile，并严格按 JSON 示例字段输出。\n1. currentState 将客户当前情绪与可从表达观察到的心理状态合并成一段结论；不要诊断疾病、人格障碍或贴 MBTI 标签。currentStateEvidence 必须给出支持结论的真实客户消息。\n2. emotionTurningPoints 按聊天先后顺序提取真正发生变化的 0-8 个情绪转折点。score 只能为 -2 到 2（-2明显消极、-1偏消极、0中性、1偏积极、2明显积极）；label 是简短情绪标签，reason 说明这句话及上下文为什么构成转折。没有明显转折时返回 []，不得为了画图虚构转折。\n3. personalityTraits 只写沟通性格倾向，每项包含 trait、explanation 和自己的 evidence；不再输出敏感点或防御/回避模式。\n4. decisionStyle 总结决策方式；decisionFactors 写主要考虑因素；decisionPace 写决策节奏；advancementConditions 写继续推进所需条件；communicationApproach 写适合的沟通方式；decisionEvidence 必须直接支撑这些判断。\n5. 每一条 evidence 必须引用真实客户消息的 M 编号与逐字原文 quote，并提供忠实中文 translation 和 interpretation。禁止改写原话、拼接不同消息或引用销售消息。信息不足时明确说明并降低 confidence，不能用常识补全。advice 给出尊重客户自主决定、可执行且不操纵的沟通建议。`,
   objections: `${commonPrompt}\n只返回 objections。仅保留有客户逐字原文证据的明确异议或犹豫，禁止占位标题。未正面回答或客户再次追问=未解决；销售正面回答且客户未再追问=未追问-基本解决；销售回答后客户明确认可=客户肯定-完全解决。解决证据必须发生在异议之后；沉默、礼貌致谢和话题切换不算肯定。`,
   checklist: `${commonPrompt}\n只返回 confirmations，必须且只按顺序返回 role、seeding、medical、scammed、coa、packaging、company、feedback、logistics、payment_method 共10项。每项只使用统一精简字段：conclusion 是该项结论，detail 是方向或具体说明，source 是谁提出，handling 是销售是否处理，reaction 是客户反应，advice 是下一步建议。seeding 结论只能“需要种草/无需种草”；medical 只能“需要提供建议/无需提供建议”；scammed 只能“有被骗经历/无被骗经历”。其他项目 conclusion 简洁概括。已处理必须引用销售原文；客户明确肯定、满意或异议必须引用客户原文并符合消息顺序。未提及的字段使用未提及、未确认或不适用，不得虚构证据。只有真实成交障碍才标 risk。`,
   action: `${legacyModulePrompts.action}\n如果提供了话术知识库资料，应优先借鉴与当前客户问题直接相关的表达和销售思路，但不能照搬不适用于当前客户的事实。knowledgeReferenceIds 只返回实际用于 suggestedReply 的话术 ID；没有使用时返回 []，禁止编造 ID。`,
@@ -823,10 +823,23 @@ function requireRawModuleResult(module: AnalysisModule, value: unknown, messages
       ? raw.emotionProfile as Record<string, unknown> : {};
     const requiredStrings = ["currentState", "decisionStyle", "decisionPace", "communicationApproach"];
     const requiredLists = ["currentStateEvidence", "emotionTurningPoints", "personalityTraits", "decisionFactors", "advancementConditions", "decisionEvidence", "advice"];
+    const stringLists = ["decisionFactors", "advancementConditions", "advice"];
+    const objectLists = ["currentStateEvidence", "emotionTurningPoints", "personalityTraits", "decisionEvidence"];
     const stringsComplete = requiredStrings.every((key) => typeof emotion[key] === "string" && Boolean((emotion[key] as string).trim()));
-    const listsComplete = requiredLists.every((key) => Array.isArray(emotion[key]) && (emotion[key] as unknown[]).some((item) => typeof item === "string" && item.trim()));
-    if (!stringsComplete || !listsComplete || !Number.isFinite(Number(emotion.confidence))) {
-      throw new Error("客户情绪与沟通性格模块字段不完整");
+    const listsComplete = requiredLists.every((key) => Array.isArray(emotion[key]));
+    const stringListsValid = stringLists.every((key) => !Array.isArray(emotion[key]) || (emotion[key] as unknown[]).every((item) => typeof item === "string" && Boolean(item.trim())));
+    const objectListsValid = objectLists.every((key) => !Array.isArray(emotion[key]) || (emotion[key] as unknown[]).every((item) => Boolean(item) && typeof item === "object" && !Array.isArray(item)));
+    const advicePresent = Array.isArray(emotion.advice) && emotion.advice.length > 0;
+    const missingFields = [
+      ...requiredStrings.filter((key) => typeof emotion[key] !== "string" || !(emotion[key] as string).trim()),
+      ...requiredLists.filter((key) => !Array.isArray(emotion[key])),
+      ...(!stringListsValid ? ["字符串数组内容"] : []),
+      ...(!objectListsValid ? ["依据对象数组内容"] : []),
+      ...(!advicePresent ? ["advice"] : []),
+      ...(!Number.isFinite(Number(emotion.confidence)) ? ["confidence"] : []),
+    ];
+    if (!stringsComplete || !listsComplete || !stringListsValid || !objectListsValid || !advicePresent || !Number.isFinite(Number(emotion.confidence))) {
+      throw new Error(`客户情绪与沟通性格模块字段不完整（缺失或格式错误：${[...new Set(missingFields)].join("、")}）`);
     }
     if (messages.some((message) => message.role === "customer") && (emotion.currentStateEvidence as unknown[]).length === 0) {
       throw new Error("客户情绪与沟通性格模块缺少客户原文依据");
@@ -992,7 +1005,7 @@ function validateLegacyModuleResult(module: "customer" | "risk" | "action", valu
     if (result.profile.some((item, index) => !new RegExp(`^${profileDimensions[index]}[：:]`).test(item?.trim()))) throw new Error("客户画像维度缺失或顺序不正确");
     const emotion = result.emotionProfile;
     if (!emotion?.currentState?.trim() || !emotion.decisionStyle?.trim() || !emotion.decisionPace?.trim() || !emotion.communicationApproach?.trim() || !Number.isFinite(emotion.confidence)) throw new Error("客户情绪、沟通性格与心理研判字段不完整");
-    if (!Array.isArray(emotion.personalityTraits) || !emotion.personalityTraits.length || !Array.isArray(emotion.emotionTurningPoints) || !emotion.emotionTurningPoints.length || !Array.isArray(emotion.decisionFactors) || !emotion.decisionFactors.length || !Array.isArray(emotion.advancementConditions) || !emotion.advancementConditions.length || !Array.isArray(emotion.advice) || !emotion.advice.length || !Array.isArray(emotion.currentStateEvidence) || !Array.isArray(emotion.decisionEvidence)) throw new Error("客户情绪与沟通性格分析缺少转折、决策依据或建议");
+    if (!Array.isArray(emotion.personalityTraits) || !Array.isArray(emotion.emotionTurningPoints) || !Array.isArray(emotion.decisionFactors) || !Array.isArray(emotion.advancementConditions) || !Array.isArray(emotion.advice) || !emotion.advice.length || !Array.isArray(emotion.currentStateEvidence) || !Array.isArray(emotion.decisionEvidence)) throw new Error("客户情绪与沟通性格分析缺少必要数组或建议");
     const customerMessageById = new Map(messages.filter((message) => message.role === "customer").map((message) => [message.id, message]));
     const allEvidence = [...emotion.currentStateEvidence, ...emotion.emotionTurningPoints, ...emotion.personalityTraits.flatMap((item) => item.evidence), ...emotion.decisionEvidence];
     if (customerMessageById.size && !allEvidence.length) throw new Error("客户情绪与沟通性格分析缺少客户原文依据");
@@ -1160,7 +1173,7 @@ async function requestDeepSeekPsychologyParts(config: RuntimeProviderConfig, inp
       currentState: "合并描述当前情绪和可观察心理状态",
       currentStateEvidence: [{ messageId: "M00001", quote: "客户逐字原文", translation: "忠实中文翻译", interpretation: "如何支持当前状态" }],
       emotionTurningPoints: [{ messageId: "M00001", quote: "客户逐字原文", translation: "忠实中文翻译", interpretation: "该处情绪含义", label: "谨慎", score: -1, reason: "为什么构成转折" }],
-    }, "分析当前情绪和心理状态，并按聊天先后提取 1-8 个真正的情绪转折。score 限定 -2 到 2。不得为了画图虚构转折。", 2600),
+    }, "分析当前情绪和心理状态，并按聊天先后提取 0-8 个真正的情绪转折。score 限定 -2 到 2。没有明显转折时返回空数组，不得为了画图虚构转折。", 2600),
     requestPart<Pick<CustomerEmotionProfile, "personalityTraits">>(psychologyTraitsSchema, {
       personalityTraits: [{ trait: "证据导向", explanation: "带有限定语的沟通性格倾向", evidence: [{ messageId: "M00001", quote: "客户逐字原文", translation: "忠实中文翻译", interpretation: "如何支持该倾向" }] }],
     }, "只分析沟通性格倾向。每项分别给出 trait、explanation 和自己的原文 evidence；不输出敏感点、防御模式、疾病或人格障碍诊断。", 2200),
