@@ -300,6 +300,37 @@ const psychologySchema = {
   properties: { emotionProfile: customerSchema.properties.emotionProfile },
 };
 
+const psychologyStateSchema = {
+  type: "object", additionalProperties: false,
+  required: ["currentState", "currentStateEvidence", "emotionTurningPoints"],
+  properties: {
+    currentState: customerSchema.properties.emotionProfile.properties.currentState,
+    currentStateEvidence: customerSchema.properties.emotionProfile.properties.currentStateEvidence,
+    emotionTurningPoints: customerSchema.properties.emotionProfile.properties.emotionTurningPoints,
+  },
+};
+
+const psychologyTraitsSchema = {
+  type: "object", additionalProperties: false,
+  required: ["personalityTraits"],
+  properties: { personalityTraits: customerSchema.properties.emotionProfile.properties.personalityTraits },
+};
+
+const psychologyDecisionSchema = {
+  type: "object", additionalProperties: false,
+  required: ["decisionStyle", "decisionFactors", "decisionPace", "advancementConditions", "communicationApproach", "decisionEvidence", "advice", "confidence"],
+  properties: {
+    decisionStyle: customerSchema.properties.emotionProfile.properties.decisionStyle,
+    decisionFactors: customerSchema.properties.emotionProfile.properties.decisionFactors,
+    decisionPace: customerSchema.properties.emotionProfile.properties.decisionPace,
+    advancementConditions: customerSchema.properties.emotionProfile.properties.advancementConditions,
+    communicationApproach: customerSchema.properties.emotionProfile.properties.communicationApproach,
+    decisionEvidence: customerSchema.properties.emotionProfile.properties.decisionEvidence,
+    advice: customerSchema.properties.emotionProfile.properties.advice,
+    confidence: customerSchema.properties.emotionProfile.properties.confidence,
+  },
+};
+
 const objectionsSchema = {
   type: "object", additionalProperties: false, required: ["objections"],
   properties: { objections: riskSchema.properties.objections },
@@ -1117,12 +1148,38 @@ function normalizeModuleResult(module: AnalysisModule, value: unknown, messages:
   };
 }
 
+async function requestDeepSeekPsychologyParts(config: RuntimeProviderConfig, input: string, merge = false): Promise<PsychologyModuleResult> {
+  const shared = `${commonPrompt}\n${merge ? "下面是已有分段结果，请重新综合，保留可核验的消息编号和逐字原文。" : "下面是完整编号对话。"}\n每条 evidence 必须引用真实客户消息的 M 编号和逐字原文 quote，并提供忠实中文 translation；禁止引用销售消息、改写原文或拼接多条消息。只输出符合所给 Schema 的 JSON 对象。`;
+  const requestPart = <T>(schema: Record<string, unknown>, example: Record<string, unknown>, instruction: string, maxTokens: number) => requestDeepSeekJson<T>(config, [{
+    role: "system",
+    content: `${shared}\n${instruction}\nJSON Schema:\n${JSON.stringify(schema)}\n合法 JSON 示例：\n${JSON.stringify(example)}\n示例仅展示结构，不是当前客户事实。`,
+  }, { role: "user", content: input }], maxTokens);
+
+  const [state, traits, decision] = await Promise.all([
+    requestPart<Pick<CustomerEmotionProfile, "currentState" | "currentStateEvidence" | "emotionTurningPoints">>(psychologyStateSchema, {
+      currentState: "合并描述当前情绪和可观察心理状态",
+      currentStateEvidence: [{ messageId: "M00001", quote: "客户逐字原文", translation: "忠实中文翻译", interpretation: "如何支持当前状态" }],
+      emotionTurningPoints: [{ messageId: "M00001", quote: "客户逐字原文", translation: "忠实中文翻译", interpretation: "该处情绪含义", label: "谨慎", score: -1, reason: "为什么构成转折" }],
+    }, "分析当前情绪和心理状态，并按聊天先后提取 1-8 个真正的情绪转折。score 限定 -2 到 2。不得为了画图虚构转折。", 2600),
+    requestPart<Pick<CustomerEmotionProfile, "personalityTraits">>(psychologyTraitsSchema, {
+      personalityTraits: [{ trait: "证据导向", explanation: "带有限定语的沟通性格倾向", evidence: [{ messageId: "M00001", quote: "客户逐字原文", translation: "忠实中文翻译", interpretation: "如何支持该倾向" }] }],
+    }, "只分析沟通性格倾向。每项分别给出 trait、explanation 和自己的原文 evidence；不输出敏感点、防御模式、疾病或人格障碍诊断。", 2200),
+    requestPart<Pick<CustomerEmotionProfile, "decisionStyle" | "decisionFactors" | "decisionPace" | "advancementConditions" | "communicationApproach" | "decisionEvidence" | "advice" | "confidence">>(psychologyDecisionSchema, {
+      decisionStyle: "概括决策方式", decisionFactors: ["主要考虑因素"], decisionPace: "决策节奏", advancementConditions: ["推进条件"], communicationApproach: "建议沟通方式",
+      decisionEvidence: [{ messageId: "M00001", quote: "客户逐字原文", translation: "忠实中文翻译", interpretation: "如何支持决策判断" }], advice: ["可执行建议"], confidence: 0.8,
+    }, "分析客户如何决策、主要考虑因素、节奏、推进条件和适合的沟通方式。建议必须尊重客户自主决定且不可操纵。", 2400),
+  ]);
+
+  return { emotionProfile: { ...state, ...traits, ...decision } };
+}
+
 async function requestModuleOnce(config: RuntimeProviderConfig, provider: Provider, module: AnalysisModule, input: string, merge = false, knowledgeContext = ""): Promise<AnalysisModuleResult> {
   const instruction = `${analysisPrompts[module]}${module === "action" ? knowledgeContext : ""}${merge ? "\n下面是分段分析结果，请去重并合并为一个最终结果。消息编号与原文必须原样保留。" : ""}`;
   if (provider === "openai") {
     return requestOpenAIJson<AnalysisModuleResult>(config, moduleSchema(module), `customer_${module}_analysis`, instruction, input);
   }
-  const tokens = module === "checklist" ? 4200 : module === "psychology" ? 4500 : module === "customer" ? 2200 : module === "objections" ? 2800 : 2400;
+  if (module === "psychology") return requestDeepSeekPsychologyParts(config, input, merge);
+  const tokens = module === "checklist" ? 4200 : module === "customer" ? 2200 : module === "objections" ? 2800 : 2400;
   const schema = JSON.stringify(moduleSchema(module));
   const example = JSON.stringify(deepSeekJsonExample(module));
   return requestDeepSeekJson<AnalysisModuleResult>(config, [{
