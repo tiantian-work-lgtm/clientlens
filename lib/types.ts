@@ -275,6 +275,34 @@ export interface ConfirmationItem {
   confidence: number;
 }
 
+export interface OffensePoint {
+  title: string;
+  opportunity: string;
+  timingReason: string;
+  evidenceMessageId: string;
+  evidenceQuote: string;
+  evidenceTranslation: string;
+  direction: string;
+  suggestedReply: string;
+  suggestedReplyTranslation: string;
+  priority: "高" | "中" | "低";
+  goal: "引导需求" | "建立信任" | "产品匹配" | "促成试单" | "推动付款" | "推动复购" | "其他";
+}
+
+export interface DefensePoint {
+  title: string;
+  risk: string;
+  reason: string;
+  evidenceMessageId: string;
+  evidenceQuote: string;
+  evidenceTranslation: string;
+  status: "未解决" | "未追问-基本解决" | "客户肯定-完全解决";
+  remedy: string;
+  suggestedReply: string;
+  suggestedReplyTranslation: string;
+  riskLevel: "高" | "中" | "低";
+}
+
 export interface AnalysisReport {
   summary: string;
   profile: string[];
@@ -286,6 +314,9 @@ export interface AnalysisReport {
   parallelStages: SalesStage[];
   stageReason: string;
   objections: Objection[];
+  offensePoints: OffensePoint[];
+  defensePoints: DefensePoint[];
+  /** @deprecated 仅用于读取升级前保存在浏览器中的旧任务；新分析保持为空数组。 */
   confirmations: ConfirmationItem[];
   improvements: string[];
   nextActions: string[];

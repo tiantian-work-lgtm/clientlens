@@ -41,7 +41,7 @@ import {
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { defaultConfirmations, defaultProgress, emptyReport, initialTasks } from "@/lib/demo-data";
 import { parseConversationMessages } from "@/lib/conversation";
-import type { AnalysisModule, AnalysisModuleStatus, CommunicationTrait, ConfirmationItem, ConfirmationStatus, CustomerTask, EmotionEvidence, EmotionTurningPoint, HesitationSignal, ImportPreview, KnowledgeScript, KnowledgeScriptReference, ProductMention, ProductResearch, Provider, SalesStage, SourceType } from "@/lib/types";
+import type { AnalysisModule, AnalysisModuleStatus, CommunicationTrait, CustomerTask, DefensePoint, EmotionEvidence, EmotionTurningPoint, HesitationSignal, ImportPreview, KnowledgeScript, KnowledgeScriptReference, OffensePoint, ProductMention, ProductResearch, Provider, SalesStage, SourceType } from "@/lib/types";
 import SettingsManager from "@/app/components/settings-manager";
 
 type View = "analysis" | "scripts" | "products" | "translate" | "settings";
@@ -259,6 +259,31 @@ function normalizeReport(value: unknown, conversation = ""): CustomerTask["repor
       advice: stringValue(item.advice, "需要结合原始对话进一步确认。"),
     }];
   });
+  const offenseGoals: OffensePoint["goal"][] = ["引导需求", "建立信任", "产品匹配", "促成试单", "推动付款", "推动复购", "其他"];
+  const offensePoints: OffensePoint[] = (Array.isArray(report.offensePoints) ? report.offensePoints : []).flatMap((value) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+    const item = value as Record<string, unknown>;
+    const message = messageById.get(stringValue(item.evidenceMessageId));
+    const evidenceQuote = normalizeEvidenceQuote(item.evidenceQuote, conversation);
+    const title = stringValue(item.title);
+    if (!title || !message || !evidenceQuote || !message.content.normalize("NFKC").includes(evidenceQuote.normalize("NFKC"))) return [];
+    if (message.role !== "customer" && /客户(?:需要|希望|关注|认可|同意|感兴趣|愿意|决定)/.test(`${stringValue(item.opportunity)}${stringValue(item.timingReason)}`)) return [];
+    const priority: OffensePoint["priority"] = item.priority === "高" || item.priority === "低" ? item.priority : "中";
+    const goal = offenseGoals.includes(item.goal as OffensePoint["goal"]) ? item.goal as OffensePoint["goal"] : "其他";
+    return [{ title, opportunity: stringValue(item.opportunity), timingReason: stringValue(item.timingReason), evidenceMessageId: message.id, evidenceQuote, evidenceTranslation: stringValue(item.evidenceTranslation), direction: stringValue(item.direction), suggestedReply: stringValue(item.suggestedReply), suggestedReplyTranslation: stringValue(item.suggestedReplyTranslation), priority, goal }];
+  });
+  const defensePoints: DefensePoint[] = (Array.isArray(report.defensePoints) ? report.defensePoints : []).flatMap((value) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+    const item = value as Record<string, unknown>;
+    const message = messageById.get(stringValue(item.evidenceMessageId));
+    const evidenceQuote = normalizeEvidenceQuote(item.evidenceQuote, conversation);
+    const title = stringValue(item.title);
+    if (!title || !message || !evidenceQuote || !message.content.normalize("NFKC").includes(evidenceQuote.normalize("NFKC"))) return [];
+    if (message.role !== "customer" && /客户(?:担心|质疑|不信任|不满|拒绝|犹豫|认可|肯定)/.test(`${title}${stringValue(item.risk)}${stringValue(item.reason)}`)) return [];
+    const riskLevel: DefensePoint["riskLevel"] = item.riskLevel === "高" || item.riskLevel === "低" ? item.riskLevel : "中";
+    const status: DefensePoint["status"] = item.status === "客户肯定-完全解决" || item.status === "未追问-基本解决" ? item.status : "未解决";
+    return [{ title, risk: stringValue(item.risk), reason: stringValue(item.reason), evidenceMessageId: message.id, evidenceQuote, evidenceTranslation: stringValue(item.evidenceTranslation), status, remedy: stringValue(item.remedy), suggestedReply: stringValue(item.suggestedReply), suggestedReplyTranslation: stringValue(item.suggestedReplyTranslation), riskLevel }];
+  });
   const rawConfirmations = Array.isArray(report.confirmations) ? report.confirmations : [];
   const confirmations = defaultConfirmations.map((fallback) => {
     const raw = rawConfirmations.find((value) => value && typeof value === "object" && !Array.isArray(value) && (value as Record<string, unknown>).id === fallback.id);
@@ -385,6 +410,8 @@ function normalizeReport(value: unknown, conversation = ""): CustomerTask["repor
     parallelStages,
     stageReason: stringValue(report.stageReason, "当前聊天记录不足以支持更具体的阶段判断。"),
     objections,
+    offensePoints,
+    defensePoints,
     confirmations,
     improvements: stringList(report.improvements),
     nextActions: stringList(report.nextActions),
@@ -396,14 +423,14 @@ function normalizeReport(value: unknown, conversation = ""): CustomerTask["repor
 }
 
 const analysisModules: AnalysisModule[] = ["customer", "psychology", "objections", "checklist", "action"];
-const analysisModuleLabels: Record<AnalysisModule, string> = { customer: "总结、画像与阶段", psychology: "情绪、性格与心理", objections: "异议与解决状态", checklist: "客户确认清单", action: "行动与回复" };
+const analysisModuleLabels: Record<AnalysisModule, string> = { customer: "总结、画像与阶段", psychology: "情绪、性格与心理", objections: "异议与解决状态", checklist: "进攻点与防守点", action: "行动与回复" };
 
 function mergeAnalysisModule(report: CustomerTask["report"], module: AnalysisModule, result: unknown, conversation: string) {
   const value = result && typeof result === "object" ? result as Record<string, unknown> : {};
   if (module === "customer") return normalizeReport({ ...report, summary: value.summary, profile: value.profile, productMentions: value.productMentions, stage: value.stage, parallelStages: value.parallelStages, stageReason: value.stageReason, confidence: value.confidence }, conversation);
   if (module === "psychology") return normalizeReport({ ...report, emotionProfile: value.emotionProfile }, conversation);
   if (module === "objections") return normalizeReport({ ...report, objections: value.objections }, conversation);
-  if (module === "checklist") return normalizeReport({ ...report, confirmations: value.confirmations }, conversation);
+  if (module === "checklist") return normalizeReport({ ...report, offensePoints: value.offensePoints, defensePoints: value.defensePoints, confirmations: [] }, conversation);
   return normalizeReport({ ...report, improvements: value.improvements, nextActions: value.nextActions, suggestedReply: value.suggestedReply, suggestedReplyTranslation: value.suggestedReplyTranslation, knowledgeReferences: value.knowledgeReferences }, conversation);
 }
 
@@ -424,7 +451,7 @@ async function analyzeConcurrently(task: CustomerTask, conversation: string, onU
       } : {}),
       ...(requestedModules.includes("psychology") ? { emotionProfile: { ...emptyReport.emotionProfile, currentStateEvidence: [], emotionTurningPoints: [], personalityTraits: [], decisionEvidence: [], advice: [...emptyReport.emotionProfile.advice] } } : {}),
       ...(requestedModules.includes("objections") ? { objections: [] } : {}),
-      ...(requestedModules.includes("checklist") ? { confirmations: defaultConfirmations.map((item) => ({ ...item })) } : {}),
+      ...(requestedModules.includes("checklist") ? { offensePoints: [], defensePoints: [], confirmations: [] } : {}),
       ...(requestedModules.includes("action") ? { improvements: [], nextActions: [], suggestedReply: "", suggestedReplyTranslation: "", knowledgeReferences: [] } : {}),
     };
   let provider: Provider = task.provider;
@@ -696,7 +723,12 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
     if (moduleVisible("customer")) sections.push({ id: "summary", label: "对话总结" }, { id: "profile", label: "客户画像" });
     if (moduleVisible("psychology")) sections.push({ id: "psychology", label: "情绪与心理" });
     if (moduleVisible("objections")) sections.push({ id: "objections", label: "异议与犹豫", meta: String(activeTask.report.objections.length) }, { id: "hesitation", label: "深度犹豫", meta: "按需" });
-    if (moduleVisible("checklist")) sections.push({ id: "checklist", label: "确认清单", meta: `${activeTask.report.confirmations.filter((item) => item.status === "confirmed" || item.status === "na").length}/${activeTask.report.confirmations.length}` });
+    if (moduleVisible("checklist")) {
+      const strategyReport = activeTask.report as unknown as { offensePoints?: unknown[]; defensePoints?: unknown[] };
+      const offenseCount = Array.isArray(strategyReport.offensePoints) ? strategyReport.offensePoints.length : 0;
+      const defenseCount = Array.isArray(strategyReport.defensePoints) ? strategyReport.defensePoints.length : 0;
+      sections.push({ id: "checklist", label: "进攻与防守", meta: `${offenseCount}/${defenseCount}` });
+    }
     sections.push({ id: "product-research", label: "产品匹配", meta: activeTask.report.productMentions.length ? String(activeTask.report.productMentions.length) : "按需" });
     if (moduleVisible("action")) sections.push({ id: "improvements", label: "沟通改善" }, { id: "next-actions", label: "下一步建议" });
     return sections;
@@ -708,11 +740,6 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
   };
 
   const setAllReportSections = (collapsed: boolean) => setCollapsedSections(Object.fromEntries(reportSections.map((section) => [section.id, collapsed])));
-
-  const openProductResearch = () => {
-    setCollapsedSections((current) => ({ ...current, "product-research": false }));
-    window.setTimeout(() => productResearchRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
-  };
 
   const openRawChat = (messageId = "", quote = "") => {
     setShowRaw(true);
@@ -898,7 +925,7 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
           </>}
 
           {moduleVisible("checklist") && <>
-          <ConfirmationChecklist task={activeTask} onUpdate={onUpdate} onLocate={openRawChat} onOpenProductResearch={openProductResearch} />
+          <OffenseDefensePanel task={activeTask} onLocate={openRawChat} />
           </>}
 
           <div ref={productResearchRef} className="product-research-anchor">
@@ -1129,6 +1156,157 @@ function ProductResearchCard({ task, onUpdate, onLocate }: { task: CustomerTask;
   </ReportCard>;
 }
 
+type StrategyPriority = "高" | "中" | "低";
+type DefenseResolution = "未解决" | "未追问-基本解决" | "客户肯定-完全解决";
+
+type OffensePointView = {
+  id: string;
+  title: string;
+  opportunity: string;
+  timing: string;
+  evidenceMessageId: string;
+  evidenceQuote: string;
+  evidenceTranslation: string;
+  direction: string;
+  suggestedReply: string;
+  suggestedReplyTranslation: string;
+  priority: StrategyPriority;
+  goal: string;
+};
+
+type DefensePointView = {
+  id: string;
+  title: string;
+  risk: string;
+  trigger: string;
+  evidenceMessageId: string;
+  evidenceQuote: string;
+  evidenceTranslation: string;
+  status: DefenseResolution;
+  remedy: string;
+  suggestedReply: string;
+  suggestedReplyTranslation: string;
+  riskLevel: StrategyPriority;
+};
+
+function normalizeStrategyPriority(value: unknown): StrategyPriority {
+  const text = stringValue(value);
+  if (text.includes("高")) return "高";
+  if (text.includes("低")) return "低";
+  return "中";
+}
+
+function normalizeOffensePoint(value: unknown, index: number): OffensePointView | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const point = value as Record<string, unknown>;
+  const title = stringValue(point.title);
+  if (!title) return null;
+  return {
+    id: stringValue(point.id, `offense-${index}`),
+    title,
+    opportunity: stringValue(point.opportunity, stringValue(point.opportunityReason, "当前对话中存在可继续推进的积极信号。")),
+    timing: stringValue(point.timingReason, stringValue(point.timing, stringValue(point.whyNow, "可结合当前对话自然推进。"))),
+    evidenceMessageId: stringValue(point.evidenceMessageId),
+    evidenceQuote: stringValue(point.evidenceQuote),
+    evidenceTranslation: stringValue(point.evidenceTranslation),
+    direction: stringValue(point.direction, stringValue(point.recommendedDirection, "围绕客户已经表达的关注点继续推进。")),
+    suggestedReply: stringValue(point.suggestedReply),
+    suggestedReplyTranslation: stringValue(point.suggestedReplyTranslation),
+    priority: normalizeStrategyPriority(point.priority),
+    goal: stringValue(point.goal, "推进客户决策"),
+  };
+}
+
+function normalizeDefensePoint(value: unknown, index: number): DefensePointView | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const point = value as Record<string, unknown>;
+  const title = stringValue(point.title);
+  if (!title) return null;
+  const rawStatus = stringValue(point.status);
+  const status: DefenseResolution = rawStatus.includes("完全") || rawStatus.includes("肯定")
+    ? "客户肯定-完全解决"
+    : rawStatus.includes("基本") || rawStatus.includes("未追问")
+      ? "未追问-基本解决"
+      : "未解决";
+  return {
+    id: stringValue(point.id, `defense-${index}`),
+    title,
+    risk: stringValue(point.risk, stringValue(point.riskDescription, "该问题可能阻碍客户继续推进。")),
+    trigger: stringValue(point.reason, stringValue(point.trigger, stringValue(point.triggerReason, "根据当前对话识别。"))),
+    evidenceMessageId: stringValue(point.evidenceMessageId),
+    evidenceQuote: stringValue(point.evidenceQuote),
+    evidenceTranslation: stringValue(point.evidenceTranslation),
+    status,
+    remedy: stringValue(point.remedy, stringValue(point.recommendedAction, "先正面回应客户顾虑，再补充可验证的信息。")),
+    suggestedReply: stringValue(point.suggestedReply),
+    suggestedReplyTranslation: stringValue(point.suggestedReplyTranslation),
+    riskLevel: normalizeStrategyPriority(point.riskLevel),
+  };
+}
+
+function StrategyReply({ text, translation }: { text: string; translation: string }) {
+  if (!text && !translation) return null;
+  return <div className="strategy-reply">
+    <header><Bot size={14} /><strong>可直接发送的回复</strong>{text && <button type="button" onClick={() => navigator.clipboard.writeText(text)}><Copy size={12} />复制原文</button>}</header>
+    {text && <p>{text}</p>}
+    {translation && <div><small>中文核对</small><p>{translation}</p></div>}
+  </div>;
+}
+
+function StrategyEvidence({ messageId, quote, translation, onLocate }: { messageId: string; quote: string; translation: string; onLocate: (messageId?: string, quote?: string) => void }) {
+  if (!quote) return <div className="strategy-no-evidence"><CircleAlert size={13} />暂无可逐字核验的原始聊天依据</div>;
+  return <div className="strategy-evidence">
+    <button type="button" onClick={() => onLocate(messageId, quote)}>已核验原文</button>
+    <blockquote>“{quote.replaceAll("“", "").replaceAll("”", "")}”</blockquote>
+    {translation && <p><span>中文翻译</span>{translation}</p>}
+  </div>;
+}
+
+function OffenseDefensePanel({ task, onLocate }: { task: CustomerTask; onLocate: (messageId?: string, quote?: string) => void }) {
+  const report = task.report as unknown as { offensePoints?: unknown[]; defensePoints?: unknown[] };
+  const offensePoints = (Array.isArray(report.offensePoints) ? report.offensePoints : []).map(normalizeOffensePoint).filter((point): point is OffensePointView => Boolean(point));
+  const defensePoints = (Array.isArray(report.defensePoints) ? report.defensePoints : []).map(normalizeDefensePoint).filter((point): point is DefensePointView => Boolean(point));
+  const highRiskCount = defensePoints.filter((point) => point.riskLevel === "高" && point.status !== "客户肯定-完全解决").length;
+
+  return <ReportCard icon={ListChecks} title="进攻点与防守点" tone="green" sectionId="checklist">
+    <div className="strategy-summary">
+      <div className="offense"><Zap size={16} /><span>进攻点</span><strong>{offensePoints.length}</strong></div>
+      <div className="defense"><ShieldCheck size={16} /><span>防守点</span><strong>{defensePoints.length}</strong></div>
+      <div className={`high-risk ${highRiskCount ? "active" : ""}`}><CircleAlert size={16} /><span>高风险</span><strong>{highRiskCount}</strong></div>
+    </div>
+    <p className="strategy-intro">从完整对话中识别当前可以主动推进的机会，以及成交前必须守住的风险。结论只采用可核验的真实聊天原文。</p>
+    <div className="strategy-columns">
+      <section className="strategy-column offense-column">
+        <header><div><Zap size={17} /><strong>进攻点</strong></div><span>{offensePoints.length} 个机会</span></header>
+        {!offensePoints.length && <div className="strategy-empty"><CircleDashed size={17} />当前对话暂未识别到可靠的进攻机会</div>}
+        {offensePoints.map((point, index) => <details className="strategy-item offense-item" key={point.id} open={index === 0}>
+          <summary><span className={`strategy-level level-${point.priority}`}>{point.priority}</span><strong>{point.title}</strong><ChevronDown size={15} /></summary>
+          <div className="strategy-item-body">
+            <div className="strategy-meta"><span>目标 · {point.goal}</span><span>优先级 · {point.priority}</span></div>
+            <dl><div><dt>机会判断</dt><dd>{point.opportunity}</dd></div><div><dt>为什么现在适合推进</dt><dd>{point.timing}</dd></div><div><dt>推荐推进方向</dt><dd>{point.direction}</dd></div></dl>
+            <StrategyEvidence messageId={point.evidenceMessageId} quote={point.evidenceQuote} translation={point.evidenceTranslation} onLocate={onLocate} />
+            <StrategyReply text={point.suggestedReply} translation={point.suggestedReplyTranslation} />
+          </div>
+        </details>)}
+      </section>
+      <section className="strategy-column defense-column">
+        <header><div><ShieldCheck size={17} /><strong>防守点</strong></div><span>{defensePoints.length} 个风险</span></header>
+        {!defensePoints.length && <div className="strategy-empty safe"><CheckCircle2 size={17} />当前对话暂未识别到可靠的防守风险</div>}
+        {defensePoints.map((point, index) => <details className="strategy-item defense-item" key={point.id} open={index === 0}>
+          <summary><span className={`strategy-level level-${point.riskLevel}`}>{point.riskLevel}</span><strong>{point.title}</strong><span className={`strategy-status status-${point.status}`}>{point.status}</span><ChevronDown size={15} /></summary>
+          <div className="strategy-item-body">
+            <div className="strategy-meta"><span>风险等级 · {point.riskLevel}</span><span>{point.status}</span></div>
+            <dl><div><dt>风险说明</dt><dd>{point.risk}</dd></div><div><dt>触发原因</dt><dd>{point.trigger}</dd></div><div><dt>建议补救动作</dt><dd>{point.remedy}</dd></div></dl>
+            <StrategyEvidence messageId={point.evidenceMessageId} quote={point.evidenceQuote} translation={point.evidenceTranslation} onLocate={onLocate} />
+            <StrategyReply text={point.suggestedReply} translation={point.suggestedReplyTranslation} />
+          </div>
+        </details>)}
+      </section>
+    </div>
+  </ReportCard>;
+}
+
+/* Legacy fixed confirmation checklist retained in source temporarily for old task-data reference only.
 const confirmationState: Record<ConfirmationStatus, { label: string; className: string }> = {
   confirmed: { label: "已确认", className: "confirmed" },
   unknown: { label: "未确认", className: "unknown" },
@@ -1296,6 +1474,7 @@ function ConfirmationChecklist({ task, onUpdate, onLocate, onOpenProductResearch
     </ReportCard>
   );
 }
+*/
 
 function RawChatPanel({ task, onClose, onUpdate, onSync, syncing = false, target }: { task: CustomerTask; onClose: () => void; onUpdate: (task: CustomerTask) => void; onSync?: () => Promise<void>; syncing?: boolean; target: { messageId?: string; quote: string; nonce: number } | null }) {
   const [translating, setTranslating] = useState(false);
