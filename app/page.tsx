@@ -447,16 +447,36 @@ function normalizeReport(value: unknown, conversation = ""): CustomerTask["repor
   };
 }
 
-const analysisModules: AnalysisModule[] = ["customer", "psychology", "checklist", "action"];
-const analysisModuleLabels: Record<AnalysisModule, string> = { customer: "总结、画像与产品", psychology: "情绪、性格与心理", objections: "历史异议分析", checklist: "成交决策地图", action: "行动与回复" };
+const foundationAnalysisModules: AnalysisModule[] = ["summary", "profile", "products", "emotion_state", "emotion_trend", "personality", "decision", "drivers", "blockers", "blocker_status", "improvements"];
+const analysisModules: AnalysisModule[] = [...foundationAnalysisModules, "strategy", "reply"];
+const analysisModuleLabels: Record<AnalysisModule, string> = {
+  summary: "对话总结", profile: "客户画像", products: "产品识别", emotion_state: "当前情绪", emotion_trend: "情绪变化",
+  personality: "沟通性格", decision: "决策方式", drivers: "下单驱动力", blockers: "成交阻力", blocker_status: "阻力处理状态",
+  improvements: "沟通改善和不足", strategy: "下一步策略", reply: "建议回复",
+};
 
 function mergeAnalysisModule(report: CustomerTask["report"], module: AnalysisModule, result: unknown, conversation: string) {
   const value = result && typeof result === "object" ? result as Record<string, unknown> : {};
-  if (module === "customer") return normalizeReport({ ...report, summary: value.summary, profile: value.profile, productMentions: value.productMentions, confidence: value.confidence }, conversation);
-  if (module === "psychology") return normalizeReport({ ...report, emotionProfile: value.emotionProfile }, conversation);
-  if (module === "objections") return normalizeReport({ ...report, objections: value.objections }, conversation);
-  if (module === "checklist") return normalizeReport({ ...report, decisionMap: value.decisionMap, objections: [], offensePoints: [], defensePoints: [], confirmations: [] }, conversation);
-  return normalizeReport({ ...report, improvements: value.improvements, nextStrategy: value.nextStrategy, suggestedReply: value.suggestedReply, suggestedReplyTranslation: value.suggestedReplyTranslation, knowledgeReferences: value.knowledgeReferences }, conversation);
+  if (module === "summary") return normalizeReport({ ...report, summary: value.summary, confidence: value.confidence }, conversation);
+  if (module === "profile") return normalizeReport({ ...report, profile: value.profile, confidence: Math.max(report.confidence, Number(value.confidence) || 0) }, conversation);
+  if (module === "products") return normalizeReport({ ...report, productMentions: value.productMentions }, conversation);
+  if (module === "emotion_state") return normalizeReport({ ...report, emotionProfile: { ...report.emotionProfile, currentState: value.currentState, currentStateEvidence: value.currentStateEvidence, confidence: value.confidence } }, conversation);
+  if (module === "emotion_trend") return normalizeReport({ ...report, emotionProfile: { ...report.emotionProfile, emotionTurningPoints: value.emotionTurningPoints } }, conversation);
+  if (module === "personality") return normalizeReport({ ...report, emotionProfile: { ...report.emotionProfile, personalitySummary: value.personalitySummary, personalityTraits: value.personalityTraits } }, conversation);
+  if (module === "decision") return normalizeReport({ ...report, emotionProfile: { ...report.emotionProfile, decisionStyle: value.decisionStyle, decisionFactors: value.decisionFactors, decisionPace: value.decisionPace, communicationApproach: value.communicationApproach, decisionEvidence: value.decisionEvidence, confidence: Math.max(report.emotionProfile.confidence, Number(value.confidence) || 0) } }, conversation);
+  if (module === "drivers") return normalizeReport({ ...report, decisionMap: { ...report.decisionMap, motivationLevel: value.motivationLevel, readiness: value.readiness, buyingDrivers: value.buyingDrivers } }, conversation);
+  if (module === "blockers") return normalizeReport({ ...report, decisionMap: { ...report.decisionMap, biggestBlocker: value.biggestBlocker, priorityTask: value.priorityTask, blockers: value.blockers } }, conversation);
+  if (module === "blocker_status") {
+    const assessments = Array.isArray(value.blockerAssessments) ? value.blockerAssessments as Array<Record<string, unknown>> : [];
+    const blockers = report.decisionMap.blockers.map((blocker) => {
+      const assessment = assessments.find((item) => item.evidenceMessageId === blocker.evidenceMessageId);
+      return assessment ? { ...blocker, ...assessment } : blocker;
+    });
+    return normalizeReport({ ...report, decisionMap: { ...report.decisionMap, blockers } }, conversation);
+  }
+  if (module === "improvements") return normalizeReport({ ...report, improvements: value.improvements }, conversation);
+  if (module === "strategy") return normalizeReport({ ...report, nextStrategy: value.nextStrategy }, conversation);
+  return normalizeReport({ ...report, suggestedReply: value.suggestedReply, suggestedReplyTranslation: value.suggestedReplyTranslation, knowledgeReferences: value.knowledgeReferences }, conversation);
 }
 
 async function analyzeConcurrently(task: CustomerTask, conversation: string, onUpdate: (task: CustomerTask) => void, requestedModules: AnalysisModule[] = analysisModules) {
@@ -466,33 +486,37 @@ async function analyzeConcurrently(task: CustomerTask, conversation: string, onU
     ? { ...emptyReport, confirmations: defaultConfirmations.map((item) => ({ ...item })) }
     : {
       ...task.report,
-      ...(requestedModules.includes("customer") ? {
-        summary: emptyReport.summary,
-        profile: [],
-        confidence: 0,
-      } : {}),
-      ...(requestedModules.includes("psychology") ? { emotionProfile: { ...emptyReport.emotionProfile, currentStateEvidence: [], emotionTurningPoints: [], personalityTraits: [], decisionEvidence: [] } } : {}),
-      ...(requestedModules.includes("objections") ? { objections: [] } : {}),
-      ...(requestedModules.includes("checklist") ? { decisionMap: emptyReport.decisionMap, objections: [], offensePoints: [], defensePoints: [], confirmations: [] } : {}),
-      ...(requestedModules.includes("action") ? { improvements: [], nextStrategy: { ...emptyReport.nextStrategy, actions: [], avoidActions: [], evidence: [] }, suggestedReply: "", suggestedReplyTranslation: "", knowledgeReferences: [] } : {}),
+      ...(requestedModules.includes("summary") ? { summary: emptyReport.summary, confidence: 0 } : {}),
+      ...(requestedModules.includes("profile") ? { profile: [] } : {}),
+      ...(requestedModules.includes("products") ? { productMentions: [] } : {}),
+      ...(requestedModules.some((module) => ["emotion_state", "emotion_trend", "personality", "decision"].includes(module)) ? { emotionProfile: { ...task.report.emotionProfile, ...(requestedModules.includes("emotion_state") ? { currentState: emptyReport.emotionProfile.currentState, currentStateEvidence: [], confidence: 0 } : {}), ...(requestedModules.includes("emotion_trend") ? { emotionTurningPoints: [] } : {}), ...(requestedModules.includes("personality") ? { personalitySummary: emptyReport.emotionProfile.personalitySummary, personalityTraits: [] } : {}), ...(requestedModules.includes("decision") ? { decisionStyle: emptyReport.emotionProfile.decisionStyle, decisionFactors: [], decisionPace: emptyReport.emotionProfile.decisionPace, communicationApproach: emptyReport.emotionProfile.communicationApproach, decisionEvidence: [] } : {}) } } : {}),
+      ...(requestedModules.some((module) => ["drivers", "blockers", "blocker_status"].includes(module)) ? { decisionMap: { ...task.report.decisionMap, ...(requestedModules.includes("drivers") ? { motivationLevel: "弱" as const, readiness: "低" as const, buyingDrivers: [] } : {}), ...(requestedModules.includes("blockers") ? { biggestBlocker: "待分析", priorityTask: "等待 AI 完成成交判断。", blockers: [] } : {}) } } : {}),
+      ...(requestedModules.includes("improvements") ? { improvements: [] } : {}),
+      ...(requestedModules.includes("strategy") ? { nextStrategy: { ...emptyReport.nextStrategy, actions: [], avoidActions: [], evidence: [] } } : {}),
+      ...(requestedModules.includes("reply") ? { suggestedReply: "", suggestedReplyTranslation: "", knowledgeReferences: [] } : {}),
     };
   let provider: Provider = task.provider;
   let completed = 0;
   let succeeded = 0;
-  let states = { customer: "pending", psychology: "pending", objections: "pending", checklist: "pending", action: "pending", ...(task.analysisModules ?? {}) } as Record<AnalysisModule, AnalysisModuleStatus>;
+  let states = Object.fromEntries(analysisModules.map((module) => [module, task.analysisModules?.[module] ?? "pending"])) as Record<AnalysisModule, AnalysisModuleStatus>;
   for (const module of requestedModules) states[module] = "analyzing";
   let errors: Partial<Record<AnalysisModule, string>> = { ...(task.analysisModuleErrors ?? {}) };
-  delete errors.objections;
   for (const module of requestedModules) delete errors[module];
+  const results: Partial<Record<AnalysisModule, unknown>> = {};
   let latest: CustomerTask = { ...task, rawConversation: conversation, report, status: "analyzing", analysisStep: "analyzing", analysisModules: states, analysisModuleErrors: errors, analysisError: undefined };
   onUpdate(latest);
   const runModule = async (module: AnalysisModule) => {
     try {
-      const analysisContext = module === "action" ? { summary: report.summary, profile: report.profile, emotionProfile: report.emotionProfile, decisionMap: report.decisionMap, improvements: report.improvements } : undefined;
+      const analysisContext = module === "strategy"
+        ? { summary: report.summary, profile: report.profile, emotionProfile: report.emotionProfile, decisionMap: report.decisionMap, improvements: report.improvements }
+        : module === "reply"
+          ? { summary: report.summary, emotionProfile: report.emotionProfile, decisionMap: report.decisionMap, nextStrategy: report.nextStrategy }
+          : undefined;
       const response = await fetch("/api/analyze", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ conversation, module, analysisContext }) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || `${analysisModuleLabels[module]}分析失败`);
       provider = data.provider === "deepseek" ? "deepseek" : "openai";
+      results[module] = data.result;
       report = mergeAnalysisModule(report, module, data.result, conversation);
       states = { ...states, [module]: "done" };
       succeeded += 1;
@@ -515,9 +539,22 @@ async function analyzeConcurrently(task: CustomerTask, conversation: string, onU
     });
     onUpdate(latest);
   };
-  const foundationModules = requestedModules.filter((module) => module !== "action");
+  const foundationModules = requestedModules.filter((module) => foundationAnalysisModules.includes(module));
   await Promise.all(foundationModules.map(runModule));
-  if (requestedModules.includes("action")) await runModule("action");
+  // Rebuild foundation fields in a fixed order so completion timing cannot change the final report.
+  for (const module of foundationAnalysisModules) if (results[module]) report = mergeAnalysisModule(report, module, results[module], conversation);
+  latest = { ...latest, report };
+  if (requestedModules.includes("strategy")) await runModule("strategy");
+  if (requestedModules.includes("reply")) {
+    if (states.strategy === "done") await runModule("reply");
+    else {
+      states = { ...states, reply: "failed" };
+      errors = { ...errors, reply: "下一步策略未完成，建议回复已停止生成" };
+      completed += 1;
+      latest = normalizeTask({ ...latest, report, analysisModules: states, analysisModuleErrors: errors, status: succeeded || Object.values(states).includes("done") ? "ready" : "failed", analysisStep: undefined, updatedAt: "刚刚" });
+      onUpdate(latest);
+    }
+  }
   return latest;
 }
 
@@ -525,19 +562,22 @@ function normalizeTask(task: CustomerTask): CustomerTask {
   const hasNewProgress = task.progress?.some((item) => item.id === "inquiry");
   const rawStates = task.analysisModules as unknown as Record<string, AnalysisModuleStatus> | undefined;
   const rawErrors = task.analysisModuleErrors as unknown as Record<string, string> | undefined;
-  const normalizedStates = rawStates ? {
-    customer: rawStates.customer ?? "pending",
-    psychology: rawStates.psychology ?? rawStates.customer ?? "pending",
-    objections: rawStates.objections ?? rawStates.risk ?? "pending",
-    checklist: rawStates.checklist ?? rawStates.risk ?? "pending",
-    action: rawStates.action ?? "pending",
-  } satisfies Record<AnalysisModule, AnalysisModuleStatus> : undefined;
-  const normalizedErrors: Partial<Record<AnalysisModule, string>> | undefined = rawErrors ? {
-    ...(rawErrors.customer ? { customer: rawErrors.customer } : {}),
-    ...(rawErrors.psychology ? { psychology: rawErrors.psychology } : {}),
-    ...(rawErrors.checklist || rawErrors.risk ? { checklist: rawErrors.checklist || rawErrors.risk } : {}),
-    ...(rawErrors.action ? { action: rawErrors.action } : {}),
-  } : undefined;
+  const legacyState = (module: AnalysisModule): AnalysisModuleStatus | undefined => {
+    if (!rawStates) return undefined;
+    if (module === "summary" || module === "profile" || module === "products") return rawStates.customer;
+    if (module === "emotion_state" || module === "emotion_trend" || module === "personality" || module === "decision") return rawStates.psychology;
+    if (module === "drivers" || module === "blockers" || module === "blocker_status") return rawStates.checklist || rawStates.risk;
+    return rawStates.action;
+  };
+  const normalizedStates = rawStates ? Object.fromEntries(analysisModules.map((module) => [module, rawStates[module] ?? legacyState(module) ?? "pending"])) as Record<AnalysisModule, AnalysisModuleStatus> : undefined;
+  const normalizedErrors: Partial<Record<AnalysisModule, string>> | undefined = rawErrors ? Object.fromEntries(analysisModules.flatMap((module) => {
+    const legacy = module === "summary" || module === "profile" || module === "products" ? rawErrors.customer
+      : module === "emotion_state" || module === "emotion_trend" || module === "personality" || module === "decision" ? rawErrors.psychology
+        : module === "drivers" || module === "blockers" || module === "blocker_status" ? rawErrors.checklist || rawErrors.risk
+          : rawErrors.action;
+    const error = rawErrors[module] || legacy;
+    return error ? [[module, error]] : [];
+  })) : undefined;
   return {
     ...task,
     report: normalizeReport(task.report, task.rawConversation),
@@ -713,6 +753,7 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
     const state = activeTask.analysisModules?.[module];
     return state ? state === "done" : activeTask.status !== "analyzing";
   };
+  const anyModuleVisible = (modules: AnalysisModule[]) => modules.some(moduleVisible);
   const filtered = tasks.filter((task) => task.name.toLowerCase().includes(taskSearch.toLowerCase()));
 
   useEffect(() => {
@@ -745,12 +786,14 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
 
   const reportSections = useMemo(() => {
     const sections: Array<{ id: ReportSectionId; label: string; meta?: string }> = [];
-    if (moduleVisible("customer")) sections.push({ id: "summary", label: "对话总结" }, { id: "profile", label: "客户画像" });
-    if (moduleVisible("psychology")) sections.push({ id: "psychology", label: "情绪与心理" });
-    if (moduleVisible("checklist")) {
+    if (moduleVisible("summary")) sections.push({ id: "summary", label: "对话总结" });
+    if (moduleVisible("profile")) sections.push({ id: "profile", label: "客户画像" });
+    if (anyModuleVisible(["emotion_state", "emotion_trend", "personality", "decision"])) sections.push({ id: "psychology", label: "情绪与心理" });
+    if (anyModuleVisible(["drivers", "blockers", "blocker_status"])) {
       sections.push({ id: "checklist", label: "成交决策地图", meta: `${activeTask.report.decisionMap.buyingDrivers.length}/${activeTask.report.decisionMap.blockers.length}` });
     }
-    if (moduleVisible("action")) sections.push({ id: "improvements", label: "改善和不足" }, { id: "next-actions", label: "下一步建议" });
+    if (moduleVisible("improvements")) sections.push({ id: "improvements", label: "改善和不足" });
+    if (anyModuleVisible(["strategy", "reply"])) sections.push({ id: "next-actions", label: "下一步建议" });
     return sections;
   }, [activeTask]);
 
@@ -880,23 +923,23 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
           <AnalysisFailed task={activeTask} onRetry={reanalyze} />
         ) : <ReportCollapseContext.Provider value={{ collapsed: collapsedSections, toggle: toggleReportSection }}><div className="report-content">
           {activeTask.status === "analyzing" && <AnalysisModuleProgress task={activeTask} compact />}
-          {moduleVisible("customer") && <>
+          {anyModuleVisible(["summary", "profile"]) && <>
           <div className="report-intro">
             <div className="ai-orb"><Sparkles size={22} /></div>
             <div><span>AI ANALYSIS</span><h2>{activeTask.customer.name} 的对话洞察</h2><p>基于 {activeTask.rawConversation.split("\n").length} 条对话 · {activeTask.model} · 置信度 {Math.round(activeTask.report.confidence * 100)}%</p></div>
             <div className={`confidence score-${confidenceLabel(activeTask.report.confidence)}`}><div style={{ "--score": `${activeTask.report.confidence * 100}%` } as React.CSSProperties} /><span>{confidenceLabel(activeTask.report.confidence)}</span></div>
           </div>
 
-          <ReportCard icon={FileText} title="对话总结" tone="violet" sectionId="summary">
+          {moduleVisible("summary") && <ReportCard icon={FileText} title="对话总结" tone="violet" sectionId="summary">
             <p className="summary-text">{activeTask.report.summary}</p>
-          </ReportCard>
+          </ReportCard>}
 
-          <ReportCard icon={UserRound} title="客户画像" tone="blue" sectionId="profile">
+          {moduleVisible("profile") && <ReportCard icon={UserRound} title="客户画像" tone="blue" sectionId="profile">
             <div className="profile-tags">{activeTask.report.profile.map((item, index) => <span key={`${item}-${index}`}>{item}</span>)}</div>
-          </ReportCard>
+          </ReportCard>}
           </>}
 
-          {moduleVisible("psychology") && <>
+          {anyModuleVisible(["emotion_state", "emotion_trend", "personality", "decision"]) && <>
           <ReportCard icon={UsersRound} title="客户情绪、沟通性格与心理研判" tone="cyan" sectionId="psychology">
             <div className="emotion-profile-toolbar"><span>基于客户真实表达的沟通研判</span><strong className={`emotion-confidence score-${confidenceLabel(activeTask.report.emotionProfile.confidence)}`}>{confidenceLabel(activeTask.report.emotionProfile.confidence)} · {Math.round(activeTask.report.emotionProfile.confidence * 100)}%</strong></div>
             <section className="emotion-insight current-state-card">
@@ -920,16 +963,15 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
           </ReportCard>
           </>}
 
-          {moduleVisible("checklist") && <>
+          {anyModuleVisible(["drivers", "blockers", "blocker_status"]) && <>
           <DecisionMapPanel task={activeTask} onLocate={openRawChat} />
           </>}
 
-          {moduleVisible("action") && <>
-          <ReportCard icon={Zap} title="本次沟通可改善和不足" tone="amber" sectionId="improvements">
+          {moduleVisible("improvements") && <ReportCard icon={Zap} title="本次沟通可改善和不足" tone="amber" sectionId="improvements">
             <CommunicationReview improvements={activeTask.report.improvements} onLocate={openRawChat} />
-          </ReportCard>
+          </ReportCard>}
 
-          <ReportCard icon={Sparkles} title="AI 下一步建议" tone="violet" featured sectionId="next-actions">
+          {anyModuleVisible(["strategy", "reply"]) && <ReportCard icon={Sparkles} title="AI 下一步建议" tone="violet" featured sectionId="next-actions">
             <div className="next-strategy">
               <section className="strategy-summary"><small>当前策略判断</small><strong>{activeTask.report.nextStrategy.strategySummary}</strong></section>
               <div className="strategy-grid"><section><small>下一步核心目标</small><strong>{activeTask.report.nextStrategy.primaryGoal}</strong></section><section><small>推荐沟通方式</small><p>{activeTask.report.nextStrategy.communicationMethod}</p></section></div>
@@ -938,8 +980,7 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
               {activeTask.report.nextStrategy.avoidActions.length > 0 && <section className="strategy-avoid"><small>暂时不要做</small><ul>{activeTask.report.nextStrategy.avoidActions.map((item) => <li key={item}>{item}</li>)}</ul></section>}
             </div>
             <div className="reply-box"><div><Bot size={16} /><strong>建议回复</strong><button onClick={() => navigator.clipboard.writeText(activeTask.report.suggestedReply)}><Copy size={14} />复制原文</button></div><p>{activeTask.report.suggestedReply}</p><div className="reply-translation"><span>中文核对</span><p>{activeTask.report.suggestedReplyTranslation}</p></div>{activeTask.report.knowledgeReferences.length > 0 && <div className="knowledge-references"><strong><BookOpen size={13} />本次参考了 {activeTask.report.knowledgeReferences.length} 条已发布话术</strong><div>{activeTask.report.knowledgeReferences.map((reference) => <article className="knowledge-reference" key={reference.id}><span>{reference.title}{reference.scenario ? ` · ${reference.scenario}` : ""}</span><small>{reference.excerpt}</small></article>)}</div></div>}</div>
-          </ReportCard>
-          </>}
+          </ReportCard>}
         </div></ReportCollapseContext.Provider>}
       </section>
 
@@ -971,7 +1012,8 @@ function AnalysisLoading({ task }: { task: CustomerTask }) {
 }
 
 function AnalysisModuleProgress({ task, compact = false }: { task: CustomerTask; compact?: boolean }) {
-  const states = task.analysisModules ?? { customer: "analyzing", psychology: "analyzing", objections: "analyzing", checklist: "analyzing", action: "analyzing" };
+  const states: Record<AnalysisModule, AnalysisModuleStatus> = task.analysisModules
+    ?? Object.fromEntries(analysisModules.map((module) => [module, "analyzing"])) as Record<AnalysisModule, AnalysisModuleStatus>;
   return <div className={`analysis-steps ${compact ? "compact" : ""}`}>
     {analysisModules.map((module) => {
       const state = states[module];

@@ -3,7 +3,21 @@ export type TaskStatus = "ready" | "analyzing" | "stale" | "failed";
 export type Provider = "openai" | "deepseek";
 export type IntegrationProvider = Provider | "salesmartly";
 export type ConfirmationStatus = "confirmed" | "unknown" | "risk" | "na";
-export type AnalysisModule = "customer" | "psychology" | "objections" | "checklist" | "action";
+export type AnalysisModule =
+  | "summary"
+  | "profile"
+  | "products"
+  | "emotion_state"
+  | "emotion_trend"
+  | "personality"
+  | "decision"
+  | "drivers"
+  | "blockers"
+  | "blocker_status"
+  | "improvements"
+  | "strategy"
+  | "reply";
+export type LegacyAnalysisModule = "customer" | "psychology" | "objections" | "checklist" | "action";
 export type AnalysisModuleStatus = "pending" | "analyzing" | "done" | "failed";
 
 export interface KnowledgeScriptReference {

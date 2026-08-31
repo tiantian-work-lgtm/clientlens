@@ -1,4 +1,4 @@
-import type { AnalysisModule, AnalysisReport, BuyingDriver, CommunicationImprovement, ConfirmationItem, CustomerEmotionProfile, DealBlocker, DealDecisionMap, KnowledgeScript, KnowledgeScriptReference, NextStepStrategy, Objection, ProductMention, Provider } from "./types";
+import type { AnalysisReport, BuyingDriver, CommunicationImprovement, ConfirmationItem, CustomerEmotionProfile, DealBlocker, DealDecisionMap, KnowledgeScript, KnowledgeScriptReference, LegacyAnalysisModule, NextStepStrategy, Objection, ProductMention, Provider } from "./types";
 import { getRuntimeProviderConfig, type RuntimeProviderConfig } from "./provider-config";
 import { buildNumberedConversationChunks, parseConversationMessages, type ParsedConversationMessage } from "./conversation";
 import { formatScriptKnowledgeContext, recordScriptUsage, retrieveRelevantScripts, toScriptReferences } from "./script-knowledge";
@@ -309,7 +309,7 @@ const checklistSchema = {
   },
 };
 
-const analysisPrompts: Record<AnalysisModule, string> = {
+const analysisPrompts: Record<LegacyAnalysisModule, string> = {
   customer: `${commonPrompt}\n只返回对话总结、客户画像标签和对话提及产品，不判断或输出任何销售阶段。profile 由模型根据真实聊天自由提炼为简洁、具体、可独立阅读的画像标签，不预设分类、固定数量、顺序或“分类：内容”格式；应尽可能覆盖聊天中有证据的身份、经验、需求、关注点、信任、价格、决策和沟通特征，使画像足够丰富，通常可提炼 5 至 12 个标签，证据确实较少时允许更少。没有原文依据的特征不得输出，不得为了凑数量重复。productMentions 必须列出聊天中出现的每一个具体产品、多肽或药物并去重。公司名、厂家名、店铺名以及仅代表供应方的品牌名称不得作为产品输出；若商品名本身明确指向一种具体产品或药物，则应按具体产品保留。mentionedBy 判断客户、销售或双方提及；customerAwareness 依据客户原话判断不了解、初步了解、有使用经验、明确熟悉或无法判断；customerInterest 判断明确感兴趣、可能感兴趣、未表现兴趣、明确拒绝或无法判断；awarenessReason 说明判断依据。evidenceMessageId 和 evidenceQuote 必须引用包含该产品名或能直接证明客户了解程度的真实消息编号及逐字原文。仅由销售提及而客户未回应时，客户了解程度和兴趣必须填无法判断。`,
   psychology: `${commonPrompt}\n只返回 emotionProfile，并严格按 JSON 示例字段输出。\n1. currentState 将客户当前情绪与可从表达观察到的心理状态合并成一段结论；不要诊断疾病、人格障碍或贴 MBTI 标签。currentStateEvidence 必须给出支持结论的真实客户消息。\n2. emotionTurningPoints 按聊天先后顺序提取真正发生变化的 0-8 个情绪转折点。score 只能为 -2 到 2；label 是简短情绪标签，reason 说明转折原因。没有明显转折时返回 []，不得虚构。\n3. personalitySummary 用一句自然中文概括全部可观察沟通性格；personalityTraits 再列具体倾向，每项包含 trait、explanation 和自己的 evidence；不输出敏感点或防御/回避模式。\n4. decisionStyle 总结决策方式；decisionFactors 写主要考虑因素；decisionPace 写决策节奏；communicationApproach 写适合的沟通方式；decisionEvidence 必须直接支撑判断。\n5. 每条 evidence 必须引用真实客户消息的 M 编号与逐字原文，并提供忠实中文翻译和解释。禁止改写、拼接或引用销售消息。信息不足时明确说明并降低 confidence。`,
   objections: `${commonPrompt}\n只返回 objections。仅保留有客户逐字原文证据的明确异议或犹豫，禁止占位标题。未正面回答或客户再次追问=未解决；销售正面回答且客户未再追问=未追问-基本解决；销售回答后客户明确认可=客户肯定-完全解决。解决证据必须发生在异议之后；沉默、礼貌致谢和话题切换不算肯定。`,
@@ -454,7 +454,7 @@ async function requestOpenAIJson<T>(config: RuntimeProviderConfig, schema: Recor
   return parseJsonContent<T>(extractOpenAIText(await response.json()));
 }
 
-function moduleSchema(module: AnalysisModule) {
+function moduleSchema(module: LegacyAnalysisModule) {
   if (module === "customer") return profileSchema;
   if (module === "psychology") return psychologySchema;
   if (module === "objections") return objectionsSchema;
@@ -464,7 +464,7 @@ function moduleSchema(module: AnalysisModule) {
 
 const confirmationIds = ["role", "seeding", "medical", "scammed", "coa", "packaging", "company", "feedback", "logistics", "payment_method"];
 
-function deepSeekJsonExample(module: AnalysisModule): Record<string, unknown> {
+function deepSeekJsonExample(module: LegacyAnalysisModule): Record<string, unknown> {
   if (module === "customer") return {
     summary: "根据完整对话生成的中文总结",
     profile: ["有原文依据的画像标签一", "有原文依据的画像标签二", "有原文依据的画像标签三"],
@@ -716,7 +716,7 @@ function normalizeCustomerResult(value: unknown, messages: ParsedConversationMes
   };
 }
 
-function requireRawModuleResult(module: AnalysisModule, value: unknown, messages: ParsedConversationMessage[]) {
+function requireRawModuleResult(module: LegacyAnalysisModule, value: unknown, messages: ParsedConversationMessage[]) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error(`${module} 模块返回了空结果或无效 JSON 对象`);
   }
@@ -771,7 +771,7 @@ function requireRawModuleResult(module: AnalysisModule, value: unknown, messages
   }
 }
 
-function requireNormalizedModuleResult(module: AnalysisModule, value: AnalysisModuleResult, messages: ParsedConversationMessage[]) {
+function requireNormalizedModuleResult(module: LegacyAnalysisModule, value: AnalysisModuleResult, messages: ParsedConversationMessage[]) {
   if (module === "customer") {
     const result = value as CustomerModuleResult;
     if (!result.summary.trim() || !result.profile.length || !Number.isFinite(result.confidence)) throw new Error("客户总结或画像未通过质量检查");
@@ -1091,7 +1091,7 @@ function validateLegacyModuleResult(module: "customer" | "risk" | "action", valu
   return value;
 }
 
-function normalizeModuleResult(module: AnalysisModule, value: unknown, messages: ParsedConversationMessage[]): AnalysisModuleResult {
+function normalizeModuleResult(module: LegacyAnalysisModule, value: unknown, messages: ParsedConversationMessage[]): AnalysisModuleResult {
   if (module === "customer") return normalizeCustomerResult(value, messages);
   if (module === "psychology") return normalizePsychologyResult(value, messages);
   if (module === "objections") return normalizeObjectionsResult(value, messages);
@@ -1162,7 +1162,7 @@ async function requestDeepSeekPsychologyParts(config: RuntimeProviderConfig, inp
   return { emotionProfile: { ...state, ...traits, ...decision } };
 }
 
-async function requestModuleOnce(config: RuntimeProviderConfig, provider: Provider, module: AnalysisModule, input: string, merge = false, knowledgeContext = ""): Promise<AnalysisModuleResult> {
+async function requestModuleOnce(config: RuntimeProviderConfig, provider: Provider, module: LegacyAnalysisModule, input: string, merge = false, knowledgeContext = ""): Promise<AnalysisModuleResult> {
   const instruction = `${analysisPrompts[module]}${module === "action" ? knowledgeContext : ""}${merge ? "\n下面是分段分析结果，请去重并合并为一个最终结果。消息编号与原文必须原样保留。" : ""}`;
   if (provider === "openai") {
     return requestOpenAIJson<AnalysisModuleResult>(config, moduleSchema(module), `customer_${module}_analysis`, instruction, input);
@@ -1177,7 +1177,7 @@ async function requestModuleOnce(config: RuntimeProviderConfig, provider: Provid
   }, { role: "user", content: input }], tokens);
 }
 
-export async function analyzeModuleWithProvider(provider: Provider, conversation: string, module: AnalysisModule, analysisContext?: unknown): Promise<AnalysisModuleResult | null> {
+export async function analyzeModuleWithProvider(provider: Provider, conversation: string, module: LegacyAnalysisModule, analysisContext?: unknown): Promise<AnalysisModuleResult | null> {
   const config = await getRuntimeProviderConfig(provider);
   if (!config) return null;
   const chunks = buildNumberedConversationChunks(conversation);
