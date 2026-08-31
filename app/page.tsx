@@ -18,7 +18,6 @@ import {
   FileSpreadsheet,
   FileText,
   FlaskConical,
-  Globe2,
   Languages,
   Link2,
   ListChecks,
@@ -41,7 +40,7 @@ import {
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { defaultConfirmations, defaultProgress, emptyReport, initialTasks } from "@/lib/demo-data";
 import { parseConversationMessages } from "@/lib/conversation";
-import type { AnalysisModule, AnalysisModuleStatus, BuyingDriver, CommunicationTrait, CustomerTask, DealBlocker, DealDecisionMap, DefensePoint, EmotionEvidence, EmotionTurningPoint, HesitationSignal, ImportPreview, KnowledgeScript, KnowledgeScriptReference, OffensePoint, ProductMention, ProductResearch, Provider, SalesStage, SourceType } from "@/lib/types";
+import type { AnalysisModule, AnalysisModuleStatus, BuyingDriver, CommunicationImprovement, CommunicationTrait, CustomerTask, DealBlocker, DealDecisionMap, DefensePoint, EmotionEvidence, EmotionTurningPoint, ImportPreview, KnowledgeScript, KnowledgeScriptReference, OffensePoint, ProductMention, Provider, SalesStage, SourceType } from "@/lib/types";
 import SettingsManager from "@/app/components/settings-manager";
 
 type View = "analysis" | "scripts" | "products" | "translate" | "settings";
@@ -63,7 +62,7 @@ const sourceMeta: Record<SourceType, { label: string; icon: typeof Cloud; color:
 
 const salesStages: SalesStage[] = ["初次询盘与客户背调", "信任建立", "产品与订单匹配", "决策推进", "等待付款", "已成交", "售后与复购"];
 
-type ReportSectionId = "summary" | "profile" | "psychology" | "objections" | "hesitation" | "checklist" | "product-research" | "improvements" | "next-actions";
+type ReportSectionId = "summary" | "profile" | "psychology" | "objections" | "checklist" | "improvements" | "next-actions";
 const ReportCollapseContext = createContext<{ collapsed: Record<string, boolean>; toggle: (id: ReportSectionId) => void }>({ collapsed: {}, toggle: () => undefined });
 
 function normalizeStage(value?: string): SalesStage {
@@ -151,57 +150,14 @@ function normalizeReport(value: unknown, conversation = ""): CustomerTask["repor
     currentStateEvidence: currentStateEvidence.length ? currentStateEvidence : legacyEvidence.slice(0, 3),
     emotionTurningPoints: turningPoints,
     personalityTraits: personalityTraits.length ? personalityTraits : [{ trait: "信息不足", explanation: "当前对话不足以形成明确的沟通性格倾向。", evidence: [] }],
+    personalitySummary: stringValue(rawEmotionProfile.personalitySummary, personalityTraits.map((item) => item.trait).join("、") || "当前信息不足以概括沟通性格倾向。"),
     decisionStyle: stringValue(rawEmotionProfile.decisionStyle, "信息不足，暂无法判断决策方式"),
     decisionFactors: stringList(rawEmotionProfile.decisionFactors, stringList(rawEmotionProfile.coreMotivations)).slice(0, 5),
     decisionPace: stringValue(rawEmotionProfile.decisionPace, stringValue(rawEmotionProfile.pressureResponse, "信息不足")),
-    advancementConditions: stringList(rawEmotionProfile.advancementConditions, stringList(rawEmotionProfile.trustNeeds)).slice(0, 5),
     communicationApproach: stringValue(rawEmotionProfile.communicationApproach, "先确认客户最看重的决策条件，再提供对应信息。"),
     decisionEvidence: normalizeEmotionEvidence(rawEmotionProfile.decisionEvidence, 4).length ? normalizeEmotionEvidence(rawEmotionProfile.decisionEvidence, 4) : legacyEvidence.slice(0, 4),
-    advice: stringList(rawEmotionProfile.advice, ["继续观察客户表达，并通过开放式问题确认其真实关注点。"]).slice(0, 5),
     confidence: Number.isFinite(emotionConfidence) ? Math.min(1, Math.max(0, emotionConfidence)) : 0,
   };
-  const rawHesitation = report.hesitationAnalysis && typeof report.hesitationAnalysis === "object" && !Array.isArray(report.hesitationAnalysis) ? report.hesitationAnalysis as Record<string, unknown> : null;
-  const rawHesitationSignals = rawHesitation && Array.isArray(rawHesitation.signals) ? rawHesitation.signals : [];
-  const hesitationSignals = rawHesitationSignals.flatMap<HesitationSignal>((value) => {
-    if (!value || typeof value !== "object" || Array.isArray(value)) return [];
-    const item = value as Record<string, unknown>;
-    const evidenceMessage = messageById.get(stringValue(item.evidenceMessageId));
-    const evidenceQuote = normalizeEvidenceQuote(item.evidenceQuote, conversation);
-    const kind: HesitationSignal["kind"] | null = item.kind === "明确异议" || item.kind === "延后说辞" || item.kind === "含蓄犹豫" || item.kind === "未回复风险" ? item.kind : null;
-    const severity: HesitationSignal["severity"] = item.severity === "高" || item.severity === "中" || item.severity === "低" ? item.severity : "中";
-    const quoteMatchesMessage = Boolean(evidenceMessage && evidenceQuote && evidenceMessage.content.normalize("NFKC").includes(evidenceQuote.normalize("NFKC")));
-    if (!kind || !evidenceMessage || !evidenceQuote || !quoteMatchesMessage || (kind !== "未回复风险" && evidenceMessage.role !== "customer") || (kind === "未回复风险" && evidenceMessage.role !== "sales")) return [];
-    const signalConfidence = Number(item.confidence);
-    return [{
-      title: stringValue(item.title, "需要人工核对的犹豫点"), kind, severity,
-      customerPerspective: stringValue(item.customerPerspective, "需要结合上下文进一步确认客户视角。"),
-      evidenceMessageId: evidenceMessage.id, evidenceQuote,
-      reasoning: stringValue(item.reasoning, "该表达可能影响当前推进。"),
-      confidence: Number.isFinite(signalConfidence) ? Math.min(1, Math.max(0, signalConfidence)) : 0,
-      followUpGoal: stringValue(item.followUpGoal, "确认客户当前最关心的问题。"),
-      followUpTiming: stringValue(item.followUpTiming, "根据最近一次沟通时间择机跟进。"),
-      suggestedMessage: stringValue(item.suggestedMessage),
-      suggestedMessageTranslation: stringValue(item.suggestedMessageTranslation),
-    }];
-  });
-  const rawReadStatus = rawHesitation?.readNoReplyStatus;
-  const readNoReplyStatus = rawReadStatus === "已确认已读未回" || rawReadStatus === "疑似未回复" || rawReadStatus === "未发现" || rawReadStatus === "无法判断" ? rawReadStatus : "无法判断";
-  const readEvidenceMessage = rawHesitation ? messageById.get(stringValue(rawHesitation.readNoReplyEvidenceMessageId)) : undefined;
-  const readEvidenceQuote = rawHesitation ? normalizeEvidenceQuote(rawHesitation.readNoReplyEvidenceQuote, conversation) : "";
-  const readEvidenceMatches = Boolean(readEvidenceMessage && readEvidenceQuote && readEvidenceMessage.content.normalize("NFKC").includes(readEvidenceQuote.normalize("NFKC")));
-  const hesitationConfidence = Number(rawHesitation?.confidence);
-  const hesitationAnalysis: CustomerTask["report"]["hesitationAnalysis"] = rawHesitation && stringValue(rawHesitation.analyzedAt) ? {
-    analyzedAt: stringValue(rawHesitation.analyzedAt),
-    readNoReplyStatus: (readNoReplyStatus === "已确认已读未回" || readNoReplyStatus === "疑似未回复") && (!readEvidenceMessage || readEvidenceMessage.role !== "sales" || !readEvidenceMatches) ? "无法判断" : readNoReplyStatus,
-    readNoReplyReason: stringValue(rawHesitation.readNoReplyReason, "当前聊天信息不足以判断未回复状态。"),
-    readNoReplyEvidenceMessageId: readEvidenceMessage?.role === "sales" && readEvidenceMatches ? readEvidenceMessage.id : "",
-    readNoReplyEvidenceQuote: readEvidenceMessage?.role === "sales" && readEvidenceMatches ? readEvidenceQuote : "",
-    overallCustomerPerspective: stringValue(rawHesitation.overallCustomerPerspective, "当前证据不足，建议结合完整对话人工核对。"),
-    signals: hesitationSignals.slice(0, 12),
-    strategy: stringList(rawHesitation.strategy, ["优先确认客户当前最在意的问题，再决定跟进内容。"]).slice(0, 6),
-    confidence: Number.isFinite(hesitationConfidence) ? Math.min(1, Math.max(0, hesitationConfidence)) : 0,
-  } : undefined;
-  const rawProductResearch = report.productResearch && typeof report.productResearch === "object" && !Array.isArray(report.productResearch) ? report.productResearch as ProductResearch : undefined;
   const rawProductMentions = Array.isArray(report.productMentions) ? report.productMentions : [];
   const productMentions: CustomerTask["report"]["productMentions"] = rawProductMentions.flatMap((value) => {
     if (!value || typeof value !== "object" || Array.isArray(value)) return [];
@@ -464,13 +420,22 @@ function normalizeReport(value: unknown, conversation = ""): CustomerTask["repor
     if (!id || !title) return [];
     return [{ id, title, stage: stringValue(item.stage), excerpt: stringValue(item.excerpt) }];
   }) : [];
+  const priorityRank = { "高": 0, "中": 1, "低": 2 } as const;
+  const improvements: CommunicationImprovement[] = Array.isArray(report.improvements) ? report.improvements.flatMap((value) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+    const item = value as Record<string, unknown>;
+    const title = stringValue(item.title);
+    const issue = stringValue(item.issue);
+    const recommendation = stringValue(item.recommendation);
+    if (!title || !issue || !recommendation) return [];
+    const priority: CommunicationImprovement["priority"] = item.priority === "高" || item.priority === "低" ? item.priority : "中";
+    return [{ title, priority, issue, customerEvidenceMessageId: stringValue(item.customerEvidenceMessageId), customerEvidenceQuote: normalizeEvidenceQuote(item.customerEvidenceQuote, conversation), customerEvidenceTranslation: stringValue(item.customerEvidenceTranslation), handling: stringValue(item.handling, "销售尚未处理"), salesEvidenceMessageId: stringValue(item.salesEvidenceMessageId), salesEvidenceQuote: normalizeEvidenceQuote(item.salesEvidenceQuote, conversation), salesEvidenceTranslation: stringValue(item.salesEvidenceTranslation), recommendation }];
+  }).sort((a, b) => priorityRank[a.priority] - priorityRank[b.priority]) : [];
   return {
     summary: stringValue(report.summary, "AI 未返回有效的对话总结。"),
     profile,
     emotionProfile,
-    hesitationAnalysis,
     productMentions,
-    productResearch: rawProductResearch,
     stage: normalizeStage(stringValue(report.stage)),
     parallelStages,
     stageReason: stringValue(report.stageReason, "当前聊天记录不足以支持更具体的阶段判断。"),
@@ -479,7 +444,7 @@ function normalizeReport(value: unknown, conversation = ""): CustomerTask["repor
     offensePoints,
     defensePoints,
     confirmations,
-    improvements: stringList(report.improvements),
+    improvements,
     nextActions: stringList(report.nextActions),
     suggestedReply: stringValue(report.suggestedReply),
     suggestedReplyTranslation: stringValue(report.suggestedReplyTranslation),
@@ -515,7 +480,7 @@ async function analyzeConcurrently(task: CustomerTask, conversation: string, onU
         stageReason: emptyReport.stageReason,
         confidence: 0,
       } : {}),
-      ...(requestedModules.includes("psychology") ? { emotionProfile: { ...emptyReport.emotionProfile, currentStateEvidence: [], emotionTurningPoints: [], personalityTraits: [], decisionEvidence: [], advice: [...emptyReport.emotionProfile.advice] } } : {}),
+      ...(requestedModules.includes("psychology") ? { emotionProfile: { ...emptyReport.emotionProfile, currentStateEvidence: [], emotionTurningPoints: [], personalityTraits: [], decisionEvidence: [] } } : {}),
       ...(requestedModules.includes("objections") ? { objections: [] } : {}),
       ...(requestedModules.includes("checklist") ? { decisionMap: emptyReport.decisionMap, objections: [], offensePoints: [], defensePoints: [], confirmations: [] } : {}),
       ...(requestedModules.includes("action") ? { improvements: [], nextActions: [], suggestedReply: "", suggestedReplyTranslation: "", knowledgeReferences: [] } : {}),
@@ -744,7 +709,6 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
   const [analyzing, setAnalyzing] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState("");
-  const productResearchRef = useRef<HTMLDivElement>(null);
   const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({});
   const [activeReportSection, setActiveReportSection] = useState<ReportSectionId>("summary");
   const skipCollapseSaveRef = useRef(false);
@@ -791,8 +755,7 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
     if (moduleVisible("checklist")) {
       sections.push({ id: "checklist", label: "成交决策地图", meta: `${activeTask.report.decisionMap.buyingDrivers.length}/${activeTask.report.decisionMap.blockers.length}` });
     }
-    sections.push({ id: "product-research", label: "产品匹配", meta: activeTask.report.productMentions.length ? String(activeTask.report.productMentions.length) : "按需" });
-    if (moduleVisible("action")) sections.push({ id: "improvements", label: "沟通改善" }, { id: "next-actions", label: "下一步建议" });
+    if (moduleVisible("action")) sections.push({ id: "improvements", label: "改善和不足" }, { id: "next-actions", label: "下一步建议" });
     return sections;
   }, [activeTask]);
 
@@ -850,7 +813,7 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
       onUpdate({
         ...activeTask,
         rawConversation: conversation,
-        report: changed ? { ...activeTask.report, hesitationAnalysis: undefined } : activeTask.report,
+        report: activeTask.report,
         name: `${activeTask.customer.name} · ${Number(data.messageCount ?? 0)} 条消息`,
         status: changed ? "stale" : activeTask.status,
         updatedAt: changed ? "刚刚" : activeTask.updatedAt,
@@ -950,30 +913,25 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
               <EmotionTrendChart points={activeTask.report.emotionProfile.emotionTurningPoints} onLocate={openRawChat} />
             </section>
             <section className="emotion-insight">
-              <header><span>3</span><div><small>沟通性格倾向</small><strong>仅呈现当前聊天中可观察到的倾向</strong></div></header>
+              <header><span>3</span><div><small>沟通性格倾向</small><strong>{activeTask.report.emotionProfile.personalitySummary}</strong></div></header>
               <div className="communication-traits">{activeTask.report.emotionProfile.personalityTraits.map((item, index) => <article key={`${item.trait}-${index}`}><div><strong>{item.trait}</strong><p>{item.explanation}</p></div><EmotionEvidenceDisclosure evidence={item.evidence} onLocate={openRawChat} compact /></article>)}</div>
             </section>
             <section className="emotion-insight decision-card">
               <header><span>4</span><div><small>决策方式</small><strong>{activeTask.report.emotionProfile.decisionStyle}</strong></div></header>
-              <div className="decision-grid"><div><small>主要考虑因素</small><div className="emotion-tags">{activeTask.report.emotionProfile.decisionFactors.map((item) => <span key={item}>{item}</span>)}</div></div><div><small>决策节奏</small><p>{activeTask.report.emotionProfile.decisionPace}</p></div><div><small>继续推进所需条件</small><ul>{activeTask.report.emotionProfile.advancementConditions.map((item) => <li key={item}>{item}</li>)}</ul></div><div><small>建议沟通方式</small><p>{activeTask.report.emotionProfile.communicationApproach}</p></div></div>
+              <div className="decision-grid"><div><small>主要考虑因素</small><div className="emotion-tags">{activeTask.report.emotionProfile.decisionFactors.map((item) => <span key={item}>{item}</span>)}</div></div><div><small>决策节奏</small><p>{activeTask.report.emotionProfile.decisionPace}</p></div><div><small>建议沟通方式</small><p>{activeTask.report.emotionProfile.communicationApproach}</p></div></div>
               <EmotionEvidenceDisclosure evidence={activeTask.report.emotionProfile.decisionEvidence} onLocate={openRawChat} />
             </section>
-            <div className="emotion-advice"><h4>沟通建议</h4>{activeTask.report.emotionProfile.advice.map((item, index) => <p key={item}><span>{index + 1}</span>{item}</p>)}</div>
             <p className="emotion-disclaimer">仅依据当前聊天进行非临床沟通心理研判，不构成精神健康、人格障碍或医学诊断。</p>
           </ReportCard>
           </>}
 
           {moduleVisible("checklist") && <>
-          <DecisionMapPanel task={activeTask} onUpdate={onUpdate} onLocate={openRawChat} />
+          <DecisionMapPanel task={activeTask} onLocate={openRawChat} />
           </>}
 
-          <div ref={productResearchRef} className="product-research-anchor">
-            <ProductResearchCard task={activeTask} onUpdate={onUpdate} onLocate={openRawChat} />
-          </div>
-
           {moduleVisible("action") && <>
-          <ReportCard icon={Zap} title="本次沟通可改善" tone="amber" sectionId="improvements">
-            <div className="number-list">{activeTask.report.improvements.map((item, i) => <div key={item}><span>{i + 1}</span><p>{item}</p></div>)}</div>
+          <ReportCard icon={Zap} title="本次沟通可改善和不足" tone="amber" sectionId="improvements">
+            <CommunicationReview improvements={activeTask.report.improvements} onLocate={openRawChat} />
           </ReportCard>
 
           <ReportCard icon={Sparkles} title="AI 下一步建议" tone="violet" featured sectionId="next-actions">
@@ -1053,144 +1011,6 @@ function ReportCard({ icon: Icon, title, tone, featured, sectionId, children }: 
     <header className={sectionId ? "collapsible" : ""} onClick={sectionId ? () => toggle(sectionId) : undefined}><span className={`card-icon ${tone}`}><Icon size={17} /></span><h3>{title}</h3>{sectionId && <button type="button" className="report-collapse-button" aria-label={isCollapsed ? `展开${title}` : `收起${title}`} aria-expanded={!isCollapsed} onClick={(event) => { event.stopPropagation(); toggle(sectionId); }}><ChevronDown size={17} /></button>}</header>
     {!isCollapsed && <div className="card-body">{children}</div>}
   </article>;
-}
-
-function DeepHesitationCard({ task, onUpdate, onLocate }: { task: CustomerTask; onUpdate: (task: CustomerTask) => void; onLocate: (messageId?: string, quote?: string) => void }) {
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const analysis = task.report.hesitationAnalysis;
-  const runAnalysis = async () => {
-    setLoading(true);
-    setError("");
-    try {
-      const response = await fetch("/api/hesitation-analyze", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ conversation: task.rawConversation }) });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "深度犹豫分析失败");
-      onUpdate(normalizeTask({
-        ...task,
-        report: { ...task.report, hesitationAnalysis: data.analysis },
-        provider: data.provider === "deepseek" ? "deepseek" : "openai",
-        model: data.provider === "deepseek" ? "DeepSeek" : "GPT",
-        updatedAt: "刚刚",
-      }));
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "深度犹豫分析失败");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return <ReportCard icon={Search} title="深度犹豫与未回复分析" tone="orange" sectionId="hesitation">
-    {!analysis ? <div className="hesitation-cta">
-      <span>按需分析 · 首次不自动运行</span>
-      <h4>从客户视角重新细看整段聊天</h4>
-      <p>识别已读未回、延后说辞和有证据的潜在阻力，作为成交阻力的补充核查，不在这里重复生成完整回复。</p>
-      <button className="primary-button" onClick={() => void runAnalysis()} disabled={loading || task.status === "analyzing"}><Search size={14} />{loading ? "正在深度分析…" : "开始深度分析"}</button>
-      {error && <div className="hesitation-error"><CircleAlert size={13} />{error}</div>}
-    </div> : <div className="hesitation-result">
-      <div className="hesitation-result-head">
-        <div><span className={`read-status status-${analysis.readNoReplyStatus}`}>{analysis.readNoReplyStatus}</span><small>深度分析置信度 {Math.round(analysis.confidence * 100)}%</small></div>
-        <button onClick={() => void runAnalysis()} disabled={loading}><RefreshCw size={13} className={loading ? "spin" : ""} />{loading ? "分析中…" : "重新分析"}</button>
-      </div>
-      <div className="customer-perspective"><small>站在客户角度</small><p>{analysis.overallCustomerPerspective}</p></div>
-      <div className="read-no-reply-detail"><strong>未回复判断</strong><p>{analysis.readNoReplyReason}</p>{analysis.readNoReplyEvidenceQuote && <blockquote><button onClick={() => onLocate(analysis.readNoReplyEvidenceMessageId, analysis.readNoReplyEvidenceQuote)}>定位原文</button>“{analysis.readNoReplyEvidenceQuote}”</blockquote>}</div>
-      <div className="hesitation-signals">
-        <h4>发现 {analysis.signals.length} 个需要关注的点</h4>
-        {!analysis.signals.length && <div className="empty-objections"><CheckCircle2 size={15} />没有发现具有原文依据的明显异议或延后说辞</div>}
-        {analysis.signals.map((signal, index) => <article key={`${signal.title}-${index}`}>
-          <header><span className={`severity ${signal.severity}`}>{signal.severity}</span><strong>{signal.title}</strong><em>{signal.kind}</em><small>{Math.round(signal.confidence * 100)}%</small></header>
-          <div className="signal-body">
-            <div className="signal-perspective"><small>客户视角</small><p>{signal.customerPerspective}</p></div>
-            <blockquote><button onClick={() => onLocate(signal.evidenceMessageId, signal.evidenceQuote)}>已核验原文</button>“{signal.evidenceQuote}”</blockquote>
-            <p className="signal-reasoning"><span>判断说明</span>{signal.reasoning}</p>
-            <div className="follow-up-plan"><div><small>跟进目标</small><p>{signal.followUpGoal}</p></div><div><small>建议时机</small><p>{signal.followUpTiming}</p></div></div>
-          </div>
-        </article>)}
-      </div>
-      {error && <div className="hesitation-error"><CircleAlert size={13} />{error}</div>}
-      <p className="hesitation-disclaimer">潜在犹豫属于基于原文的销售推断，不代表已经确认客户的内心想法。</p>
-    </div>}
-  </ReportCard>;
-}
-
-function ProductResearchCard({ task, onUpdate, onLocate }: { task: CustomerTask; onUpdate: (task: CustomerTask) => void; onLocate: (messageId?: string, quote?: string) => void }) {
-  const research = task.report.productResearch;
-  const firstMentionName = task.report.productMentions[0]?.name || "";
-  const suggestedProduct = firstMentionName || (task.customer.product && task.customer.product !== "待识别" ? task.customer.product : "KLOW");
-  const defaultProduct = research?.productName || suggestedProduct;
-  const [productName, setProductName] = useState(defaultProduct);
-  const [stage, setStage] = useState<"searching" | "formatting" | null>(null);
-  const [error, setError] = useState("");
-  const [searchSummary, setSearchSummary] = useState("");
-
-  useEffect(() => setProductName(task.report.productResearch?.productName || suggestedProduct), [task.id, firstMentionName]);
-
-  const runResearch = async () => {
-    if (!productName.trim()) return setError("请先输入产品名称");
-    setStage("searching");
-    setError("");
-    setSearchSummary("");
-    onUpdate(normalizeTask({ ...task, report: { ...task.report, productResearch: undefined }, updatedAt: "刚刚" }));
-    try {
-      const searchResponse = await fetch("/api/product-research", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode: "search", productName: productName.trim(), conversation: task.rawConversation }),
-      });
-      const searchData = await searchResponse.json();
-      if (!searchResponse.ok) throw new Error(searchData.error || "产品联网搜索失败");
-      const evidence = typeof searchData.searchSummary === "string" ? searchData.searchSummary : "";
-      if (!evidence) throw new Error("联网搜索没有返回可用资料");
-      setSearchSummary(evidence);
-      setStage("formatting");
-      const formatResponse = await fetch("/api/product-research", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode: "format", productName: productName.trim(), conversation: task.rawConversation, searchSummary: evidence }),
-      });
-      const formatData = await formatResponse.json();
-      if (!formatResponse.ok) throw new Error(formatData.error || "搜索已完成，但资料整理失败");
-      if (typeof formatData.searchSummary === "string" && formatData.searchSummary.trim()) setSearchSummary(formatData.searchSummary);
-      onUpdate(normalizeTask({ ...task, report: { ...task.report, productResearch: formatData.research }, updatedAt: "刚刚" }));
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "产品联网研究失败");
-    } finally {
-      setStage(null);
-    }
-  };
-
-  return <ReportCard icon={Globe2} title="产品匹配与种草建议" tone="violet" sectionId="product-research">
-    <div className="product-research">
-    <div className="product-research-head"><div><strong>针对当前客户生成有资料依据的价值说明</strong><small>按需运行 · 结果随当前任务保存</small></div><span>DeepSeek Web Search</span></div>
-    <div className="mentioned-products">
-      <header><div><strong>对话提及产品</strong><small>点击产品可作为联网研究目标</small></div><span>{task.report.productMentions.length} 个</span></header>
-      {!task.report.productMentions.length && <div className="mentioned-products-empty">当前对话尚未识别到明确产品；仍可在下方手动输入产品名称。</div>}
-      {task.report.productMentions.map((item) => <article className={productName.toLocaleLowerCase() === item.name.toLocaleLowerCase() ? "selected" : ""} key={item.name}>
-        <button type="button" className="mentioned-product-select" onClick={() => setProductName(item.name)}><strong>{item.name}</strong><span>{item.mentionedBy}提及</span></button>
-        <div className="mentioned-product-status"><span>了解程度 <strong>{item.customerAwareness}</strong></span><span>客户兴趣 <strong>{item.customerInterest}</strong></span></div>
-        <p>{item.awarenessReason}</p>
-        <button type="button" className="mentioned-product-evidence" onClick={() => onLocate(item.evidenceMessageId, item.evidenceQuote)}>查看判断原文</button>
-      </article>)}
-    </div>
-    <div className="product-research-form">
-      <label><span>目标产品</span><input value={productName} onChange={(event) => setProductName(event.target.value)} placeholder="例如 KLOW" /></label>
-      <button type="button" className="primary-button" onClick={() => void runResearch()} disabled={Boolean(stage)}>{stage ? <RefreshCw className="spin" size={14} /> : <Search size={14} />}{stage === "searching" ? "正在搜索产品资料…" : stage === "formatting" ? "正在核验并生成建议…" : research ? "重新联网研究" : "联网研究并生成话术"}</button>
-    </div>
-    {!research && !stage && <p className="product-research-hint">系统会提取客户的具体痛点，联网核验产品及成分资料，再生成带来源的价值说明；不会生成个体化剂量、周期或治疗方案。</p>}
-    {error && <div className="product-research-error"><CircleAlert size={14} />{error}</div>}
-    {error && searchSummary && <details className="research-search-backup"><summary>搜索资料已保留，可展开核对 <ChevronDown size={14} /></summary><pre>{searchSummary}</pre></details>}
-    {research && <div className="product-research-result">
-      <div className="research-match-head"><div><small>客户关注</small><strong>{research.customerNeed}</strong></div><span className={`match-level level-${research.matchLevel}`}>匹配度 {research.matchLevel}</span></div>
-      <button className="research-evidence" type="button" onClick={() => onLocate(research.customerEvidenceMessageId, research.customerEvidenceQuote)}><span>客户原文</span>“{research.customerEvidenceQuote}”</button>
-      <p className="research-summary">{research.matchSummary}</p>
-      <div className="research-points"><h5>可用于沟通的价值点</h5>{research.talkingPoints.map((point, index) => <article key={`${point.title}-${index}`}><span>{index + 1}</span><div><strong>{point.title}</strong><p>{point.explanation}</p><div>{point.sourceUrls.map((url) => <a href={url} target="_blank" rel="noreferrer" key={url}><Link2 size={11} />查看依据</a>)}</div></div></article>)}</div>
-      {!!research.limitations.length && <div className="research-limitations"><strong>资料边界</strong>{research.limitations.map((item) => <p key={item}><CircleAlert size={12} />{item}</p>)}</div>}
-      <details className="research-sources"><summary>查看 {research.sources.length} 条资料来源 <ChevronDown size={14} /></summary><div>{research.sources.map((source) => <a href={source.url} target="_blank" rel="noreferrer" key={`${source.url}-${source.title}`}><span>{source.level}</span><strong>{source.title}</strong><p>{source.excerpt}</p></a>)}</div></details>
-      <div className="research-reply"><header><Bot size={15} /><strong>针对当前客户的建议回复</strong><button type="button" onClick={() => navigator.clipboard.writeText(research.suggestedReply)}><Copy size={13} />复制原文</button></header><p>{research.suggestedReply}</p><div><small>中文核对</small><p>{research.suggestedReplyTranslation}</p></div></div>
-      <small className="research-time">检索于 {new Date(research.searchedAt).toLocaleString("zh-CN")}</small>
-    </div>}
-    </div>
-  </ReportCard>;
 }
 
 type StrategyPriority = "高" | "中" | "低";
@@ -1299,7 +1119,19 @@ function StrategyEvidence({ messageId, quote, translation, onLocate }: { message
   </div>;
 }
 
-function DecisionMapPanel({ task, onUpdate, onLocate }: { task: CustomerTask; onUpdate: (task: CustomerTask) => void; onLocate: (messageId?: string, quote?: string) => void }) {
+function CommunicationReview({ improvements, onLocate }: { improvements: CommunicationImprovement[]; onLocate: (messageId?: string, quote?: string) => void }) {
+  if (!improvements.length) return <div className="strategy-empty"><CheckCircle2 size={16} />当前未识别到有充分依据的明显沟通不足</div>;
+  return <div className="communication-review-list">{improvements.map((item, index) => <details key={`${item.title}-${index}`} open>
+    <summary><span className={`review-priority priority-${item.priority}`}>{item.priority}</span><strong>{item.title}</strong><ChevronDown size={16} /></summary>
+    <div className="communication-review-body">
+      <section><small>问题阐述</small><p>{item.issue}</p>{item.customerEvidenceQuote && <StrategyEvidence messageId={item.customerEvidenceMessageId} quote={item.customerEvidenceQuote} translation={item.customerEvidenceTranslation} onLocate={onLocate} />}</section>
+      <section><small>销售是怎么处理的</small><p>{item.handling}</p>{item.salesEvidenceQuote && <StrategyEvidence messageId={item.salesEvidenceMessageId} quote={item.salesEvidenceQuote} translation={item.salesEvidenceTranslation} onLocate={onLocate} />}</section>
+      <section className="review-recommendation"><small>应该怎么处理</small><p>{item.recommendation}</p></section>
+    </div>
+  </details>)}</div>;
+}
+
+function DecisionMapPanel({ task, onLocate }: { task: CustomerTask; onLocate: (messageId?: string, quote?: string) => void }) {
   const map = task.report.decisionMap;
   const unresolved = map.blockers.filter((item) => item.handlingStatus === "未解决").length;
   return <ReportCard icon={ListChecks} title="成交决策地图" tone="green" sectionId="checklist">
@@ -1340,7 +1172,6 @@ function DecisionMapPanel({ task, onUpdate, onLocate }: { task: CustomerTask; on
         </details>)}
       </section>
     </div>
-    <div className="decision-deep-check"><DeepHesitationCard task={task} onUpdate={onUpdate} onLocate={onLocate} /></div>
   </ReportCard>;
 }
 
@@ -1388,175 +1219,6 @@ function OffenseDefensePanel({ task, onLocate }: { task: CustomerTask; onLocate:
   </ReportCard>;
 }
 
-/* Legacy fixed confirmation checklist retained in source temporarily for old task-data reference only.
-const confirmationState: Record<ConfirmationStatus, { label: string; className: string }> = {
-  confirmed: { label: "已确认", className: "confirmed" },
-  unknown: { label: "未确认", className: "unknown" },
-  risk: { label: "存在风险", className: "risk" },
-  na: { label: "不适用", className: "na" },
-};
-
-function ConfirmationChecklist({ task, onUpdate, onLocate, onOpenProductResearch }: { task: CustomerTask; onUpdate: (task: CustomerTask) => void; onLocate: (messageId?: string, quote?: string) => void; onOpenProductResearch: () => void }) {
-  const [generating, setGenerating] = useState<string | null>(null);
-  const [result, setResult] = useState<{ id: string; mode: "hook" | "explain"; text: string; translation: string } | null>(null);
-  const categories: ConfirmationItem["category"][] = ["客户角色", "认知与经历", "产品与信任", "交易条件"];
-  const completed = task.report.confirmations.filter((item) => item.status === "confirmed" || item.status === "na").length;
-  const riskItems = task.report.confirmations.filter((item) => item.status === "risk");
-
-  const cycleStatus = (item: ConfirmationItem) => {
-    const order: ConfirmationStatus[] = ["unknown", "confirmed", "risk", "na"];
-    const status = order[(order.indexOf(item.status) + 1) % order.length];
-    onUpdate({
-      ...task,
-      report: { ...task.report, confirmations: task.report.confirmations.map((current) => current.id === item.id ? {
-        ...current,
-        status,
-        evidenceQuote: status === "risk" ? current.evidenceQuote || "" : current.evidenceQuote,
-        riskReason: status === "risk" ? current.riskReason || "该项目由人工标记为风险，具体原因需要补充确认。" : "",
-      } : current) },
-    });
-  };
-
-  const generate = async (item: ConfirmationItem, mode: "hook" | "explain") => {
-    setGenerating(`${item.id}-${mode}`);
-    setResult(null);
-    try {
-      const response = await fetch("/api/checklist-suggest", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ conversation: task.rawConversation, item: item.label, mode, provider: task.provider }),
-      });
-      const data = await response.json();
-      setResult({ id: item.id, mode, text: data.suggestion || data.error || "暂时无法生成建议。", translation: data.translation || "暂无中文翻译。" });
-    } catch {
-      setResult({ id: item.id, mode, text: "Generation failed. Please try again later.", translation: "生成失败，请稍后重试。" });
-    } finally {
-      setGenerating(null);
-    }
-  };
-
-  return (
-    <ReportCard icon={ListChecks} title={`客户确认清单 · ${completed}/${task.report.confirmations.length}`} tone="green" sectionId="checklist">
-      <p className="checklist-intro">点击状态可人工切换。对未确认或存在风险的项目，可结合当前对话生成探询钩子或直接说明。</p>
-      {!!riskItems.length && <div className="risk-summary">
-        <header><CircleAlert size={14} /><strong>发现 {riskItems.length} 个风险点</strong></header>
-        {riskItems.map((item) => <div className="risk-summary-item" key={item.id}>
-          <strong>{item.label}</strong>
-          <p><span>风险原因</span>{item.riskReason || item.evidence || "该项目被人工标记为风险，原因尚待补充。"}</p>
-          <p><span>对话依据</span>{item.evidence || "暂无直接对话依据，建议进一步确认。"}</p>
-          <blockquote><span>原始片段</span>{item.evidenceQuote ? `“${item.evidenceQuote.replaceAll("“", "").replaceAll("”", "") }”` : "暂无可验证的原始聊天片段"}</blockquote>
-        </div>)}
-      </div>}
-      <div className="confirmation-groups">
-        {categories.map((category) => {
-          const items = task.report.confirmations.filter((item) => item.category === category);
-          if (!items.length) return null;
-          return <section className="confirmation-group" key={category}>
-            <h4>{category}</h4>
-            {items.map((item) => {
-              const state = confirmationState[item.status];
-              const selectedResult = result?.id === item.id ? result : null;
-              return <div className="confirmation-row" key={item.id}>
-                <div className="confirmation-main">
-                  <button className={`confirmation-status ${state.className}`} onClick={() => cycleStatus(item)}>{item.status === "confirmed" && <Check size={12} />}{state.label}</button>
-                  <div><strong>{item.label}</strong><p>{item.evidence}</p></div>
-                  <span className="item-confidence">{Math.round(item.confidence * 100)}%</span>
-                </div>
-                {item.id === "seeding" && item.seedingNeed && <div className={`seeding-analysis ${item.seedingNeed === "需要种草" ? "needed" : "not-needed"}`}>
-                  <header><span>种草结论</span><strong>{item.seedingNeed}</strong></header>
-                  {item.seedingNeed === "需要种草" && <div className="seeding-detail-grid">
-                    <div><small>种草方向</small><p>{item.seedingDirection || "待确认客户关注的改善、期望或痛点。"}</p></div>
-                    <div><small>当前是否已种草</small><p>{item.seedingPerformed || "未确认"}</p>{item.seedingPerformedEvidenceQuote && <blockquote>“{item.seedingPerformedEvidenceQuote}”</blockquote>}</div>
-                    <div><small>是否获得客户肯定</small><p>{item.seedingAccepted || "未确认"}</p>{item.seedingAcceptanceEvidenceQuote && <blockquote>“{item.seedingAcceptanceEvidenceQuote}”</blockquote>}</div>
-                    <div className="seeding-advice"><small>建议</small><p>{item.seedingAdvice || "先确认客户希望改善的问题，再做针对性价值说明。"}</p></div>
-                  </div>}
-                  <button type="button" className="seeding-research-button" onClick={onOpenProductResearch}><Globe2 size={13} />{task.report.productResearch ? "查看产品匹配建议" : item.seedingNeed === "需要种草" ? "生成针对性种草建议" : "研究其他产品"}</button>
-                </div>}
-                {item.id === "medical" && item.medicalNeed && <div className={`seeding-analysis medical-analysis ${item.medicalNeed === "需要提供建议" ? "needed" : "not-needed"}`}>
-                  <header><span>建议结论</span><strong>{item.medicalNeed}</strong></header>
-                  {item.medicalNeed === "需要提供建议" && <div className="seeding-detail-grid medical-detail-grid">
-                    <div><small>需求方向</small><p>{item.medicalDirection || "待确认客户的剂量、使用或医疗相关需求。"}</p></div>
-                    <div><small>是否已经解答</small><p>{item.medicalAnswered || "未确认"}</p>{item.medicalAnswerEvidenceQuote && <blockquote>“{item.medicalAnswerEvidenceQuote}”</blockquote>}</div>
-                    <div><small>是否获得客户肯定</small><p>{item.medicalAccepted || "未确认"}</p>{item.medicalAcceptanceEvidenceQuote && <blockquote>“{item.medicalAcceptanceEvidenceQuote}”</blockquote>}</div>
-                    <div className="seeding-advice"><small>建议</small><p>{item.medicalAdvice || "结合客户的具体问题，给出清晰、准确且有依据的下一步说明。"}</p></div>
-                  </div>}
-                </div>}
-                {item.id === "scammed" && item.scamExperienceStatus && <div className={`seeding-analysis scam-analysis ${item.scamExperienceStatus === "有被骗经历" ? "needed" : "not-needed"}`}>
-                  <header><span>被骗经历</span><strong>{item.scamExperienceStatus}</strong></header>
-                  {item.scamExperienceStatus === "有被骗经历" && <div className="seeding-detail-grid scam-detail-grid">
-                    <div><small>具体经历概述</small><p>{item.scamExperienceSummary || "待确认被骗方式、损失或由此产生的不信任。"}</p></div>
-                    <div><small>是否针对问题回应</small><p>{item.scamAddressed || "未确认"}</p>{item.scamResponseEvidenceQuote && <blockquote>“{item.scamResponseEvidenceQuote}”</blockquote>}</div>
-                    <div><small>是否获得客户肯定</small><p>{item.scamAccepted || "未确认"}</p>{item.scamAcceptanceEvidenceQuote && <blockquote>“{item.scamAcceptanceEvidenceQuote}”</blockquote>}</div>
-                    <div className="seeding-advice"><small>建议</small><p>{item.scamAdvice || "先承接客户的不信任，再用可验证资料和低风险首单方案回应。"}</p></div>
-                  </div>}
-                </div>}
-                {item.id === "coa" && item.coaMentionSource && <div className={`seeding-analysis coa-analysis ${item.coaMentionSource === "未提及" ? "not-needed" : "needed"}`}>
-                  <header><span>COA 判断</span><strong>{item.coaMentionSource}</strong></header>
-                  <div className="seeding-detail-grid coa-detail-grid">
-                    <div><small>由谁提出</small><p>{item.coaMentionSource}</p>{item.coaMentionEvidenceQuote && <blockquote>“{item.coaMentionEvidenceQuote}”</blockquote>}</div>
-                    <div><small>是否已经说明</small><p>{item.coaExplained || "未确认"}</p>{item.coaExplanationEvidenceQuote && <blockquote>“{item.coaExplanationEvidenceQuote}”</blockquote>}</div>
-                    <div><small>是否获得客户肯定</small><p>{item.coaAccepted || "未确认"}</p>{item.coaAcceptanceEvidenceQuote && <blockquote>“{item.coaAcceptanceEvidenceQuote}”</blockquote>}</div>
-                    <div className="seeding-advice"><small>建议</small><p>{item.coaAdvice || "根据当前对话判断是否需要主动说明 COA、批次与交付产品的对应关系。"}</p></div>
-                  </div>
-                </div>}
-                {item.id === "packaging" && item.packagingMentionSource && <div className={`seeding-analysis packaging-analysis ${item.packagingMentionSource === "未提及" ? "not-needed" : "needed"}`}>
-                  <header><span>包装判断</span><strong>{item.packagingMentionSource}</strong></header>
-                  <div className="seeding-detail-grid packaging-detail-grid">
-                    <div><small>由谁提出</small><p>{item.packagingMentionSource}</p>{item.packagingMentionEvidenceQuote && <blockquote>“{item.packagingMentionEvidenceQuote}”</blockquote>}</div>
-                    <div><small>是否已经说明</small><p>{item.packagingExplained || "未确认"}</p>{item.packagingExplanationEvidenceQuote && <blockquote>“{item.packagingExplanationEvidenceQuote}”</blockquote>}</div>
-                    <div><small>是否获得客户肯定</small><p>{item.packagingAccepted || "未确认"}</p>{item.packagingAcceptanceEvidenceQuote && <blockquote>“{item.packagingAcceptanceEvidenceQuote}”</blockquote>}</div>
-                    <div className="seeding-advice"><small>建议</small><p>{item.packagingAdvice || "根据当前对话判断是否需要主动说明包装规格、标签、隐私性和运输防护。"}</p></div>
-                  </div>
-                </div>}
-                {item.id === "company" && item.companyMentionSource && <div className={`seeding-analysis company-analysis ${item.companyMentionSource === "未提及" ? "not-needed" : "needed"}`}>
-                  <header><span>公司资料判断</span><strong>{item.companyMentionSource}</strong></header>
-                  <div className="seeding-detail-grid company-detail-grid">
-                    <div><small>由谁提出</small><p>{item.companyMentionSource}</p>{item.companyMentionEvidenceQuote && <blockquote>“{item.companyMentionEvidenceQuote}”</blockquote>}</div>
-                    <div><small>是否已经说明</small><p>{item.companyExplained || "未确认"}</p>{item.companyExplanationEvidenceQuote && <blockquote>“{item.companyExplanationEvidenceQuote}”</blockquote>}</div>
-                    <div><small>是否获得客户肯定</small><p>{item.companyAccepted || "未确认"}</p>{item.companyAcceptanceEvidenceQuote && <blockquote>“{item.companyAcceptanceEvidenceQuote}”</blockquote>}</div>
-                    <div className="seeding-advice"><small>建议</small><p>{item.companyAdvice || "根据客户最想核验的内容，提供真实、具体且可验证的公司资料。"}</p></div>
-                  </div>
-                </div>}
-                {item.id === "feedback" && item.feedbackMentionSource && <div className={`seeding-analysis feedback-analysis ${item.feedbackMentionSource === "未提及" ? "not-needed" : "needed"}`}>
-                  <header><span>客户反馈判断</span><strong>{item.feedbackMentionSource}</strong></header>
-                  <div className="seeding-detail-grid feedback-detail-grid">
-                    <div><small>由谁提出</small><p>{item.feedbackMentionSource}</p>{item.feedbackMentionEvidenceQuote && <blockquote>“{item.feedbackMentionEvidenceQuote}”</blockquote>}</div>
-                    <div><small>是否已经解答</small><p>{item.feedbackAnswered || "未确认"}</p>{item.feedbackAnswerEvidenceQuote && <blockquote>“{item.feedbackAnswerEvidenceQuote}”</blockquote>}</div>
-                    <div><small>是否获得客户肯定</small><p>{item.feedbackAccepted || "未确认"}</p>{item.feedbackAcceptanceEvidenceQuote && <blockquote>“{item.feedbackAcceptanceEvidenceQuote}”</blockquote>}</div>
-                    <div className="seeding-advice"><small>建议</small><p>{item.feedbackAdvice || "结合客户的国家和信任顾虑，提供真实、相关且已脱敏的客户反馈或物流参考。"}</p></div>
-                  </div>
-                </div>}
-                {item.id === "logistics" && item.logisticsMentionSource && <div className={`seeding-analysis logistics-analysis ${item.logisticsMentionSource === "未提及" ? "not-needed" : "needed"}`}>
-                  <header><span>物流判断</span><strong>{item.logisticsMentionSource}</strong></header>
-                  <div className="seeding-detail-grid logistics-detail-grid">
-                    <div><small>由谁提出</small><p>{item.logisticsMentionSource}</p>{item.logisticsMentionEvidenceQuote && <blockquote>“{item.logisticsMentionEvidenceQuote}”</blockquote>}</div>
-                    <div><small>是否已经解答</small><p>{item.logisticsAnswered || "未确认"}</p>{item.logisticsAnswerEvidenceQuote && <blockquote>“{item.logisticsAnswerEvidenceQuote}”</blockquote>}</div>
-                    <div><small>客户是否满意或存在异议</small><p>{item.logisticsCustomerReaction || "未确认"}</p>{item.logisticsReactionEvidenceQuote && <blockquote>“{item.logisticsReactionEvidenceQuote}”</blockquote>}</div>
-                    <div className="seeding-advice"><small>建议</small><p>{item.logisticsAdvice || "结合目的国家，明确渠道、参考时效、清关边界和异常处理方式。"}</p></div>
-                  </div>
-                </div>}
-                {item.id === "payment_method" && item.paymentMentionSource && <div className={`seeding-analysis payment-analysis ${item.paymentMentionSource === "未提及" ? "not-needed" : "needed"}`}>
-                  <header><span>支付判断</span><strong>{item.paymentMentionSource}</strong></header>
-                  <div className="seeding-detail-grid payment-detail-grid">
-                    <div><small>由谁提出</small><p>{item.paymentMentionSource}</p>{item.paymentMentionEvidenceQuote && <blockquote>“{item.paymentMentionEvidenceQuote}”</blockquote>}</div>
-                    <div><small>客户是否肯定或存在异议</small><p>{item.paymentCustomerReaction || "未确认"}</p>{item.paymentReactionEvidenceQuote && <blockquote>“{item.paymentReactionEvidenceQuote}”</blockquote>}</div>
-                    <div className="seeding-advice"><small>建议</small><p>{item.paymentAdvice || "确认客户可用的支付渠道，并如实说明流程、费用和可核验的付款保障。"}</p></div>
-                  </div>
-                </div>}
-                {(item.status === "unknown" || item.status === "risk") && <div className="confirmation-actions">
-                  <button onClick={() => generate(item, "hook")} disabled={!!generating}><Sparkles size={12} />{generating === `${item.id}-hook` ? "生成中…" : "生成探询钩子"}</button>
-                  <button onClick={() => generate(item, "explain")} disabled={!!generating}><Bot size={12} />{generating === `${item.id}-explain` ? "生成中…" : "生成直接阐述"}</button>
-                </div>}
-                {selectedResult && <div className="generated-suggestion"><header><span>{selectedResult.mode === "hook" ? "探询钩子" : "直接阐述"}</span><button onClick={() => navigator.clipboard.writeText(selectedResult.text)}><Copy size={12} />复制原文</button></header><p>{selectedResult.text}</p><div className="suggestion-translation"><span>中文核对</span><p>{selectedResult.translation}</p></div></div>}
-              </div>;
-            })}
-          </section>;
-        })}
-      </div>
-    </ReportCard>
-  );
-}
-*/
 
 function RawChatPanel({ task, onClose, onUpdate, onSync, syncing = false, target }: { task: CustomerTask; onClose: () => void; onUpdate: (task: CustomerTask) => void; onSync?: () => Promise<void>; syncing?: boolean; target: { messageId?: string; quote: string; nonce: number } | null }) {
   const [translating, setTranslating] = useState(false);
@@ -2007,15 +1669,23 @@ const translationLanguages = [
 type TranslationTone = "professional" | "friendly" | "concise";
 
 function TranslateView() {
-  const [source, setSource] = useState("Could you please confirm the quantity and delivery address? Once confirmed, I can prepare the exact quotation for you.");
-  const [target, setTarget] = useState("请您确认一下数量和收货地址。确认后，我可以为您准备准确的报价。");
+  const [source, setSource] = useState("");
+  const [target, setTarget] = useState("");
   const [sourceLanguage, setSourceLanguage] = useState("auto");
   const [targetLanguage, setTargetLanguage] = useState("zh-CN");
   const [tone, setTone] = useState<TranslationTone>("professional");
   const [loading, setLoading] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
   const [error, setError] = useState("");
   const [translationMeta, setTranslationMeta] = useState("DeepSeek · 商务翻译");
   const languagePrompt = (value: string) => translationLanguages.find((item) => item.value === value)?.prompt || "Auto detect";
+  useEffect(() => {
+    if (!loading) return;
+    const startedAt = performance.now();
+    setElapsed(0);
+    const timer = window.setInterval(() => setElapsed((performance.now() - startedAt) / 1000), 100);
+    return () => window.clearInterval(timer);
+  }, [loading]);
   const swapLanguages = () => {
     const fallbackTarget = targetLanguage === "zh-CN" ? "en" : "zh-CN";
     setSourceLanguage(targetLanguage);
@@ -2027,6 +1697,8 @@ function TranslateView() {
   const translate = async () => {
     if (!source.trim()) { setError("请先输入需要翻译的内容"); return; }
     setLoading(true);
+    setTarget("");
+    setElapsed(0);
     setError("");
     const controller = new AbortController();
     const timeout = window.setTimeout(() => controller.abort(), 45_000);
@@ -2058,7 +1730,7 @@ function TranslateView() {
     <div className="page-header"><div><span className="eyebrow">AI TRANSLATOR</span><h1>AI 翻译</h1><p>保留产品术语、数字和语气的自然商务翻译。</p></div><div className="translation-model"><span className="provider-dot deepseek" />{translationMeta}</div></div>
     <div className="translator-card">
       <div className="language-row"><label className="language-select"><select aria-label="源语言" value={sourceLanguage} onChange={(event) => setSourceLanguage(event.target.value)}><option value="auto">自动检测</option>{translationLanguages.map((language) => <option key={language.value} value={language.value}>{language.label}</option>)}</select><ChevronDown size={15} /></label><button className="swap-button" aria-label="交换语言和文本" onClick={swapLanguages}><ArrowLeftRight size={17} /></button><label className="language-select"><select aria-label="目标语言" value={targetLanguage} onChange={(event) => setTargetLanguage(event.target.value)}>{translationLanguages.map((language) => <option key={language.value} value={language.value}>{language.label}</option>)}</select><ChevronDown size={15} /></label></div>
-      <div className="translation-grid"><div><textarea aria-label="需要翻译的内容" maxLength={5000} value={source} onChange={(e) => setSource(e.target.value)} /><footer><span>{source.length} / 5,000</span><button aria-label="清空原文" onClick={() => setSource("")}><X size={15} /></button></footer></div><div className="translation-result"><textarea aria-label="翻译结果" value={target} onChange={(e) => setTarget(e.target.value)} /><footer><span><Sparkles size={14} />自然商务版</span><button onClick={() => navigator.clipboard.writeText(target)}><Copy size={15} />复制</button></footer></div></div>
+      <div className="translation-grid"><div><textarea aria-label="需要翻译的内容" maxLength={5000} value={source} onChange={(e) => setSource(e.target.value)} /><footer><span>{source.length} / 5,000</span>{source && <button className="translation-clear" aria-label="清空原文" onClick={() => { setSource(""); setTarget(""); }}><X size={22} /></button>}</footer></div><div className="translation-result">{loading ? <div className="translation-loading" role="status"><span className="translation-pulse"><Sparkles size={24} /></span><strong>AI 正在翻译</strong><b>{elapsed.toFixed(1)}s</b></div> : <textarea aria-label="翻译结果" value={target} onChange={(e) => setTarget(e.target.value)} />}<footer><span><Sparkles size={14} />自然商务版</span>{target && <button onClick={() => navigator.clipboard.writeText(target)}><Copy size={15} />复制</button>}</footer></div></div>
       <div className="translate-actions"><div><div className="tone-selector"><span>语气</span>{([['professional', '专业'], ['friendly', '友好'], ['concise', '简洁']] as const).map(([value, label]) => <button key={value} className={tone === value ? "active" : ""} onClick={() => setTone(value)}>{label}</button>)}</div>{error && <p className="translation-error">{error}</p>}</div><button className="primary-button" onClick={translate} disabled={loading || !source.trim()}><Languages size={17} />{loading ? "AI 翻译中，请稍候…" : "开始翻译"}</button></div>
     </div>
     <div className="translator-features"><div><ShieldCheck size={20} /><strong>术语保护</strong><p>产品名、规格、单位不会被错误改写。</p></div><div><Sparkles size={20} /><strong>自然表达</strong><p>根据商务场景优化语气，不是逐字直译。</p></div><div><LockKeyhole size={20} /><strong>隐私模式</strong><p>可关闭翻译历史，不在浏览器长期保存。</p></div></div>

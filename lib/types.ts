@@ -90,69 +90,27 @@ export interface CustomerEmotionProfile {
   currentStateEvidence: EmotionEvidence[];
   emotionTurningPoints: EmotionTurningPoint[];
   personalityTraits: CommunicationTrait[];
+  personalitySummary: string;
   decisionStyle: string;
   decisionFactors: string[];
   decisionPace: string;
-  advancementConditions: string[];
   communicationApproach: string;
   decisionEvidence: EmotionEvidence[];
-  advice: string[];
   confidence: number;
 }
 
-export interface HesitationSignal {
+export interface CommunicationImprovement {
   title: string;
-  kind: "明确异议" | "延后说辞" | "含蓄犹豫" | "未回复风险";
-  severity: "高" | "中" | "低";
-  customerPerspective: string;
-  evidenceMessageId: string;
-  evidenceQuote: string;
-  reasoning: string;
-  confidence: number;
-  followUpGoal: string;
-  followUpTiming: string;
-  suggestedMessage: string;
-  suggestedMessageTranslation: string;
-}
-
-export interface HesitationAnalysis {
-  analyzedAt: string;
-  readNoReplyStatus: "已确认已读未回" | "疑似未回复" | "未发现" | "无法判断";
-  readNoReplyReason: string;
-  readNoReplyEvidenceMessageId: string;
-  readNoReplyEvidenceQuote: string;
-  overallCustomerPerspective: string;
-  signals: HesitationSignal[];
-  strategy: string[];
-  confidence: number;
-}
-
-export interface ProductResearchSource {
-  title: string;
-  url: string;
-  excerpt: string;
-  level: "自有产品资料" | "同行评审研究" | "官方或机构资料" | "厂商产品资料" | "其他公开资料";
-}
-
-export interface ProductTalkingPoint {
-  title: string;
-  explanation: string;
-  sourceUrls: string[];
-}
-
-export interface ProductResearch {
-  productName: string;
-  customerNeed: string;
+  priority: "高" | "中" | "低";
+  issue: string;
   customerEvidenceMessageId: string;
   customerEvidenceQuote: string;
-  matchLevel: "高" | "中" | "低" | "资料不足";
-  matchSummary: string;
-  talkingPoints: ProductTalkingPoint[];
-  limitations: string[];
-  sources: ProductResearchSource[];
-  suggestedReply: string;
-  suggestedReplyTranslation: string;
-  searchedAt: string;
+  customerEvidenceTranslation: string;
+  handling: string;
+  salesEvidenceMessageId: string;
+  salesEvidenceQuote: string;
+  salesEvidenceTranslation: string;
+  recommendation: string;
 }
 
 export interface ProductMention {
@@ -346,9 +304,7 @@ export interface AnalysisReport {
   summary: string;
   profile: string[];
   emotionProfile: CustomerEmotionProfile;
-  hesitationAnalysis?: HesitationAnalysis;
   productMentions: ProductMention[];
-  productResearch?: ProductResearch;
   stage: SalesStage;
   parallelStages: SalesStage[];
   stageReason: string;
@@ -360,7 +316,7 @@ export interface AnalysisReport {
   defensePoints: DefensePoint[];
   /** @deprecated 仅用于读取升级前保存在浏览器中的旧任务；新分析保持为空数组。 */
   confirmations: ConfirmationItem[];
-  improvements: string[];
+  improvements: CommunicationImprovement[];
   nextActions: string[];
   suggestedReply: string;
   suggestedReplyTranslation: string;

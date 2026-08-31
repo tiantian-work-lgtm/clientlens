@@ -1,4 +1,4 @@
-import type { AnalysisModule, AnalysisReport, BuyingDriver, ConfirmationItem, CustomerEmotionProfile, DealBlocker, DealDecisionMap, HesitationAnalysis, KnowledgeScript, KnowledgeScriptReference, Objection, ProductMention, Provider, SalesStage } from "./types";
+import type { AnalysisModule, AnalysisReport, BuyingDriver, CommunicationImprovement, ConfirmationItem, CustomerEmotionProfile, DealBlocker, DealDecisionMap, KnowledgeScript, KnowledgeScriptReference, Objection, ProductMention, Provider, SalesStage } from "./types";
 import { getRuntimeProviderConfig, type RuntimeProviderConfig } from "./provider-config";
 import { buildNumberedConversationChunks, parseConversationMessages, type ParsedConversationMessage } from "./conversation";
 import { formatScriptKnowledgeContext, recordScriptUsage, retrieveRelevantScripts, toScriptReferences } from "./script-knowledge";
@@ -46,7 +46,7 @@ const customerSchema = {
     emotionProfile: {
       type: "object",
       additionalProperties: false,
-      required: ["currentState", "currentStateEvidence", "emotionTurningPoints", "personalityTraits", "decisionStyle", "decisionFactors", "decisionPace", "advancementConditions", "communicationApproach", "decisionEvidence", "advice", "confidence"],
+      required: ["currentState", "currentStateEvidence", "emotionTurningPoints", "personalitySummary", "personalityTraits", "decisionStyle", "decisionFactors", "decisionPace", "communicationApproach", "decisionEvidence", "confidence"],
       properties: {
         currentState: { type: "string" },
         currentStateEvidence: { type: "array", minItems: 1, maxItems: 3, items: emotionEvidenceSchema() },
@@ -66,13 +66,12 @@ const customerSchema = {
             properties: { trait: { type: "string" }, explanation: { type: "string" }, evidence: { type: "array", minItems: 1, maxItems: 3, items: emotionEvidenceSchema() } },
           },
         },
+        personalitySummary: { type: "string" },
         decisionStyle: { type: "string" },
         decisionFactors: { type: "array", minItems: 1, maxItems: 5, items: { type: "string" } },
         decisionPace: { type: "string" },
-        advancementConditions: { type: "array", minItems: 1, maxItems: 5, items: { type: "string" } },
         communicationApproach: { type: "string" },
         decisionEvidence: { type: "array", minItems: 1, maxItems: 4, items: emotionEvidenceSchema() },
-        advice: { type: "array", minItems: 1, maxItems: 5, items: { type: "string" } },
         confidence: { type: "number", minimum: 0, maximum: 1 },
       },
     },
@@ -219,49 +218,15 @@ const actionSchema = {
   additionalProperties: false,
   required: ["improvements", "nextActions", "suggestedReply", "suggestedReplyTranslation", "knowledgeReferenceIds"],
   properties: {
-    improvements: { type: "array", items: { type: "string" } },
+    improvements: { type: "array", maxItems: 6, items: { type: "object", additionalProperties: false, required: ["title", "priority", "issue", "customerEvidenceMessageId", "customerEvidenceQuote", "customerEvidenceTranslation", "handling", "salesEvidenceMessageId", "salesEvidenceQuote", "salesEvidenceTranslation", "recommendation"], properties: {
+      title: { type: "string" }, priority: { type: "string", enum: ["高", "中", "低"] }, issue: { type: "string" },
+      customerEvidenceMessageId: { type: "string" }, customerEvidenceQuote: { type: "string" }, customerEvidenceTranslation: { type: "string" },
+      handling: { type: "string" }, salesEvidenceMessageId: { type: "string" }, salesEvidenceQuote: { type: "string" }, salesEvidenceTranslation: { type: "string" }, recommendation: { type: "string" },
+    } } },
     nextActions: { type: "array", items: { type: "string" } },
     suggestedReply: { type: "string" },
     suggestedReplyTranslation: { type: "string" },
     knowledgeReferenceIds: { type: "array", items: { type: "string" } },
-  },
-};
-
-const hesitationSchema = {
-  type: "object",
-  additionalProperties: false,
-  required: ["readNoReplyStatus", "readNoReplyReason", "readNoReplyEvidenceMessageId", "readNoReplyEvidenceQuote", "overallCustomerPerspective", "signals", "strategy", "confidence"],
-  properties: {
-    readNoReplyStatus: { type: "string", enum: ["已确认已读未回", "疑似未回复", "未发现", "无法判断"] },
-    readNoReplyReason: { type: "string" },
-    readNoReplyEvidenceMessageId: { type: "string" },
-    readNoReplyEvidenceQuote: { type: "string" },
-    overallCustomerPerspective: { type: "string" },
-    signals: {
-      type: "array",
-      maxItems: 12,
-      items: {
-        type: "object",
-        additionalProperties: false,
-        required: ["title", "kind", "severity", "customerPerspective", "evidenceMessageId", "evidenceQuote", "reasoning", "confidence", "followUpGoal", "followUpTiming", "suggestedMessage", "suggestedMessageTranslation"],
-        properties: {
-          title: { type: "string" },
-          kind: { type: "string", enum: ["明确异议", "延后说辞", "含蓄犹豫", "未回复风险"] },
-          severity: { type: "string", enum: ["高", "中", "低"] },
-          customerPerspective: { type: "string" },
-          evidenceMessageId: { type: "string" },
-          evidenceQuote: { type: "string" },
-          reasoning: { type: "string" },
-          confidence: { type: "number", minimum: 0, maximum: 1 },
-          followUpGoal: { type: "string" },
-          followUpTiming: { type: "string" },
-          suggestedMessage: { type: "string" },
-          suggestedMessageTranslation: { type: "string" },
-        },
-      },
-    },
-    strategy: { type: "array", minItems: 1, maxItems: 6, items: { type: "string" } },
-    confidence: { type: "number", minimum: 0, maximum: 1 },
   },
 };
 
@@ -270,7 +235,7 @@ const commonPrompt = `你是一名严谨的 B2B 销售对话分析师。判断�
 const legacyModulePrompts = {
   customer: `${commonPrompt}\n只分析：对话总结、客户画像、销售阶段和总体置信度。客户画像 profile 必须严格返回 10 项，并按以下顺序和“维度：结论”格式填写：身份与组织、客户类型与经验、核心需求与目标、产品兴趣、决策权与流程、采购意向、价格敏感度、信任状态、核心关注与风险偏好、沟通风格与下一步倾向。每项应尽量具体，但只能依据聊天内容；聊天没有提供的维度必须写“维度：待确认”，禁止用常识补全或虚构。销售阶段只能从七阶段中选择；主阶段取最接近当前成交里程碑的一项，第1至3阶段可以同时放入 parallelStages。`,
   risk: `${commonPrompt}\n只分析异议、犹豫点、风险和确认清单，JSON 根对象只能包含 objections 和 confirmations。异议必须有真实客户原文，禁止“待确认异议1”等占位标题。按消息顺序判断：未正面回答、回避或客户再次追问=未解决；销售正面回答且客户未再追问=未追问-基本解决；销售回答后客户明确认可=客户肯定-完全解决。基本解决引用销售回答，完全解决引用客户后续肯定；沉默、礼貌致谢或话题切换不算肯定。确认清单必须且只返回 10 项：role、seeding、medical、scammed、coa、packaging、company、feedback、logistics、payment_method，禁止返回 education。只有明确顾虑或成交阻碍才能标记 risk，没谈到应标记 unknown。所有 evidenceQuote 必须逐字引用对应 M 编号原文。seeding 必须在需要种草/无需种草中二选一：需要时填写客户改善期望或痛点方向、销售是否已种草、客户是否在种草后明确肯定及下一步建议；已种草必须引用销售原话，客户明确肯定必须引用更晚的客户原话；非 seeding 项的全部 seeding 字段为空。medical 必须在需要提供建议/无需提供建议中二选一：客户提出剂量、用法、不良反应、禁忌、身体状况、疗效预期等需求时判为需要；需要时填写需求方向、是否已解答、客户是否在解答后明确肯定及下一步建议；已解答必须引用销售原话，客户明确肯定必须引用更晚的客户原话。不得仅因为销售没有写“非医疗建议”免责声明或没有建议咨询医生，就判定为未解答、风险或沟通问题；非 medical 项的全部 medical 字段为空。`,
-  action: `${commonPrompt}\n只分析本次沟通可改善之处、下一步行动和建议回复。建议必须具体可执行；suggestedReply 沿用客户语言，suggestedReplyTranslation 返回自然简体中文翻译。不得仅因为销售没有写“非医疗建议”免责声明、没有建议咨询医生，或没有主动介绍副作用与禁忌，就生成改善项；相关改善必须对应客户真实提出但未被回答的问题，或销售原文中明确存在的错误承诺、答非所问或缺乏依据的结论。同类问题只保留一条，避免重复。`,
+  action: `${commonPrompt}\n分析“本次沟通可改善和不足”、下一步行动和建议回复。improvements 最多 6 项，按高、中、低优先级排列并语义去重，每项固定三段：issue 说明发生了什么以及影响；handling 客观总结销售如何处理，未处理必须写“销售尚未处理”；recommendation 说明应该怎么处理。前两段只能依据原始对话，不能使用知识库补充事实；recommendation 可以借鉴话术知识库。客户事实必须引用真实客户消息，销售处理必须引用真实销售消息；没有对应证据的字段返回空字符串，不得虚构。此模块评估销售沟通质量，不重复罗列客户异议，也不在改善项中生成完整回复。suggestedReply 沿用客户语言，suggestedReplyTranslation 返回自然简体中文翻译。不得仅因为销售没有写医疗免责声明或没有建议咨询医生而生成改善项。`,
 };
 
 const scamPromptAddon = `\nscammed（是否有被骗经历）必须在“有被骗经历”和“无被骗经历”中二选一。“无被骗经历”仅表示当前聊天未发现相关表述，不得写成已核实的终身事实。有被骗经历时必须用 evidenceMessageId/Quote 引用客户原话，scamExperienceSummary 概括被骗方式、损失或造成的不信任；scamAddressed 判断销售是否针对该经历回应，已回应时 scamResponseEvidenceMessageId/Quote 必须引用销售原话；scamAccepted 只有客户在回应之后明确认可、接受或信任改善时才可填客户明确肯定，并引用更晚的客户原话；scamAdvice 给出建立信任和降低首次合作风险的具体建议。无被骗经历时这些明细字段返回空字符串。非 scammed 项的全部 scam 字段返回空字符串。`;
@@ -312,21 +277,19 @@ const psychologyStateSchema = {
 
 const psychologyTraitsSchema = {
   type: "object", additionalProperties: false,
-  required: ["personalityTraits"],
-  properties: { personalityTraits: customerSchema.properties.emotionProfile.properties.personalityTraits },
+  required: ["personalitySummary", "personalityTraits"],
+  properties: { personalitySummary: customerSchema.properties.emotionProfile.properties.personalitySummary, personalityTraits: customerSchema.properties.emotionProfile.properties.personalityTraits },
 };
 
 const psychologyDecisionSchema = {
   type: "object", additionalProperties: false,
-  required: ["decisionStyle", "decisionFactors", "decisionPace", "advancementConditions", "communicationApproach", "decisionEvidence", "advice", "confidence"],
+  required: ["decisionStyle", "decisionFactors", "decisionPace", "communicationApproach", "decisionEvidence", "confidence"],
   properties: {
     decisionStyle: customerSchema.properties.emotionProfile.properties.decisionStyle,
     decisionFactors: customerSchema.properties.emotionProfile.properties.decisionFactors,
     decisionPace: customerSchema.properties.emotionProfile.properties.decisionPace,
-    advancementConditions: customerSchema.properties.emotionProfile.properties.advancementConditions,
     communicationApproach: customerSchema.properties.emotionProfile.properties.communicationApproach,
     decisionEvidence: customerSchema.properties.emotionProfile.properties.decisionEvidence,
-    advice: customerSchema.properties.emotionProfile.properties.advice,
     confidence: customerSchema.properties.emotionProfile.properties.confidence,
   },
 };
@@ -353,7 +316,7 @@ const checklistSchema = {
 
 const analysisPrompts: Record<AnalysisModule, string> = {
   customer: `${commonPrompt}\n只返回对话总结、客户画像标签、对话提及产品和销售阶段。profile 由模型根据真实聊天自由提炼为简洁、具体、可独立阅读的画像标签，不预设分类、固定数量、顺序或“分类：内容”格式；应尽可能覆盖聊天中有证据的身份、经验、需求、关注点、信任、价格、决策和沟通特征，使画像足够丰富，通常可提炼 5 至 12 个标签，证据确实较少时允许更少。没有原文依据的特征不得输出，不得为了凑数量重复。productMentions 必须列出聊天中出现的每一个具体产品、多肽或药物并去重。公司名、厂家名、店铺名以及仅代表供应方的品牌名称不得作为产品输出；若商品名本身明确指向一种具体产品或药物，则应按具体产品保留。mentionedBy 判断客户、销售或双方提及；customerAwareness 依据客户原话判断不了解、初步了解、有使用经验、明确熟悉或无法判断；customerInterest 判断明确感兴趣、可能感兴趣、未表现兴趣、明确拒绝或无法判断；awarenessReason 说明判断依据。evidenceMessageId 和 evidenceQuote 必须引用包含该产品名或能直接证明客户了解程度的真实消息编号及逐字原文。仅由销售提及而客户未回应时，客户了解程度和兴趣必须填无法判断。stage 只能使用规定七阶段，第一至三阶段可并行。`,
-  psychology: `${commonPrompt}\n只返回 emotionProfile，并严格按 JSON 示例字段输出。\n1. currentState 将客户当前情绪与可从表达观察到的心理状态合并成一段结论；不要诊断疾病、人格障碍或贴 MBTI 标签。currentStateEvidence 必须给出支持结论的真实客户消息。\n2. emotionTurningPoints 按聊天先后顺序提取真正发生变化的 0-8 个情绪转折点。score 只能为 -2 到 2（-2明显消极、-1偏消极、0中性、1偏积极、2明显积极）；label 是简短情绪标签，reason 说明这句话及上下文为什么构成转折。没有明显转折时返回 []，不得为了画图虚构转折。\n3. personalityTraits 只写沟通性格倾向，每项包含 trait、explanation 和自己的 evidence；不再输出敏感点或防御/回避模式。\n4. decisionStyle 总结决策方式；decisionFactors 写主要考虑因素；decisionPace 写决策节奏；advancementConditions 写继续推进所需条件；communicationApproach 写适合的沟通方式；decisionEvidence 必须直接支撑这些判断。\n5. 每一条 evidence 必须引用真实客户消息的 M 编号与逐字原文 quote，并提供忠实中文 translation 和 interpretation。禁止改写原话、拼接不同消息或引用销售消息。信息不足时明确说明并降低 confidence，不能用常识补全。advice 给出尊重客户自主决定、可执行且不操纵的沟通建议。`,
+  psychology: `${commonPrompt}\n只返回 emotionProfile，并严格按 JSON 示例字段输出。\n1. currentState 将客户当前情绪与可从表达观察到的心理状态合并成一段结论；不要诊断疾病、人格障碍或贴 MBTI 标签。currentStateEvidence 必须给出支持结论的真实客户消息。\n2. emotionTurningPoints 按聊天先后顺序提取真正发生变化的 0-8 个情绪转折点。score 只能为 -2 到 2；label 是简短情绪标签，reason 说明转折原因。没有明显转折时返回 []，不得虚构。\n3. personalitySummary 用一句自然中文概括全部可观察沟通性格；personalityTraits 再列具体倾向，每项包含 trait、explanation 和自己的 evidence；不输出敏感点或防御/回避模式。\n4. decisionStyle 总结决策方式；decisionFactors 写主要考虑因素；decisionPace 写决策节奏；communicationApproach 写适合的沟通方式；decisionEvidence 必须直接支撑判断。\n5. 每条 evidence 必须引用真实客户消息的 M 编号与逐字原文，并提供忠实中文翻译和解释。禁止改写、拼接或引用销售消息。信息不足时明确说明并降低 confidence。`,
   objections: `${commonPrompt}\n只返回 objections。仅保留有客户逐字原文证据的明确异议或犹豫，禁止占位标题。未正面回答或客户再次追问=未解决；销售正面回答且客户未再追问=未追问-基本解决；销售回答后客户明确认可=客户肯定-完全解决。解决证据必须发生在异议之后；沉默、礼貌致谢和话题切换不算肯定。`,
   checklist: `${commonPrompt}\n业务上只返回 decisionMap（成交决策地图），禁止返回 offensePoints、defensePoints、confirmations 或独立 objections。它只回答：客户为什么想买、为什么还没买、当前最需要解决什么。\nbuyingDrivers 只保留真正推动购买的核心原因，最多3项；相同目标、需求、购买意向、直接货源诉求必须语义合并，禁止拆成近义卡片。每项必须由客户原文支撑，并区分想获得的结果、痛点或期望、驱动力强度、购买意愿和推动成交的原因。\nblockers 合并所有明确异议、产品疑问、价格预算、质量COA、公司信任、包装交付、物流、支付、决策时机和内部审批问题。一个语义问题只输出一次。客户疑问即使代表兴趣，只要尚未解决并可能阻碍决定，就只能进入 blockers，不能同时进入 buyingDrivers。\nhandlingStatus 严格按消息顺序判断：没有销售正面处理或客户再次追问=未解决；销售正面处理后客户未再追问=已回答-客户未追问；销售处理后客户明确认可=客户明确认可。礼貌致谢、沉默和换话题不算明确认可。销售处理存在时必须提供更晚的销售原文；客户明确认可时还必须提供销售处理之后的客户认可原文。不存在的销售处理或认可证据字段全部返回空字符串。\n每个 driver 和 blocker 都必须引用一个可核验客户 M 编号及逐字原文和忠实中文翻译，禁止拼接、改写或虚构。decisionMap 顶部给出总体下单动力、最大阻力、成交准备度和一句首要任务。这里只输出诊断和解决方向，不生成完整回复话术；完整回复属于 action 模块。`,
   action: `${legacyModulePrompts.action}\n如果提供了话术知识库资料，应优先借鉴与当前客户问题直接相关的表达和销售思路，但不能照搬不适用于当前客户的事实。knowledgeReferenceIds 只返回实际用于 suggestedReply 的话术 ID；没有使用时返回 []，禁止编造 ID。`,
@@ -373,7 +336,7 @@ export interface PsychologyModuleResult { emotionProfile: CustomerEmotionProfile
 export interface ObjectionsModuleResult { objections: Objection[] }
 export interface ChecklistModuleResult { decisionMap: DealDecisionMap }
 interface RiskModuleResult { objections: Objection[]; confirmations: ConfirmationItem[] }
-export interface ActionModuleResult { improvements: string[]; nextActions: string[]; suggestedReply: string; suggestedReplyTranslation: string; knowledgeReferenceIds: string[]; knowledgeReferences?: KnowledgeScriptReference[] }
+export interface ActionModuleResult { improvements: CommunicationImprovement[]; nextActions: string[]; suggestedReply: string; suggestedReplyTranslation: string; knowledgeReferenceIds: string[]; knowledgeReferences?: KnowledgeScriptReference[] }
 export type AnalysisModuleResult = CustomerModuleResult | PsychologyModuleResult | ObjectionsModuleResult | ChecklistModuleResult | ActionModuleResult;
 
 interface ChecklistModelResult { decisionMap: DealDecisionMap }
@@ -525,13 +488,12 @@ function deepSeekJsonExample(module: AnalysisModule): Record<string, unknown> {
       currentStateEvidence: [{ messageId: "M00001", quote: "必须替换成该客户消息中的逐字原文", translation: "逐字原文的忠实中文翻译", interpretation: "说明如何支持当前状态判断" }],
       emotionTurningPoints: [{ messageId: "M00001", quote: "必须替换成该客户消息中的逐字原文", translation: "逐字原文的忠实中文翻译", interpretation: "解释情绪含义", label: "谨慎", score: -1, reason: "说明该处为什么构成情绪转折" }],
       personalityTraits: [{ trait: "证据导向", explanation: "使用限定语说明该沟通倾向", evidence: [{ messageId: "M00001", quote: "必须替换成该客户消息中的逐字原文", translation: "逐字原文的忠实中文翻译", interpretation: "说明如何支持该倾向" }] }],
+      personalitySummary: "客户表达直接、重视证据，倾向核实关键信息后再决定。",
       decisionStyle: "概括客户的决策方式",
       decisionFactors: ["有原文依据的主要考虑因素"],
       decisionPace: "描述客户的决策节奏",
-      advancementConditions: ["继续推进所需的条件"],
       communicationApproach: "适合当前客户的沟通方式",
       decisionEvidence: [{ messageId: "M00001", quote: "必须替换成该客户消息中的逐字原文", translation: "逐字原文的忠实中文翻译", interpretation: "说明如何支持决策判断" }],
-      advice: ["尊重客户自主决定的可执行沟通建议"],
       confidence: 0.8,
     },
   };
@@ -544,7 +506,7 @@ function deepSeekJsonExample(module: AnalysisModule): Record<string, unknown> {
     },
   };
   return {
-    improvements: ["结合真实对话指出一项可改善之处"],
+    improvements: [{ title: "未直接回应关键问题", priority: "高", issue: "客户提出关键问题，但回复未正面覆盖，可能降低沟通效率。", customerEvidenceMessageId: "M00001", customerEvidenceQuote: "客户逐字原文", customerEvidenceTranslation: "忠实中文翻译", handling: "销售尚未处理", salesEvidenceMessageId: "", salesEvidenceQuote: "", salesEvidenceTranslation: "", recommendation: "先直接回答问题，再补充必要背景。" }],
     nextActions: ["结合当前进度给出一项明确行动"],
     suggestedReply: "A natural reply in the customer's language.",
     suggestedReplyTranslation: "上一条建议回复的自然简体中文翻译。",
@@ -786,24 +748,22 @@ function requireRawModuleResult(module: AnalysisModule, value: unknown, messages
   if (module === "psychology") {
     const emotion = raw.emotionProfile && typeof raw.emotionProfile === "object" && !Array.isArray(raw.emotionProfile)
       ? raw.emotionProfile as Record<string, unknown> : {};
-    const requiredStrings = ["currentState", "decisionStyle", "decisionPace", "communicationApproach"];
-    const requiredLists = ["currentStateEvidence", "emotionTurningPoints", "personalityTraits", "decisionFactors", "advancementConditions", "decisionEvidence", "advice"];
-    const stringLists = ["decisionFactors", "advancementConditions", "advice"];
+    const requiredStrings = ["currentState", "personalitySummary", "decisionStyle", "decisionPace", "communicationApproach"];
+    const requiredLists = ["currentStateEvidence", "emotionTurningPoints", "personalityTraits", "decisionFactors", "decisionEvidence"];
+    const stringLists = ["decisionFactors"];
     const objectLists = ["currentStateEvidence", "emotionTurningPoints", "personalityTraits", "decisionEvidence"];
     const stringsComplete = requiredStrings.every((key) => typeof emotion[key] === "string" && Boolean((emotion[key] as string).trim()));
     const listsComplete = requiredLists.every((key) => Array.isArray(emotion[key]));
     const stringListsValid = stringLists.every((key) => !Array.isArray(emotion[key]) || (emotion[key] as unknown[]).every((item) => typeof item === "string" && Boolean(item.trim())));
     const objectListsValid = objectLists.every((key) => !Array.isArray(emotion[key]) || (emotion[key] as unknown[]).every((item) => Boolean(item) && typeof item === "object" && !Array.isArray(item)));
-    const advicePresent = Array.isArray(emotion.advice) && emotion.advice.length > 0;
     const missingFields = [
       ...requiredStrings.filter((key) => typeof emotion[key] !== "string" || !(emotion[key] as string).trim()),
       ...requiredLists.filter((key) => !Array.isArray(emotion[key])),
       ...(!stringListsValid ? ["字符串数组内容"] : []),
       ...(!objectListsValid ? ["依据对象数组内容"] : []),
-      ...(!advicePresent ? ["advice"] : []),
       ...(!Number.isFinite(Number(emotion.confidence)) ? ["confidence"] : []),
     ];
-    if (!stringsComplete || !listsComplete || !stringListsValid || !objectListsValid || !advicePresent || !Number.isFinite(Number(emotion.confidence))) {
+    if (!stringsComplete || !listsComplete || !stringListsValid || !objectListsValid || !Number.isFinite(Number(emotion.confidence))) {
       throw new Error(`客户情绪与沟通性格模块字段不完整（缺失或格式错误：${[...new Set(missingFields)].join("、")}）`);
     }
     if (messages.some((message) => message.role === "customer") && (emotion.currentStateEvidence as unknown[]).length === 0) {
@@ -820,7 +780,7 @@ function requireRawModuleResult(module: AnalysisModule, value: unknown, messages
     if (!decisionMap || !Array.isArray(decisionMap.buyingDrivers) || !Array.isArray(decisionMap.blockers)) throw new Error("成交决策地图字段不完整");
     return;
   }
-  const improvements = Array.isArray(raw.improvements) ? raw.improvements.filter((item) => typeof item === "string" && item.trim()) : [];
+  const improvements = Array.isArray(raw.improvements) ? raw.improvements.filter((item) => item && typeof item === "object" && !Array.isArray(item)) : [];
   const nextActions = Array.isArray(raw.nextActions) ? raw.nextActions.filter((item) => typeof item === "string" && item.trim()) : [];
   if (!improvements.length || !nextActions.length || typeof raw.suggestedReply !== "string" || !raw.suggestedReply.trim() || typeof raw.suggestedReplyTranslation !== "string" || !raw.suggestedReplyTranslation.trim() || !Array.isArray(raw.knowledgeReferenceIds)) {
     throw new Error("行动建议模块字段不完整");
@@ -891,10 +851,9 @@ function normalizePsychologyResult(value: unknown, messages: ParsedConversationM
     decisionStyle: typeof raw.decisionStyle === "string" && raw.decisionStyle.trim() ? raw.decisionStyle.trim() : "信息不足，暂无法判断决策方式",
     decisionFactors: cleanStringArray(raw.decisionFactors),
     decisionPace: typeof raw.decisionPace === "string" && raw.decisionPace.trim() ? raw.decisionPace.trim() : "信息不足",
-    advancementConditions: cleanStringArray(raw.advancementConditions),
     communicationApproach: typeof raw.communicationApproach === "string" && raw.communicationApproach.trim() ? raw.communicationApproach.trim() : "继续通过开放式问题确认客户的决策条件。",
     decisionEvidence,
-    advice: cleanStringArray(raw.advice, ["继续观察客户表达，并通过开放式问题确认其真实关注点。"]),
+    personalitySummary: typeof raw.personalitySummary === "string" && raw.personalitySummary.trim() ? raw.personalitySummary.trim() : personalityTraits.map((item) => item.trait).join("、") || "当前信息不足以概括沟通性格倾向。",
     confidence: currentStateEvidence.length && Number.isFinite(confidence) ? Math.min(1, Math.max(0, confidence)) : Math.min(Number.isFinite(confidence) ? confidence : 0.2, 0.35),
   } };
 }
@@ -1007,7 +966,7 @@ function validateLegacyModuleResult(module: "customer" | "risk" | "action", valu
     if (result.profile.some((item, index) => !new RegExp(`^${profileDimensions[index]}[：:]`).test(item?.trim()))) throw new Error("客户画像维度缺失或顺序不正确");
     const emotion = result.emotionProfile;
     if (!emotion?.currentState?.trim() || !emotion.decisionStyle?.trim() || !emotion.decisionPace?.trim() || !emotion.communicationApproach?.trim() || !Number.isFinite(emotion.confidence)) throw new Error("客户情绪、沟通性格与心理研判字段不完整");
-    if (!Array.isArray(emotion.personalityTraits) || !Array.isArray(emotion.emotionTurningPoints) || !Array.isArray(emotion.decisionFactors) || !Array.isArray(emotion.advancementConditions) || !Array.isArray(emotion.advice) || !emotion.advice.length || !Array.isArray(emotion.currentStateEvidence) || !Array.isArray(emotion.decisionEvidence)) throw new Error("客户情绪与沟通性格分析缺少必要数组或建议");
+    if (!emotion.personalitySummary?.trim() || !Array.isArray(emotion.personalityTraits) || !Array.isArray(emotion.emotionTurningPoints) || !Array.isArray(emotion.decisionFactors) || !Array.isArray(emotion.currentStateEvidence) || !Array.isArray(emotion.decisionEvidence)) throw new Error("客户情绪与沟通性格分析缺少必要字段");
     const customerMessageById = new Map(messages.filter((message) => message.role === "customer").map((message) => [message.id, message]));
     const allEvidence = [...emotion.currentStateEvidence, ...emotion.emotionTurningPoints, ...emotion.personalityTraits.flatMap((item) => item.evidence), ...emotion.decisionEvidence];
     if (customerMessageById.size && !allEvidence.length) throw new Error("客户情绪与沟通性格分析缺少客户原文依据");
@@ -1154,8 +1113,26 @@ function normalizeModuleResult(module: AnalysisModule, value: unknown, messages:
   if (module === "objections") return normalizeObjectionsResult(value, messages);
   if (module === "checklist") return normalizeChecklistResult(value, messages);
   const raw = value && typeof value === "object" ? value as Partial<ActionModuleResult> : {};
+  const messageById = new Map(messages.map((message) => [message.id, message]));
+  const priorityRank = { "高": 0, "中": 1, "低": 2 } as const;
+  const improvements: CommunicationImprovement[] = (Array.isArray(raw.improvements) ? raw.improvements : []).flatMap((candidate) => {
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return [];
+    const item = candidate as unknown as Record<string, unknown>;
+    const title = typeof item.title === "string" ? item.title.trim() : "";
+    const issue = typeof item.issue === "string" ? item.issue.trim() : "";
+    const recommendation = typeof item.recommendation === "string" ? item.recommendation.trim() : "";
+    if (!title || !issue || !recommendation) return [];
+    const customerEvidenceMessageId = typeof item.customerEvidenceMessageId === "string" ? item.customerEvidenceMessageId : "";
+    const customerEvidenceQuote = typeof item.customerEvidenceQuote === "string" ? item.customerEvidenceQuote : "";
+    const salesEvidenceMessageId = typeof item.salesEvidenceMessageId === "string" ? item.salesEvidenceMessageId : "";
+    const salesEvidenceQuote = typeof item.salesEvidenceQuote === "string" ? item.salesEvidenceQuote : "";
+    if (customerEvidenceMessageId && (messageById.get(customerEvidenceMessageId)?.role !== "customer" || !hasVerifiedEvidence(messageById, customerEvidenceMessageId, customerEvidenceQuote))) return [];
+    if (salesEvidenceMessageId && (messageById.get(salesEvidenceMessageId)?.role !== "sales" || !hasVerifiedEvidence(messageById, salesEvidenceMessageId, salesEvidenceQuote))) return [];
+    const priority: CommunicationImprovement["priority"] = item.priority === "高" || item.priority === "低" ? item.priority : "中";
+    return [{ title, priority, issue, customerEvidenceMessageId, customerEvidenceQuote, customerEvidenceTranslation: typeof item.customerEvidenceTranslation === "string" ? item.customerEvidenceTranslation.trim() : "", handling: typeof item.handling === "string" && item.handling.trim() ? item.handling.trim() : "销售尚未处理", salesEvidenceMessageId, salesEvidenceQuote, salesEvidenceTranslation: typeof item.salesEvidenceTranslation === "string" ? item.salesEvidenceTranslation.trim() : "", recommendation }];
+  }).filter((item, index, all) => all.findIndex((other) => other.title === item.title) === index).sort((a, b) => priorityRank[a.priority] - priorityRank[b.priority]).slice(0, 6);
   return {
-    improvements: cleanStringArray(raw.improvements, ["继续结合客户原话检查本次沟通是否直接回答了问题。"]),
+    improvements,
     nextActions: cleanStringArray(raw.nextActions, ["先确认客户当前最关心的问题，再推进一个明确的下一步。"]),
     suggestedReply: raw.suggestedReply?.trim() || "Could you tell me which point you would like to confirm first?",
     suggestedReplyTranslation: raw.suggestedReplyTranslation?.trim() || "您可以告诉我，您想先确认哪一点吗？",
@@ -1176,13 +1153,14 @@ async function requestDeepSeekPsychologyParts(config: RuntimeProviderConfig, inp
       currentStateEvidence: [{ messageId: "M00001", quote: "客户逐字原文", translation: "忠实中文翻译", interpretation: "如何支持当前状态" }],
       emotionTurningPoints: [{ messageId: "M00001", quote: "客户逐字原文", translation: "忠实中文翻译", interpretation: "该处情绪含义", label: "谨慎", score: -1, reason: "为什么构成转折" }],
     }, "分析当前情绪和心理状态，并按聊天先后提取 0-8 个真正的情绪转折。score 限定 -2 到 2。没有明显转折时返回空数组，不得为了画图虚构转折。", 2600),
-    requestPart<Pick<CustomerEmotionProfile, "personalityTraits">>(psychologyTraitsSchema, {
+    requestPart<Pick<CustomerEmotionProfile, "personalitySummary" | "personalityTraits">>(psychologyTraitsSchema, {
+      personalitySummary: "客户表达直接、重视证据，倾向核实关键信息后再决定。",
       personalityTraits: [{ trait: "证据导向", explanation: "带有限定语的沟通性格倾向", evidence: [{ messageId: "M00001", quote: "客户逐字原文", translation: "忠实中文翻译", interpretation: "如何支持该倾向" }] }],
-    }, "只分析沟通性格倾向。每项分别给出 trait、explanation 和自己的原文 evidence；不输出敏感点、防御模式、疾病或人格障碍诊断。", 2200),
-    requestPart<Pick<CustomerEmotionProfile, "decisionStyle" | "decisionFactors" | "decisionPace" | "advancementConditions" | "communicationApproach" | "decisionEvidence" | "advice" | "confidence">>(psychologyDecisionSchema, {
-      decisionStyle: "概括决策方式", decisionFactors: ["主要考虑因素"], decisionPace: "决策节奏", advancementConditions: ["推进条件"], communicationApproach: "建议沟通方式",
-      decisionEvidence: [{ messageId: "M00001", quote: "客户逐字原文", translation: "忠实中文翻译", interpretation: "如何支持决策判断" }], advice: ["可执行建议"], confidence: 0.8,
-    }, "分析客户如何决策、主要考虑因素、节奏、推进条件和适合的沟通方式。建议必须尊重客户自主决定且不可操纵。", 2400),
+    }, "只分析沟通性格倾向。personalitySummary 用一句话综合概括；每项分别给出 trait、explanation 和自己的原文 evidence；不输出敏感点、防御模式、疾病或人格障碍诊断。", 2200),
+    requestPart<Pick<CustomerEmotionProfile, "decisionStyle" | "decisionFactors" | "decisionPace" | "communicationApproach" | "decisionEvidence" | "confidence">>(psychologyDecisionSchema, {
+      decisionStyle: "概括决策方式", decisionFactors: ["主要考虑因素"], decisionPace: "决策节奏", communicationApproach: "建议沟通方式",
+      decisionEvidence: [{ messageId: "M00001", quote: "客户逐字原文", translation: "忠实中文翻译", interpretation: "如何支持决策判断" }], confidence: 0.8,
+    }, "分析客户如何决策、主要考虑因素、节奏和适合的沟通方式。", 2200),
   ]);
 
   return { emotionProfile: { ...state, ...traits, ...decision } };
@@ -1257,108 +1235,6 @@ export async function analyzeWithProvider(provider: Provider, conversation: stri
   const checklist = results[2] as ChecklistModuleResult;
   const action = results[3] as ActionModuleResult;
   return { ...customer, ...psychology, ...checklist, ...action, objections: [], offensePoints: [], defensePoints: [], confirmations: [], knowledgeReferences: action.knowledgeReferences ?? [] };
-}
-
-type HesitationModelResult = Omit<HesitationAnalysis, "analyzedAt">;
-
-const hesitationJsonExample: HesitationModelResult = {
-  readNoReplyStatus: "无法判断",
-  readNoReplyReason: "根据真实聊天说明是否存在已读未回或末条销售消息未获回复",
-  readNoReplyEvidenceMessageId: "",
-  readNoReplyEvidenceQuote: "",
-  overallCustomerPerspective: "站在客户视角总结其可能如何看待整段沟通，并区分事实与推断",
-  signals: [{
-    title: "根据客户原文概括的具体犹豫点",
-    kind: "含蓄犹豫",
-    severity: "中",
-    customerPerspective: "使用限定语说明客户可能如何看待该问题",
-    evidenceMessageId: "M00001",
-    evidenceQuote: "必须替换为该编号消息中的客户逐字原文",
-    reasoning: "解释原文为什么可能阻碍当前推进",
-    confidence: 0.7,
-    followUpGoal: "说明下一次跟进要解决的具体问题",
-    followUpTiming: "根据聊天节奏给出建议时机",
-    suggestedMessage: "A natural follow-up message in the customer's language.",
-    suggestedMessageTranslation: "上一条跟进消息的自然简体中文翻译。",
-  }],
-  strategy: ["根据真实聊天中影响最大的具体问题安排第一步跟进"],
-  confidence: 0.5,
-};
-
-const hesitationInstruction = `${commonPrompt}
-这是一次用户主动触发的深度复盘，不属于首次常规分析。请按消息顺序细看完整对话，并站在客户视角识别：明确异议、延后说辞、含蓄犹豫和未回复风险。延后说辞包括“稍后看看”“研究后回复”“之后再说”等推迟决策表达；含蓄犹豫只能作为有证据的可能性推断，禁止声称读懂客户内心或把推断写成事实。
-每个 signals 项必须引用一条真实消息的 M 编号及逐字原文，解释为什么该表达可能阻碍推进，并分别给出跟进目标、建议时机、可直接发送的客户语言消息及自然简体中文翻译。没有原文依据的点必须删除，不得为追求数量而虚构。
-readNoReplyStatus 只有输入明确包含已读标记时才能写“已确认已读未回”；若最后一条关键销售消息之后没有客户回复但没有已读标记，只能写“疑似未回复”；若后续已有客户回复则不能把此前普通等待误判为当前未回复。礼貌感谢、普通询价和正常考虑不自动等于拒绝。
-overallCustomerPerspective 要总结客户此刻可能如何看待整个沟通过程，并明确区分事实与推断。strategy 提供多点跟进顺序，优先解决高影响问题，避免连续轰炸、施压和重复发送相同内容。只输出符合字段要求的合法 JSON。`;
-
-function validateHesitationResult(result: HesitationModelResult, messages: ParsedConversationMessage[], conversation: string, final: boolean) {
-  const missing: string[] = [];
-  if (!result?.readNoReplyStatus) missing.push("readNoReplyStatus");
-  if (!result?.readNoReplyReason?.trim()) missing.push("readNoReplyReason");
-  if (typeof result?.readNoReplyEvidenceMessageId !== "string") missing.push("readNoReplyEvidenceMessageId");
-  if (typeof result?.readNoReplyEvidenceQuote !== "string") missing.push("readNoReplyEvidenceQuote");
-  if (!result?.overallCustomerPerspective?.trim()) missing.push("overallCustomerPerspective");
-  if (!Array.isArray(result?.signals)) missing.push("signals");
-  if (!Array.isArray(result?.strategy) || !result.strategy.length) missing.push("strategy");
-  if (!Number.isFinite(result?.confidence)) missing.push("confidence");
-  if (missing.length) throw new Error(`深度犹豫分析字段不完整：缺少 ${missing.join("、")}`);
-  const messageById = new Map(messages.map((message) => [message.id, message]));
-  const titles = new Set<string>();
-  for (const signal of result.signals) {
-    if (!signal.title?.trim() || titles.has(signal.title.trim()) || !signal.customerPerspective?.trim() || !signal.reasoning?.trim() || !signal.followUpGoal?.trim() || !signal.followUpTiming?.trim() || !signal.suggestedMessage?.trim() || !signal.suggestedMessageTranslation?.trim() || !Number.isFinite(signal.confidence)) throw new Error("深度犹豫分析包含重复或不完整的判断");
-    titles.add(signal.title.trim());
-    const evidenceMessage = messageById.get(signal.evidenceMessageId);
-    if (!evidenceMessage || !hasVerifiedEvidence(messageById, signal.evidenceMessageId, signal.evidenceQuote)) throw new Error("深度犹豫分析包含无法核验的原文");
-    if (signal.kind !== "未回复风险" && evidenceMessage.role !== "customer") throw new Error("客户异议或犹豫必须引用客户原文");
-    if (signal.kind === "未回复风险") {
-      const evidenceIndex = messages.findIndex((message) => message.id === signal.evidenceMessageId);
-      if (evidenceMessage.role !== "sales" || (final && messages.slice(evidenceIndex + 1).some((message) => message.role === "customer"))) throw new Error("未回复风险必须引用尚无客户后续回复的销售消息");
-    }
-  }
-  if (!final) return result;
-  if (result.readNoReplyStatus === "已确认已读未回" && !/(?:已读|\bseen\b|read\s*(?:at|receipt|status))/i.test(conversation)) throw new Error("聊天记录没有明确已读标记，不能判断已确认已读未回");
-  if (result.readNoReplyStatus === "已确认已读未回" || result.readNoReplyStatus === "疑似未回复") {
-    const evidenceMessage = messageById.get(result.readNoReplyEvidenceMessageId);
-    const evidenceIndex = messages.findIndex((message) => message.id === result.readNoReplyEvidenceMessageId);
-    if (evidenceMessage?.role !== "sales" || !hasVerifiedEvidence(messageById, result.readNoReplyEvidenceMessageId, result.readNoReplyEvidenceQuote) || messages.slice(evidenceIndex + 1).some((message) => message.role === "customer")) throw new Error("未回复判断缺少最后一条未获客户回复的销售原文");
-  }
-  return result;
-}
-
-async function requestHesitationOnce(config: RuntimeProviderConfig, provider: Provider, input: string, merge = false) {
-  const instructions = `${hesitationInstruction}${merge ? "\n下面是按时间顺序排列的分段分析及对话尾部，请去重、校正跨分段误判并合并为最终结果。保留真实消息编号与原文。" : ""}`;
-  if (provider === "openai") return requestOpenAIJson<HesitationModelResult>(config, hesitationSchema, "deep_hesitation_analysis", instructions, input);
-  const schema = JSON.stringify(hesitationSchema);
-  const example = JSON.stringify(hesitationJsonExample);
-  return requestDeepSeekJson<HesitationModelResult>(config, [{
-    role: "system",
-    content: `${instructions}\n必须严格按照下面的 JSON Schema 返回根对象，字段名、嵌套层级和枚举值不可改名或遗漏。没有识别到有效 signals 时返回 []，没有可核验的未回复证据时，相关消息编号和原文返回空字符串。只输出一个可由 JSON.parse 解析的 JSON 对象，不输出 Markdown。\nJSON Schema:\n${schema}\n合法 JSON 格式示例：\n${example}\n示例只展示格式，不代表当前客户事实；必须根据本次聊天生成，禁止照抄示例判断。`,
-  }, { role: "user", content: input }], 6000);
-}
-
-export async function analyzeHesitationWithProvider(provider: Provider, conversation: string): Promise<HesitationAnalysis | null> {
-  const config = await getRuntimeProviderConfig(provider);
-  if (!config) return null;
-  const messages = parseConversationMessages(conversation);
-  const chunks = buildNumberedConversationChunks(conversation);
-  let lastError: unknown;
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    try {
-      const previousError = lastError instanceof Error ? lastError.message : "字段、原文或消息顺序核验未通过";
-      const retryPrefix = attempt ? `上一次结果失败，具体原因：${previousError}。请严格依据 JSON Schema 修正；删除无法核验的推断，并区分事实、疑似与无法判断。\n\n` : "";
-      const chunkResults: HesitationModelResult[] = [];
-      for (const chunk of chunks) {
-        const result = await requestHesitationOnce(config, provider, `${retryPrefix}${chunk}`);
-        chunkResults.push(validateHesitationResult(result, messages, conversation, chunks.length === 1));
-      }
-      const merged = chunks.length === 1 ? chunkResults[0] : await requestHesitationOnce(config, provider, JSON.stringify({ chunkResults, conversationTail: chunks.at(-1) }), true);
-      const validated = validateHesitationResult(merged, messages, conversation, true);
-      return { ...validated, analyzedAt: new Date().toISOString() };
-    } catch (error) {
-      lastError = error;
-    }
-  }
-  throw lastError instanceof Error ? lastError : new Error("深度犹豫分析失败");
 }
 
 export interface BilingualSuggestion {
