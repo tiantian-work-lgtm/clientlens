@@ -21,6 +21,20 @@ const productMentionsProperty = {
   },
 };
 
+function emotionEvidenceSchema() {
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: ["messageId", "quote", "translation", "interpretation"],
+    properties: {
+      messageId: { type: "string" },
+      quote: { type: "string" },
+      translation: { type: "string" },
+      interpretation: { type: "string" },
+    },
+  } as const;
+}
+
 const customerSchema = {
   type: "object",
   additionalProperties: false,
@@ -32,32 +46,32 @@ const customerSchema = {
     emotionProfile: {
       type: "object",
       additionalProperties: false,
-      required: ["currentEmotion", "emotionTrend", "personalityTraits", "decisionStyle", "sensitivities", "psychologicalState", "coreMotivations", "trustNeeds", "defensePatterns", "pressureResponse", "evidence", "advice", "confidence"],
+      required: ["currentState", "currentStateEvidence", "emotionTurningPoints", "personalityTraits", "decisionStyle", "decisionFactors", "decisionPace", "advancementConditions", "communicationApproach", "decisionEvidence", "advice", "confidence"],
       properties: {
-        currentEmotion: { type: "string" },
-        emotionTrend: { type: "string" },
-        personalityTraits: { type: "array", minItems: 1, maxItems: 5, items: { type: "string" } },
-        decisionStyle: { type: "string" },
-        sensitivities: { type: "array", minItems: 1, maxItems: 5, items: { type: "string" } },
-        psychologicalState: { type: "string" },
-        coreMotivations: { type: "array", minItems: 1, maxItems: 5, items: { type: "string" } },
-        trustNeeds: { type: "array", minItems: 1, maxItems: 5, items: { type: "string" } },
-        defensePatterns: { type: "array", minItems: 1, maxItems: 5, items: { type: "string" } },
-        pressureResponse: { type: "string" },
-        evidence: {
-          type: "array",
-          maxItems: 5,
+        currentState: { type: "string" },
+        currentStateEvidence: { type: "array", minItems: 1, maxItems: 3, items: emotionEvidenceSchema() },
+        emotionTurningPoints: {
+          type: "array", minItems: 1, maxItems: 8,
           items: {
-            type: "object",
-            additionalProperties: false,
-            required: ["messageId", "quote", "interpretation"],
-            properties: {
-              messageId: { type: "string" },
-              quote: { type: "string" },
-              interpretation: { type: "string" },
-            },
+            type: "object", additionalProperties: false,
+            required: ["messageId", "quote", "translation", "interpretation", "label", "score", "reason"],
+            properties: { ...emotionEvidenceSchema().properties, label: { type: "string" }, score: { type: "number", minimum: -2, maximum: 2 }, reason: { type: "string" } },
           },
         },
+        personalityTraits: {
+          type: "array", minItems: 1, maxItems: 5,
+          items: {
+            type: "object", additionalProperties: false,
+            required: ["trait", "explanation", "evidence"],
+            properties: { trait: { type: "string" }, explanation: { type: "string" }, evidence: { type: "array", minItems: 1, maxItems: 3, items: emotionEvidenceSchema() } },
+          },
+        },
+        decisionStyle: { type: "string" },
+        decisionFactors: { type: "array", minItems: 1, maxItems: 5, items: { type: "string" } },
+        decisionPace: { type: "string" },
+        advancementConditions: { type: "array", minItems: 1, maxItems: 5, items: { type: "string" } },
+        communicationApproach: { type: "string" },
+        decisionEvidence: { type: "array", minItems: 1, maxItems: 4, items: emotionEvidenceSchema() },
         advice: { type: "array", minItems: 1, maxItems: 5, items: { type: "string" } },
         confidence: { type: "number", minimum: 0, maximum: 1 },
       },
@@ -254,7 +268,7 @@ const hesitationSchema = {
 const commonPrompt = `你是一名严谨的 B2B 销售对话分析师。判断与事实必须分开，不确定的信息不能当成事实。输入中的每条消息都有稳定编号 M00001 等。不得虚构消息、客户背景、公司资料或公开背调信息。所有分析字段使用中文。`;
 
 const legacyModulePrompts = {
-  customer: `${commonPrompt}\n只分析：对话总结、客户画像、客户情绪、沟通性格与非临床心理研判、销售阶段和总体置信度。客户画像 profile 必须严格返回 10 项，并按以下顺序和“维度：结论”格式填写：身份与组织、客户类型与经验、核心需求与目标、产品兴趣、决策权与流程、采购意向、价格敏感度、信任状态、核心关注与风险偏好、沟通风格与下一步倾向。每项应尽量具体，但只能依据聊天内容；聊天没有提供的维度必须写“维度：待确认”，禁止用常识补全或虚构。emotionProfile 只依据对话进行沟通场景下的心理研判，不得诊断精神疾病、人格障碍或贴 MBTI 等标签，也不得把短期状态写成永久人格。currentEmotion 写当前情绪，emotionTrend 写变化；personalityTraits 写有限定语的沟通性格倾向；decisionStyle 写决策方式；sensitivities 写容易产生防御的沟通点；psychologicalState 写当前心理状态及不确定性；coreMotivations 写推动其行动的核心动机；trustNeeds 写建立信任所需条件；defensePatterns 写受到压力或不确定性时可观察到的防御或回避模式；pressureResponse 写客户面对催促、风险或信息过载时可能的反应。所有心理判断必须使用“可能、倾向、从当前表达看”等措辞，并由 evidence 中真实客户原文支持；不得推断创伤、家庭、疾病、隐私属性或操纵弱点。证据不足时写信息不足并降低 confidence；advice 提供尊重自主决定、可执行且不操纵客户的沟通建议。销售阶段只能从七阶段中选择；主阶段取最接近当前成交里程碑的一项，第1至3阶段可以同时放入 parallelStages。`,
+  customer: `${commonPrompt}\n只分析：对话总结、客户画像、销售阶段和总体置信度。客户画像 profile 必须严格返回 10 项，并按以下顺序和“维度：结论”格式填写：身份与组织、客户类型与经验、核心需求与目标、产品兴趣、决策权与流程、采购意向、价格敏感度、信任状态、核心关注与风险偏好、沟通风格与下一步倾向。每项应尽量具体，但只能依据聊天内容；聊天没有提供的维度必须写“维度：待确认”，禁止用常识补全或虚构。销售阶段只能从七阶段中选择；主阶段取最接近当前成交里程碑的一项，第1至3阶段可以同时放入 parallelStages。`,
   risk: `${commonPrompt}\n只分析异议、犹豫点、风险和确认清单，JSON 根对象只能包含 objections 和 confirmations。异议必须有真实客户原文，禁止“待确认异议1”等占位标题。按消息顺序判断：未正面回答、回避或客户再次追问=未解决；销售正面回答且客户未再追问=未追问-基本解决；销售回答后客户明确认可=客户肯定-完全解决。基本解决引用销售回答，完全解决引用客户后续肯定；沉默、礼貌致谢或话题切换不算肯定。确认清单必须且只返回 10 项：role、seeding、medical、scammed、coa、packaging、company、feedback、logistics、payment_method，禁止返回 education。只有明确顾虑或成交阻碍才能标记 risk，没谈到应标记 unknown。所有 evidenceQuote 必须逐字引用对应 M 编号原文。seeding 必须在需要种草/无需种草中二选一：需要时填写客户改善期望或痛点方向、销售是否已种草、客户是否在种草后明确肯定及下一步建议；已种草必须引用销售原话，客户明确肯定必须引用更晚的客户原话；非 seeding 项的全部 seeding 字段为空。medical 必须在需要提供建议/无需提供建议中二选一：客户提出剂量、用法、不良反应、禁忌、身体状况、疗效预期等需求时判为需要；需要时填写需求方向、是否已解答、客户是否在解答后明确肯定及下一步建议；已解答必须引用销售原话，客户明确肯定必须引用更晚的客户原话。不得仅因为销售没有写“非医疗建议”免责声明或没有建议咨询医生，就判定为未解答、风险或沟通问题；非 medical 项的全部 medical 字段为空。`,
   action: `${commonPrompt}\n只分析本次沟通可改善之处、下一步行动和建议回复。建议必须具体可执行；suggestedReply 沿用客户语言，suggestedReplyTranslation 返回自然简体中文翻译。不得仅因为销售没有写“非医疗建议”免责声明、没有建议咨询医生，或没有主动介绍副作用与禁忌，就生成改善项；相关改善必须对应客户真实提出但未被回答的问题，或销售原文中明确存在的错误承诺、答非所问或缺乏依据的结论。同类问题只保留一条，避免重复。`,
 };
@@ -318,7 +332,7 @@ const checklistSchema = {
 
 const analysisPrompts: Record<AnalysisModule, string> = {
   customer: `${commonPrompt}\n只返回对话总结、客户画像标签、对话提及产品和销售阶段。profile 由模型根据真实聊天自由提炼为简洁、具体、可独立阅读的画像标签，不预设分类、固定数量、顺序或“分类：内容”格式；应尽可能覆盖聊天中有证据的身份、经验、需求、关注点、信任、价格、决策和沟通特征，使画像足够丰富，通常可提炼 5 至 12 个标签，证据确实较少时允许更少。没有原文依据的特征不得输出，不得为了凑数量重复。productMentions 必须列出聊天中出现的每一个具体产品、多肽或药物并去重。公司名、厂家名、店铺名以及仅代表供应方的品牌名称不得作为产品输出；若商品名本身明确指向一种具体产品或药物，则应按具体产品保留。mentionedBy 判断客户、销售或双方提及；customerAwareness 依据客户原话判断不了解、初步了解、有使用经验、明确熟悉或无法判断；customerInterest 判断明确感兴趣、可能感兴趣、未表现兴趣、明确拒绝或无法判断；awarenessReason 说明判断依据。evidenceMessageId 和 evidenceQuote 必须引用包含该产品名或能直接证明客户了解程度的真实消息编号及逐字原文。仅由销售提及而客户未回应时，客户了解程度和兴趣必须填无法判断。stage 只能使用规定七阶段，第一至三阶段可并行。`,
-  psychology: `${commonPrompt}\n只返回 emotionProfile。依据客户真实原文分析当前情绪、变化、沟通性格倾向、敏感点和决策方式，并作非临床心理研判：当前心理状态、核心驱动力、信任需求、防御或回避模式、压力反应。使用“可能、倾向”等限定语，不诊断疾病或人格障碍，不推断隐私；evidence 只引用客户消息的真实 M 编号和逐字原文，证据不足就明确说明并降低 confidence。`,
+  psychology: `${commonPrompt}\n只返回 emotionProfile，并严格按 JSON 示例字段输出。\n1. currentState 将客户当前情绪与可从表达观察到的心理状态合并成一段结论；不要诊断疾病、人格障碍或贴 MBTI 标签。currentStateEvidence 必须给出支持结论的真实客户消息。\n2. emotionTurningPoints 按聊天先后顺序提取真正发生变化的 1-8 个情绪转折点。score 只能为 -2 到 2（-2明显消极、-1偏消极、0中性、1偏积极、2明显积极）；label 是简短情绪标签，reason 说明这句话及上下文为什么构成转折。不得为了画图虚构转折。\n3. personalityTraits 只写沟通性格倾向，每项包含 trait、explanation 和自己的 evidence；不再输出敏感点或防御/回避模式。\n4. decisionStyle 总结决策方式；decisionFactors 写主要考虑因素；decisionPace 写决策节奏；advancementConditions 写继续推进所需条件；communicationApproach 写适合的沟通方式；decisionEvidence 必须直接支撑这些判断。\n5. 每一条 evidence 必须引用真实客户消息的 M 编号与逐字原文 quote，并提供忠实中文 translation 和 interpretation。禁止改写原话、拼接不同消息或引用销售消息。信息不足时明确说明并降低 confidence，不能用常识补全。advice 给出尊重客户自主决定、可执行且不操纵的沟通建议。`,
   objections: `${commonPrompt}\n只返回 objections。仅保留有客户逐字原文证据的明确异议或犹豫，禁止占位标题。未正面回答或客户再次追问=未解决；销售正面回答且客户未再追问=未追问-基本解决；销售回答后客户明确认可=客户肯定-完全解决。解决证据必须发生在异议之后；沉默、礼貌致谢和话题切换不算肯定。`,
   checklist: `${commonPrompt}\n只返回 confirmations，必须且只按顺序返回 role、seeding、medical、scammed、coa、packaging、company、feedback、logistics、payment_method 共10项。每项只使用统一精简字段：conclusion 是该项结论，detail 是方向或具体说明，source 是谁提出，handling 是销售是否处理，reaction 是客户反应，advice 是下一步建议。seeding 结论只能“需要种草/无需种草”；medical 只能“需要提供建议/无需提供建议”；scammed 只能“有被骗经历/无被骗经历”。其他项目 conclusion 简洁概括。已处理必须引用销售原文；客户明确肯定、满意或异议必须引用客户原文并符合消息顺序。未提及的字段使用未提及、未确认或不适用，不得虚构证据。只有真实成交障碍才标 risk。`,
   action: `${legacyModulePrompts.action}\n如果提供了话术知识库资料，应优先借鉴与当前客户问题直接相关的表达和销售思路，但不能照搬不适用于当前客户的事实。knowledgeReferenceIds 只返回实际用于 suggestedReply 的话术 ID；没有使用时返回 []，禁止编造 ID。`,
@@ -451,17 +465,16 @@ function deepSeekJsonExample(module: AnalysisModule): Record<string, unknown> {
   };
   if (module === "psychology") return {
     emotionProfile: {
-      currentEmotion: "使用限定语描述当前情绪",
-      emotionTrend: "描述对话中的情绪变化",
-      personalityTraits: ["有原文依据的沟通性格倾向"],
-      decisionStyle: "描述决策方式",
-      sensitivities: ["有原文依据的敏感点"],
-      psychologicalState: "作非临床、有限定语的心理研判",
-      coreMotivations: ["可能的核心驱动力"],
-      trustNeeds: ["建立信任所需条件"],
-      defensePatterns: ["对话中可观察的防御或回避模式"],
-      pressureResponse: "描述面对催促或不确定性时可能的反应",
-      evidence: [{ messageId: "M00001", quote: "必须替换成该编号消息中的客户逐字原文", interpretation: "说明该原文如何支持判断" }],
+      currentState: "合并描述当前情绪和可观察到的心理状态",
+      currentStateEvidence: [{ messageId: "M00001", quote: "必须替换成该客户消息中的逐字原文", translation: "逐字原文的忠实中文翻译", interpretation: "说明如何支持当前状态判断" }],
+      emotionTurningPoints: [{ messageId: "M00001", quote: "必须替换成该客户消息中的逐字原文", translation: "逐字原文的忠实中文翻译", interpretation: "解释情绪含义", label: "谨慎", score: -1, reason: "说明该处为什么构成情绪转折" }],
+      personalityTraits: [{ trait: "证据导向", explanation: "使用限定语说明该沟通倾向", evidence: [{ messageId: "M00001", quote: "必须替换成该客户消息中的逐字原文", translation: "逐字原文的忠实中文翻译", interpretation: "说明如何支持该倾向" }] }],
+      decisionStyle: "概括客户的决策方式",
+      decisionFactors: ["有原文依据的主要考虑因素"],
+      decisionPace: "描述客户的决策节奏",
+      advancementConditions: ["继续推进所需的条件"],
+      communicationApproach: "适合当前客户的沟通方式",
+      decisionEvidence: [{ messageId: "M00001", quote: "必须替换成该客户消息中的逐字原文", translation: "逐字原文的忠实中文翻译", interpretation: "说明如何支持决策判断" }],
       advice: ["尊重客户自主决定的可执行沟通建议"],
       confidence: 0.8,
     },
@@ -731,14 +744,14 @@ function requireRawModuleResult(module: AnalysisModule, value: unknown, messages
   if (module === "psychology") {
     const emotion = raw.emotionProfile && typeof raw.emotionProfile === "object" && !Array.isArray(raw.emotionProfile)
       ? raw.emotionProfile as Record<string, unknown> : {};
-    const requiredStrings = ["currentEmotion", "emotionTrend", "decisionStyle", "psychologicalState", "pressureResponse"];
-    const requiredLists = ["personalityTraits", "sensitivities", "coreMotivations", "trustNeeds", "defensePatterns", "advice"];
+    const requiredStrings = ["currentState", "decisionStyle", "decisionPace", "communicationApproach"];
+    const requiredLists = ["currentStateEvidence", "emotionTurningPoints", "personalityTraits", "decisionFactors", "advancementConditions", "decisionEvidence", "advice"];
     const stringsComplete = requiredStrings.every((key) => typeof emotion[key] === "string" && Boolean((emotion[key] as string).trim()));
     const listsComplete = requiredLists.every((key) => Array.isArray(emotion[key]) && (emotion[key] as unknown[]).some((item) => typeof item === "string" && item.trim()));
-    if (!stringsComplete || !listsComplete || !Array.isArray(emotion.evidence) || !Number.isFinite(Number(emotion.confidence))) {
+    if (!stringsComplete || !listsComplete || !Number.isFinite(Number(emotion.confidence))) {
       throw new Error("客户情绪与沟通性格模块字段不完整");
     }
-    if (messages.some((message) => message.role === "customer") && emotion.evidence.length === 0) {
+    if (messages.some((message) => message.role === "customer") && (emotion.currentStateEvidence as unknown[]).length === 0) {
       throw new Error("客户情绪与沟通性格模块缺少客户原文依据");
     }
     return;
@@ -773,7 +786,7 @@ function requireNormalizedModuleResult(module: AnalysisModule, value: AnalysisMo
   }
   if (module === "psychology") {
     const result = value as PsychologyModuleResult;
-    if (messages.some((message) => message.role === "customer") && !result.emotionProfile.evidence.length) throw new Error("情绪与沟通性格原文依据未通过核验");
+    if (messages.some((message) => message.role === "customer") && !result.emotionProfile.currentStateEvidence.length) throw new Error("情绪与沟通性格原文依据未通过核验");
     return;
   }
   if (module === "objections") {
@@ -789,24 +802,49 @@ function requireNormalizedModuleResult(module: AnalysisModule, value: AnalysisMo
 
 function normalizePsychologyResult(value: unknown, messages: ParsedConversationMessage[]): PsychologyModuleResult {
   const rawRoot = value && typeof value === "object" ? value as Partial<PsychologyModuleResult> : {};
-  const raw = rawRoot.emotionProfile && typeof rawRoot.emotionProfile === "object" ? rawRoot.emotionProfile as Partial<CustomerEmotionProfile> : {};
+  const raw = rawRoot.emotionProfile && typeof rawRoot.emotionProfile === "object" ? rawRoot.emotionProfile as unknown as Record<string, unknown> : {};
   const customerMessages = new Map(messages.filter((message) => message.role === "customer").map((message) => [message.id, message]));
-  const evidence = (Array.isArray(raw.evidence) ? raw.evidence : []).filter((item) => item?.interpretation?.trim() && hasVerifiedEvidence(customerMessages, item.messageId, item.quote)).slice(0, 5);
+  const cleanEvidence = (value: unknown, limit = 4) => (Array.isArray(value) ? value : []).flatMap((candidate) => {
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return [];
+    const item = candidate as Record<string, unknown>;
+    const messageId = typeof item.messageId === "string" ? item.messageId : "";
+    const quote = typeof item.quote === "string" ? item.quote : "";
+    const interpretation = typeof item.interpretation === "string" ? item.interpretation.trim() : "";
+    if (!interpretation || !hasVerifiedEvidence(customerMessages, messageId, quote)) return [];
+    return [{ messageId, quote, translation: typeof item.translation === "string" ? item.translation.trim() : "", interpretation }];
+  }).slice(0, limit);
+  const currentStateEvidence = cleanEvidence(raw.currentStateEvidence, 3);
+  const emotionTurningPoints = (Array.isArray(raw.emotionTurningPoints) ? raw.emotionTurningPoints : []).flatMap((candidate) => {
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return [];
+    const item = candidate as Record<string, unknown>;
+    const evidence = cleanEvidence([item], 1)[0];
+    if (!evidence) return [];
+    const score = Number(item.score);
+    return [{ ...evidence, label: typeof item.label === "string" ? item.label.trim() : "情绪变化", score: Number.isFinite(score) ? Math.min(2, Math.max(-2, score)) : 0, reason: typeof item.reason === "string" ? item.reason.trim() : evidence.interpretation }];
+  }).slice(0, 8);
+  const personalityTraits = (Array.isArray(raw.personalityTraits) ? raw.personalityTraits : []).flatMap((candidate) => {
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return [];
+    const item = candidate as Record<string, unknown>;
+    const evidence = cleanEvidence(item.evidence, 3);
+    const trait = typeof item.trait === "string" ? item.trait.trim() : "";
+    const explanation = typeof item.explanation === "string" ? item.explanation.trim() : "";
+    return trait && explanation && evidence.length ? [{ trait, explanation, evidence }] : [];
+  }).slice(0, 5);
+  const decisionEvidence = cleanEvidence(raw.decisionEvidence, 4);
   const confidence = Number(raw.confidence);
   return { emotionProfile: {
-    currentEmotion: raw.currentEmotion?.trim() || "信息不足，暂无法判断当前情绪",
-    emotionTrend: raw.emotionTrend?.trim() || "信息不足，暂无法判断情绪变化",
-    personalityTraits: cleanStringArray(raw.personalityTraits),
-    decisionStyle: raw.decisionStyle?.trim() || "信息不足，暂无法判断决策方式",
-    sensitivities: cleanStringArray(raw.sensitivities),
-    psychologicalState: raw.psychologicalState?.trim() || "信息不足，暂无法进行沟通心理研判",
-    coreMotivations: cleanStringArray(raw.coreMotivations),
-    trustNeeds: cleanStringArray(raw.trustNeeds),
-    defensePatterns: cleanStringArray(raw.defensePatterns),
-    pressureResponse: raw.pressureResponse?.trim() || "信息不足，暂无法判断压力下的沟通反应",
-    evidence,
+    currentState: typeof raw.currentState === "string" && raw.currentState.trim() ? raw.currentState.trim() : "信息不足，暂无法判断当前情绪和心理状态",
+    currentStateEvidence,
+    emotionTurningPoints,
+    personalityTraits,
+    decisionStyle: typeof raw.decisionStyle === "string" && raw.decisionStyle.trim() ? raw.decisionStyle.trim() : "信息不足，暂无法判断决策方式",
+    decisionFactors: cleanStringArray(raw.decisionFactors),
+    decisionPace: typeof raw.decisionPace === "string" && raw.decisionPace.trim() ? raw.decisionPace.trim() : "信息不足",
+    advancementConditions: cleanStringArray(raw.advancementConditions),
+    communicationApproach: typeof raw.communicationApproach === "string" && raw.communicationApproach.trim() ? raw.communicationApproach.trim() : "继续通过开放式问题确认客户的决策条件。",
+    decisionEvidence,
     advice: cleanStringArray(raw.advice, ["继续观察客户表达，并通过开放式问题确认其真实关注点。"]),
-    confidence: evidence.length && Number.isFinite(confidence) ? Math.min(1, Math.max(0, confidence)) : Math.min(Number.isFinite(confidence) ? confidence : 0.2, 0.35),
+    confidence: currentStateEvidence.length && Number.isFinite(confidence) ? Math.min(1, Math.max(0, confidence)) : Math.min(Number.isFinite(confidence) ? confidence : 0.2, 0.35),
   } };
 }
 
@@ -876,11 +914,12 @@ function validateLegacyModuleResult(module: "customer" | "risk" | "action", valu
     if (!Array.isArray(result.profile) || result.profile.length !== profileDimensions.length) throw new Error("客户画像必须完整覆盖 10 个维度");
     if (result.profile.some((item, index) => !new RegExp(`^${profileDimensions[index]}[：:]`).test(item?.trim()))) throw new Error("客户画像维度缺失或顺序不正确");
     const emotion = result.emotionProfile;
-    if (!emotion?.currentEmotion?.trim() || !emotion.emotionTrend?.trim() || !emotion.decisionStyle?.trim() || !emotion.psychologicalState?.trim() || !emotion.pressureResponse?.trim() || !Number.isFinite(emotion.confidence)) throw new Error("客户情绪、沟通性格与心理研判字段不完整");
-    if (!Array.isArray(emotion.personalityTraits) || !emotion.personalityTraits.length || !Array.isArray(emotion.sensitivities) || !emotion.sensitivities.length || !Array.isArray(emotion.coreMotivations) || !emotion.coreMotivations.length || !Array.isArray(emotion.trustNeeds) || !emotion.trustNeeds.length || !Array.isArray(emotion.defensePatterns) || !emotion.defensePatterns.length || !Array.isArray(emotion.advice) || !emotion.advice.length || !Array.isArray(emotion.evidence)) throw new Error("客户情绪、心理研判缺少动机、信任需求、防御模式、证据或建议");
+    if (!emotion?.currentState?.trim() || !emotion.decisionStyle?.trim() || !emotion.decisionPace?.trim() || !emotion.communicationApproach?.trim() || !Number.isFinite(emotion.confidence)) throw new Error("客户情绪、沟通性格与心理研判字段不完整");
+    if (!Array.isArray(emotion.personalityTraits) || !emotion.personalityTraits.length || !Array.isArray(emotion.emotionTurningPoints) || !emotion.emotionTurningPoints.length || !Array.isArray(emotion.decisionFactors) || !emotion.decisionFactors.length || !Array.isArray(emotion.advancementConditions) || !emotion.advancementConditions.length || !Array.isArray(emotion.advice) || !emotion.advice.length || !Array.isArray(emotion.currentStateEvidence) || !Array.isArray(emotion.decisionEvidence)) throw new Error("客户情绪与沟通性格分析缺少转折、决策依据或建议");
     const customerMessageById = new Map(messages.filter((message) => message.role === "customer").map((message) => [message.id, message]));
-    if (customerMessageById.size && !emotion.evidence.length) throw new Error("客户情绪与沟通性格分析缺少客户原文依据");
-    if (emotion.evidence.some((item) => !item.interpretation?.trim() || !hasVerifiedEvidence(customerMessageById, item.messageId, item.quote))) throw new Error("客户情绪与沟通性格分析包含无法核验的客户原文");
+    const allEvidence = [...emotion.currentStateEvidence, ...emotion.emotionTurningPoints, ...emotion.personalityTraits.flatMap((item) => item.evidence), ...emotion.decisionEvidence];
+    if (customerMessageById.size && !allEvidence.length) throw new Error("客户情绪与沟通性格分析缺少客户原文依据");
+    if (allEvidence.some((item) => !item.interpretation?.trim() || !hasVerifiedEvidence(customerMessageById, item.messageId, item.quote))) throw new Error("客户情绪与沟通性格分析包含无法核验的客户原文");
   }
   if (module === "risk") {
     const result = value as RiskModuleResult;

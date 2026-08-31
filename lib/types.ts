@@ -69,21 +69,33 @@ export interface Evidence {
 export interface EmotionEvidence {
   messageId: string;
   quote: string;
+  translation: string;
   interpretation: string;
 }
 
-export interface CustomerEmotionProfile {
-  currentEmotion: string;
-  emotionTrend: string;
-  personalityTraits: string[];
-  decisionStyle: string;
-  sensitivities: string[];
-  psychologicalState: string;
-  coreMotivations: string[];
-  trustNeeds: string[];
-  defensePatterns: string[];
-  pressureResponse: string;
+export interface EmotionTurningPoint extends EmotionEvidence {
+  label: string;
+  score: number;
+  reason: string;
+}
+
+export interface CommunicationTrait {
+  trait: string;
+  explanation: string;
   evidence: EmotionEvidence[];
+}
+
+export interface CustomerEmotionProfile {
+  currentState: string;
+  currentStateEvidence: EmotionEvidence[];
+  emotionTurningPoints: EmotionTurningPoint[];
+  personalityTraits: CommunicationTrait[];
+  decisionStyle: string;
+  decisionFactors: string[];
+  decisionPace: string;
+  advancementConditions: string[];
+  communicationApproach: string;
+  decisionEvidence: EmotionEvidence[];
   advice: string[];
   confidence: number;
 }

@@ -41,7 +41,7 @@ import {
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { defaultConfirmations, defaultProgress, emptyReport, initialTasks } from "@/lib/demo-data";
 import { parseConversationMessages } from "@/lib/conversation";
-import type { AnalysisModule, AnalysisModuleStatus, ConfirmationItem, ConfirmationStatus, CustomerTask, HesitationSignal, ImportPreview, KnowledgeScript, KnowledgeScriptReference, ProductMention, ProductResearch, Provider, SalesStage, SourceType } from "@/lib/types";
+import type { AnalysisModule, AnalysisModuleStatus, CommunicationTrait, ConfirmationItem, ConfirmationStatus, CustomerTask, EmotionEvidence, EmotionTurningPoint, HesitationSignal, ImportPreview, KnowledgeScript, KnowledgeScriptReference, ProductMention, ProductResearch, Provider, SalesStage, SourceType } from "@/lib/types";
 import SettingsManager from "@/app/components/settings-manager";
 
 type View = "analysis" | "scripts" | "products" | "translate" | "settings";
@@ -118,29 +118,45 @@ function normalizeReport(value: unknown, conversation = ""): CustomerTask["repor
   const parsedMessages = parseConversationMessages(conversation);
   const messageById = new Map(parsedMessages.map((message) => [message.id, message]));
   const rawEmotionProfile = report.emotionProfile && typeof report.emotionProfile === "object" && !Array.isArray(report.emotionProfile) ? report.emotionProfile as Record<string, unknown> : {};
-  const rawEmotionEvidence = Array.isArray(rawEmotionProfile.evidence) ? rawEmotionProfile.evidence : [];
-  const emotionEvidence = rawEmotionEvidence.flatMap((value) => {
+  const normalizeEmotionEvidence = (value: unknown, limit = 5): EmotionEvidence[] => (Array.isArray(value) ? value : []).flatMap((value) => {
     if (!value || typeof value !== "object" || Array.isArray(value)) return [];
     const item = value as Record<string, unknown>;
     const message = messageById.get(stringValue(item.messageId));
     if (!message || message.role !== "customer") return [];
     const quote = normalizeEvidenceQuote(item.quote, conversation);
     if (!quote || !message.content.normalize("NFKC").includes(quote.normalize("NFKC"))) return [];
-    return [{ messageId: message.id, quote, interpretation: stringValue(item.interpretation, "该原文支持当前沟通判断。") }];
-  });
+    return [{ messageId: message.id, quote, translation: stringValue(item.translation), interpretation: stringValue(item.interpretation, "该原文支持当前沟通判断。") }];
+  }).slice(0, limit);
+  const legacyEvidence = normalizeEmotionEvidence(rawEmotionProfile.evidence);
+  const currentStateEvidence = normalizeEmotionEvidence(rawEmotionProfile.currentStateEvidence, 3);
+  const turningPoints: EmotionTurningPoint[] = (Array.isArray(rawEmotionProfile.emotionTurningPoints) ? rawEmotionProfile.emotionTurningPoints : []).flatMap((value) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+    const item = value as Record<string, unknown>;
+    const evidence = normalizeEmotionEvidence([item], 1)[0];
+    if (!evidence) return [];
+    const score = Number(item.score);
+    return [{ ...evidence, label: stringValue(item.label, "情绪变化"), score: Number.isFinite(score) ? Math.min(2, Math.max(-2, score)) : 0, reason: stringValue(item.reason, evidence.interpretation) }];
+  }).slice(0, 8);
+  const personalityTraits: CommunicationTrait[] = (Array.isArray(rawEmotionProfile.personalityTraits) ? rawEmotionProfile.personalityTraits : []).flatMap((value) => {
+    if (typeof value === "string" && value.trim()) return [{ trait: value.trim(), explanation: "根据当前聊天呈现出的沟通倾向。", evidence: legacyEvidence.slice(0, 1) }];
+    if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+    const item = value as Record<string, unknown>;
+    const trait = stringValue(item.trait);
+    if (!trait) return [];
+    return [{ trait, explanation: stringValue(item.explanation, "根据当前聊天呈现出的沟通倾向。"), evidence: normalizeEmotionEvidence(item.evidence, 3) }];
+  }).slice(0, 5);
   const emotionConfidence = Number(rawEmotionProfile.confidence);
   const emotionProfile: CustomerTask["report"]["emotionProfile"] = {
-    currentEmotion: stringValue(rawEmotionProfile.currentEmotion, "信息不足，暂无法判断当前情绪"),
-    emotionTrend: stringValue(rawEmotionProfile.emotionTrend, "信息不足，暂无法判断情绪变化"),
-    personalityTraits: stringList(rawEmotionProfile.personalityTraits, ["信息不足"]).slice(0, 5),
+    currentState: stringValue(rawEmotionProfile.currentState, [stringValue(rawEmotionProfile.currentEmotion), stringValue(rawEmotionProfile.psychologicalState)].filter(Boolean).join("；") || "信息不足，暂无法判断当前情绪和心理状态"),
+    currentStateEvidence: currentStateEvidence.length ? currentStateEvidence : legacyEvidence.slice(0, 3),
+    emotionTurningPoints: turningPoints,
+    personalityTraits: personalityTraits.length ? personalityTraits : [{ trait: "信息不足", explanation: "当前对话不足以形成明确的沟通性格倾向。", evidence: [] }],
     decisionStyle: stringValue(rawEmotionProfile.decisionStyle, "信息不足，暂无法判断决策方式"),
-    sensitivities: stringList(rawEmotionProfile.sensitivities, ["信息不足"]).slice(0, 5),
-    psychologicalState: stringValue(rawEmotionProfile.psychologicalState, "信息不足，暂无法进行沟通心理研判"),
-    coreMotivations: stringList(rawEmotionProfile.coreMotivations, ["信息不足"]).slice(0, 5),
-    trustNeeds: stringList(rawEmotionProfile.trustNeeds, ["信息不足"]).slice(0, 5),
-    defensePatterns: stringList(rawEmotionProfile.defensePatterns, ["信息不足"]).slice(0, 5),
-    pressureResponse: stringValue(rawEmotionProfile.pressureResponse, "信息不足，暂无法判断压力下的沟通反应"),
-    evidence: emotionEvidence.slice(0, 5),
+    decisionFactors: stringList(rawEmotionProfile.decisionFactors, stringList(rawEmotionProfile.coreMotivations)).slice(0, 5),
+    decisionPace: stringValue(rawEmotionProfile.decisionPace, stringValue(rawEmotionProfile.pressureResponse, "信息不足")),
+    advancementConditions: stringList(rawEmotionProfile.advancementConditions, stringList(rawEmotionProfile.trustNeeds)).slice(0, 5),
+    communicationApproach: stringValue(rawEmotionProfile.communicationApproach, "先确认客户最看重的决策条件，再提供对应信息。"),
+    decisionEvidence: normalizeEmotionEvidence(rawEmotionProfile.decisionEvidence, 4).length ? normalizeEmotionEvidence(rawEmotionProfile.decisionEvidence, 4) : legacyEvidence.slice(0, 4),
     advice: stringList(rawEmotionProfile.advice, ["继续观察客户表达，并通过开放式问题确认其真实关注点。"]).slice(0, 5),
     confidence: Number.isFinite(emotionConfidence) ? Math.min(1, Math.max(0, emotionConfidence)) : 0,
   };
@@ -406,7 +422,7 @@ async function analyzeConcurrently(task: CustomerTask, conversation: string, onU
         stageReason: emptyReport.stageReason,
         confidence: 0,
       } : {}),
-      ...(requestedModules.includes("psychology") ? { emotionProfile: { ...emptyReport.emotionProfile, evidence: [], advice: [...emptyReport.emotionProfile.advice] } } : {}),
+      ...(requestedModules.includes("psychology") ? { emotionProfile: { ...emptyReport.emotionProfile, currentStateEvidence: [], emotionTurningPoints: [], personalityTraits: [], decisionEvidence: [], advice: [...emptyReport.emotionProfile.advice] } } : {}),
       ...(requestedModules.includes("objections") ? { objections: [] } : {}),
       ...(requestedModules.includes("checklist") ? { confirmations: defaultConfirmations.map((item) => ({ ...item })) } : {}),
       ...(requestedModules.includes("action") ? { improvements: [], nextActions: [], suggestedReply: "", suggestedReplyTranslation: "", knowledgeReferences: [] } : {}),
@@ -584,6 +600,40 @@ export default function Home() {
       )}
     </main>
   );
+}
+
+function EmotionEvidenceDisclosure({ evidence, onLocate, compact = false }: { evidence: EmotionEvidence[]; onLocate: (messageId?: string, quote?: string) => void; compact?: boolean }) {
+  const [open, setOpen] = useState(false);
+  if (!evidence.length) return <div className="emotion-evidence-missing">当前没有可逐字核验的客户原文</div>;
+  return <div className={`embedded-evidence ${compact ? "compact" : ""}`}>
+    <button type="button" className="evidence-toggle" onClick={() => setOpen((value) => !value)}><FileText size={13} />查看依据 · {evidence.length} 条<ChevronDown size={13} className={open ? "open" : ""} /></button>
+    {open && <div className="embedded-evidence-list">{evidence.map((item) => <article key={`${item.messageId}-${item.quote}`}>
+      <div className="evidence-copy"><span>{item.messageId}</span><blockquote>“{item.quote}”</blockquote>{item.translation && <p className="evidence-translation"><strong>中文</strong>{item.translation}</p>}<p>{item.interpretation}</p></div>
+      <button type="button" className="evidence-lock" onClick={() => onLocate(item.messageId, item.quote)}><Link2 size={12} />定位并锁定</button>
+    </article>)}</div>}
+  </div>;
+}
+
+function EmotionTrendChart({ points, onLocate }: { points: EmotionTurningPoint[]; onLocate: (messageId?: string, quote?: string) => void }) {
+  const [selected, setSelected] = useState(0);
+  if (!points.length) return <div className="emotion-chart-empty">当前对话不足以识别可靠的情绪转折</div>;
+  const width = 760;
+  const height = 210;
+  const paddingX = 58;
+  const paddingY = 28;
+  const chartWidth = width - paddingX * 2;
+  const chartHeight = height - paddingY * 2;
+  const coordinates = points.map((point, index) => ({ x: paddingX + (points.length === 1 ? chartWidth / 2 : chartWidth * index / (points.length - 1)), y: paddingY + (2 - point.score) / 4 * chartHeight }));
+  const path = coordinates.map((point) => `${point.x},${point.y}`).join(" ");
+  const active = points[Math.min(selected, points.length - 1)];
+  return <div className="emotion-trend-chart">
+    <div className="chart-canvas"><svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="客户情绪变化折线图">
+      {[2, 1, 0, -1, -2].map((score) => { const y = paddingY + (2 - score) / 4 * chartHeight; return <g key={score}><line x1={paddingX} x2={width - paddingX} y1={y} y2={y} className={score === 0 ? "chart-zero" : "chart-grid-line"} /><text x={10} y={y + 4}>{score === 2 ? "积极" : score === 1 ? "偏积极" : score === 0 ? "中性" : score === -1 ? "偏消极" : "消极"}</text></g>; })}
+      {points.length > 1 && <polyline points={path} className="emotion-line" />}
+      {coordinates.map((point, index) => <g key={`${points[index].messageId}-${index}`} className={`chart-point ${selected === index ? "active" : ""}`} role="button" tabIndex={0} onClick={() => setSelected(index)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") setSelected(index); }}><circle cx={point.x} cy={point.y} r={selected === index ? 8 : 6} /><text className="chart-point-label" x={point.x} y={Math.max(14, point.y - 13)} textAnchor="middle">{points[index].label}</text><text className="chart-point-id" x={point.x} y={height - 5} textAnchor="middle">{points[index].messageId}</text></g>)}
+    </svg></div>
+    <article className="turning-point-detail"><header><span>{active.label}</span><strong>{active.reason}</strong></header><EmotionEvidenceDisclosure evidence={[active]} onLocate={onLocate} /></article>
+  </div>;
 }
 
 function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
@@ -801,34 +851,24 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
 
           {moduleVisible("psychology") && <>
           <ReportCard icon={UsersRound} title="客户情绪、沟通性格与心理研判" tone="cyan" sectionId="psychology">
-            <div className="emotion-headline">
-              <div><small>当前情绪</small><strong>{activeTask.report.emotionProfile.currentEmotion}</strong></div>
-              <div><small>情绪变化</small><strong>{activeTask.report.emotionProfile.emotionTrend}</strong></div>
-              <span className={`emotion-confidence score-${confidenceLabel(activeTask.report.emotionProfile.confidence)}`}>{confidenceLabel(activeTask.report.emotionProfile.confidence)} · {Math.round(activeTask.report.emotionProfile.confidence * 100)}%</span>
-            </div>
-            <div className="emotion-columns">
-              <div><small>沟通性格倾向</small><div className="emotion-tags">{activeTask.report.emotionProfile.personalityTraits.map((item) => <span key={item}>{item}</span>)}</div></div>
-              <div><small>敏感点</small><div className="emotion-tags sensitivity-tags">{activeTask.report.emotionProfile.sensitivities.map((item) => <span key={item}>{item}</span>)}</div></div>
-              <div><small>决策方式</small><p>{activeTask.report.emotionProfile.decisionStyle}</p></div>
-            </div>
-            <div className="psychology-panel">
-              <div className="psychology-title"><strong>沟通心理研判</strong><span>非临床</span></div>
-              <div className="psychology-state"><small>当前心理状态</small><p>{activeTask.report.emotionProfile.psychologicalState}</p></div>
-              <div className="psychology-grid">
-                <div><small>核心驱动力</small><div className="emotion-tags">{activeTask.report.emotionProfile.coreMotivations.map((item) => <span key={item}>{item}</span>)}</div></div>
-                <div><small>信任需求</small><div className="emotion-tags">{activeTask.report.emotionProfile.trustNeeds.map((item) => <span key={item}>{item}</span>)}</div></div>
-                <div><small>防御或回避模式</small><div className="emotion-tags sensitivity-tags">{activeTask.report.emotionProfile.defensePatterns.map((item) => <span key={item}>{item}</span>)}</div></div>
-                <div><small>压力下的可能反应</small><p>{activeTask.report.emotionProfile.pressureResponse}</p></div>
-              </div>
-            </div>
-            {!!activeTask.report.emotionProfile.evidence.length && <div className="emotion-evidence">
-              <h4>对话依据</h4>
-              {activeTask.report.emotionProfile.evidence.map((item) => <div key={`${item.messageId}-${item.quote}`}>
-                <blockquote>“{item.quote}”</blockquote>
-                <p>{item.interpretation}</p>
-                <button type="button" onClick={() => openRawChat(item.messageId, item.quote)}>定位原文</button>
-              </div>)}
-            </div>}
+            <div className="emotion-profile-toolbar"><span>基于客户真实表达的沟通研判</span><strong className={`emotion-confidence score-${confidenceLabel(activeTask.report.emotionProfile.confidence)}`}>{confidenceLabel(activeTask.report.emotionProfile.confidence)} · {Math.round(activeTask.report.emotionProfile.confidence * 100)}%</strong></div>
+            <section className="emotion-insight current-state-card">
+              <header><span>1</span><div><small>当前情绪和心理状态</small><strong>{activeTask.report.emotionProfile.currentState}</strong></div></header>
+              <EmotionEvidenceDisclosure evidence={activeTask.report.emotionProfile.currentStateEvidence} onLocate={openRawChat} />
+            </section>
+            <section className="emotion-insight emotion-chart-card">
+              <header><span>2</span><div><small>情绪变化</small><strong>按对话顺序查看情绪转折与原因</strong></div></header>
+              <EmotionTrendChart points={activeTask.report.emotionProfile.emotionTurningPoints} onLocate={openRawChat} />
+            </section>
+            <section className="emotion-insight">
+              <header><span>3</span><div><small>沟通性格倾向</small><strong>仅呈现当前聊天中可观察到的倾向</strong></div></header>
+              <div className="communication-traits">{activeTask.report.emotionProfile.personalityTraits.map((item, index) => <article key={`${item.trait}-${index}`}><div><strong>{item.trait}</strong><p>{item.explanation}</p></div><EmotionEvidenceDisclosure evidence={item.evidence} onLocate={openRawChat} compact /></article>)}</div>
+            </section>
+            <section className="emotion-insight decision-card">
+              <header><span>4</span><div><small>决策方式</small><strong>{activeTask.report.emotionProfile.decisionStyle}</strong></div></header>
+              <div className="decision-grid"><div><small>主要考虑因素</small><div className="emotion-tags">{activeTask.report.emotionProfile.decisionFactors.map((item) => <span key={item}>{item}</span>)}</div></div><div><small>决策节奏</small><p>{activeTask.report.emotionProfile.decisionPace}</p></div><div><small>继续推进所需条件</small><ul>{activeTask.report.emotionProfile.advancementConditions.map((item) => <li key={item}>{item}</li>)}</ul></div><div><small>建议沟通方式</small><p>{activeTask.report.emotionProfile.communicationApproach}</p></div></div>
+              <EmotionEvidenceDisclosure evidence={activeTask.report.emotionProfile.decisionEvidence} onLocate={openRawChat} />
+            </section>
             <div className="emotion-advice"><h4>沟通建议</h4>{activeTask.report.emotionProfile.advice.map((item, index) => <p key={item}><span>{index + 1}</span>{item}</p>)}</div>
             <p className="emotion-disclaimer">仅依据当前聊天进行非临床沟通心理研判，不构成精神健康、人格障碍或医学诊断。</p>
           </ReportCard>
@@ -883,7 +923,7 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
       <RawChatPanel
         task={activeTask}
         onUpdate={onUpdate}
-        onClose={() => setShowRaw(false)}
+        onClose={() => { setShowRaw(false); setRawTarget(null); }}
         onSync={activeTask.source === "salesmartly" ? syncLatestMessages : undefined}
         syncing={syncing}
         target={rawTarget}
@@ -1261,6 +1301,7 @@ function RawChatPanel({ task, onClose, onUpdate, onSync, syncing = false, target
   const [translating, setTranslating] = useState(false);
   const [translationError, setTranslationError] = useState("");
   const [highlightedIndex, setHighlightedIndex] = useState<number | null>(null);
+  const [lockedIndex, setLockedIndex] = useState<number | null>(null);
   const messageRefs = useRef<Array<HTMLDivElement | null>>([]);
   const messages = useMemo(() => parseConversationMessages(task.rawConversation), [task.rawConversation]);
   const savedTranslation = task.rawTranslation?.source === task.rawConversation && task.rawTranslation.lines.length === messages.length
@@ -1271,6 +1312,7 @@ function RawChatPanel({ task, onClose, onUpdate, onSync, syncing = false, target
     if (!target?.messageId && !target?.quote) return;
     const messageIdIndex = target.messageId ? messages.findIndex((message) => message.id === target.messageId) : -1;
     if (messageIdIndex >= 0) {
+      setLockedIndex(messageIdIndex);
       setHighlightedIndex(messageIdIndex);
       messageRefs.current[messageIdIndex]?.scrollIntoView({ behavior: "smooth", block: "center" });
       const timer = window.setTimeout(() => setHighlightedIndex(null), 1800);
@@ -1282,6 +1324,7 @@ function RawChatPanel({ task, onClose, onUpdate, onSync, syncing = false, target
     if (!needle) return;
     const index = messages.findIndex((message) => normalize(message.content).includes(needle) || needle.includes(normalize(message.content)));
     if (index < 0) return;
+    setLockedIndex(index);
     setHighlightedIndex(index);
     messageRefs.current[index]?.scrollIntoView({ behavior: "smooth", block: "center" });
     const timer = window.setTimeout(() => setHighlightedIndex(null), 1800);
@@ -1310,11 +1353,11 @@ function RawChatPanel({ task, onClose, onUpdate, onSync, syncing = false, target
   };
 
   return <aside className="raw-side-panel">
-    <header><div><span className="eyebrow">SOURCE DATA</span><h2>原始聊天记录</h2></div><div className="drawer-actions">{onSync && <button className="secondary-button" onClick={() => void onSync()} disabled={syncing}><Cloud size={15} className={syncing ? "spin" : ""} />{syncing ? "同步中" : "同步"}</button>}<button className="secondary-button" onClick={() => void translate()} disabled={translating}><Languages size={15} />{translating ? "翻译中…" : savedTranslation ? "重新翻译" : "翻译"}</button><button className="icon-button raw-close-button" onClick={onClose}><X size={18} /></button></div></header>
+    <header><div><span className="eyebrow">SOURCE DATA</span><h2>原始聊天记录</h2></div><div className="drawer-actions">{lockedIndex !== null && <button className="secondary-button raw-unlock" onClick={() => setLockedIndex(null)}><Link2 size={15} />解除锁定</button>}{onSync && <button className="secondary-button" onClick={() => void onSync()} disabled={syncing}><Cloud size={15} className={syncing ? "spin" : ""} />{syncing ? "同步中" : "同步"}</button>}<button className="secondary-button" onClick={() => void translate()} disabled={translating}><Languages size={15} />{translating ? "翻译中…" : savedTranslation ? "重新翻译" : "翻译"}</button><button className="icon-button raw-close-button" onClick={onClose}><X size={18} /></button></div></header>
     <div className="drawer-meta"><span>{sourceMeta[task.source].label}</span><span>{task.customer.name}</span><span>{messages.length} 条消息</span></div>
     {translationError && <div className="raw-translation-error"><CircleAlert size={14} />{translationError}</div>}
     <div className="raw-chat-scroll">
-      {messages.map((message, index) => <div ref={(element) => { messageRefs.current[index] = element; }} className={`raw-message ${message.role} ${highlightedIndex === index ? "flash-highlight" : ""}`} key={`${index}-${message.content.slice(0, 20)}`}>
+      {messages.map((message, index) => <div ref={(element) => { messageRefs.current[index] = element; }} className={`raw-message ${message.role} ${highlightedIndex === index ? "flash-highlight" : ""} ${lockedIndex === index ? "locked-highlight" : ""}`} key={`${index}-${message.content.slice(0, 20)}`}>
         <div className="raw-message-meta"><strong>{message.label}</strong><span>{message.id}</span>{message.time && <span>{message.time}</span>}</div>
         <div className="raw-message-bubble"><p>{message.content}</p>{savedTranslation?.[index] && <div className="raw-message-translation"><span>中文</span><p>{savedTranslation[index]}</p></div>}</div>
       </div>)}
