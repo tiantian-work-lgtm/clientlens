@@ -38,12 +38,27 @@ interface RawMessage {
 export interface SaleSmartlyCustomer {
   id: string;
   name: string;
+  remark: string;
   email: string;
   phone: string;
   channel: string;
   country: string;
   language: string;
   lastMessageAt: string;
+}
+
+function mapSaleSmartlyCustomer(item: RawCustomer): SaleSmartlyCustomer {
+  return {
+    id: item.chat_user_id as string,
+    name: item.name || item.email || item.phone_number || item.phone || "未命名客户",
+    remark: item.remark_name || "",
+    email: item.email || "",
+    phone: item.phone_number || item.phone || "",
+    channel: channelNames[item.channel ?? 0] || item.channel_info || `渠道 ${item.channel ?? "未知"}`,
+    country: [item.country, item.city].filter(Boolean).join(" · ") || "待识别",
+    language: item.language || "",
+    lastMessageAt: item.msg_last_send_time ? formatTimestamp(item.msg_last_send_time) : "暂无时间",
+  };
 }
 
 const channelNames: Record<number, string> = {
@@ -89,17 +104,18 @@ export async function searchSaleSmartlyCustomers(search: string) {
   else if (clean) params.name = clean;
 
   const data = await saleSmartlyGet<{ list?: RawCustomer[]; total?: number }>("/api/v2/get-contact-list", params);
-  const customers: SaleSmartlyCustomer[] = (data.list ?? []).filter((item) => item.chat_user_id).map((item) => ({
-    id: item.chat_user_id as string,
-    name: item.remark_name || item.name || item.email || item.phone_number || item.phone || "未命名客户",
-    email: item.email || "",
-    phone: item.phone_number || item.phone || "",
-    channel: channelNames[item.channel ?? 0] || item.channel_info || `渠道 ${item.channel ?? "未知"}`,
-    country: [item.country, item.city].filter(Boolean).join(" · ") || "待识别",
-    language: item.language || "",
-    lastMessageAt: item.msg_last_send_time ? formatTimestamp(item.msg_last_send_time) : "暂无时间",
-  }));
+  const customers: SaleSmartlyCustomer[] = (data.list ?? []).filter((item) => item.chat_user_id).map(mapSaleSmartlyCustomer);
   return { customers, total: data.total ?? customers.length };
+}
+
+export async function getSaleSmartlyCustomer(chatUserId: string) {
+  const data = await saleSmartlyGet<{ list?: RawCustomer[]; total?: number }>("/api/v2/get-contact-list", {
+    chat_user_id: chatUserId,
+    page: "1",
+    page_size: "1",
+  });
+  const customer = (data.list ?? []).find((item) => item.chat_user_id === chatUserId) || data.list?.[0];
+  return customer?.chat_user_id ? mapSaleSmartlyCustomer(customer) : null;
 }
 
 export async function getSaleSmartlyConversation(chatUserId: string) {

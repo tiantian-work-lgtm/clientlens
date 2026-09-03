@@ -110,6 +110,9 @@ button { color: inherit; }
 .task-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .task-row strong { font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
 .task-row input { flex: 1; min-width: 0; border: 1px solid #bcb5ff; border-radius: 5px; padding: 3px 5px; font-size: 11px; outline: none; }
+.task-label, .task-label-input { margin: 5px 0 0 33px; width: calc(100% - 33px); }
+.task-label { color: var(--muted); font-size: 9.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.task-label-input { border: 1px solid #bcb5ff; border-radius: 5px; padding: 4px 6px; font-size: 10px; outline: none; }
 .source-icon { width: 25px; height: 25px; border-radius: 7px; display: grid; place-items: center; flex: none; }
 .source-icon.blue { color: #4177d2; background: #e9f1ff; }.source-icon.green { color: #278d62; background: #e8f7ef; }.source-icon.amber { color: #b57a20; background: #fff3da; }
 .task-meta, .task-bottom { display: flex; align-items: center; gap: 5px; color: var(--muted-2); font-size: 9.5px; margin-left: 33px; margin-top: 5px; }

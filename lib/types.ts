@@ -346,6 +346,7 @@ export interface ProgressItem {
 export interface CustomerTask {
   id: string;
   name: string;
+  taskLabel?: string;
   source: SourceType;
   status: TaskStatus;
   analysisStep?: "importing" | "analyzing";
@@ -355,6 +356,7 @@ export interface CustomerTask {
   updatedAt: string;
   customer: {
     name: string;
+    remark?: string;
     externalId?: string;
     country: string;
     company?: string;

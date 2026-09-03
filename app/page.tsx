@@ -60,6 +60,18 @@ const sourceMeta: Record<SourceType, { label: string; icon: typeof Cloud; color:
   excel: { label: "Excel", icon: FileSpreadsheet, color: "green" },
 };
 
+function customerDisplayName(customer: { name: string; remark?: string }) {
+  const name = customer.name.trim() || "未命名客户";
+  const remark = customer.remark?.trim();
+  if (!remark || remark.localeCompare(name, undefined, { sensitivity: "accent" }) === 0) return name;
+  return `${name}（${remark}）`;
+}
+
+function taskConversationCount(task: CustomerTask) {
+  const parsed = parseConversationMessages(task.rawConversation).length;
+  return parsed || task.rawConversation.split("\n").filter((line) => line.trim()).length;
+}
+
 type ReportSectionId = "summary" | "profile" | "psychology" | "objections" | "checklist" | "improvements" | "next-actions";
 const ReportCollapseContext = createContext<{ collapsed: Record<string, boolean>; toggle: (id: ReportSectionId) => void }>({ collapsed: {}, toggle: () => undefined });
 
@@ -754,7 +766,10 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
     return state ? state === "done" : activeTask.status !== "analyzing";
   };
   const anyModuleVisible = (modules: AnalysisModule[]) => modules.some(moduleVisible);
-  const filtered = tasks.filter((task) => task.name.toLowerCase().includes(taskSearch.toLowerCase()));
+  const normalizedTaskSearch = taskSearch.trim().toLowerCase();
+  const filtered = tasks.filter((task) => [task.customer.name, task.customer.remark, task.taskLabel, task.name]
+    .filter(Boolean)
+    .some((value) => String(value).toLowerCase().includes(normalizedTaskSearch)));
 
   useEffect(() => {
     skipCollapseSaveRef.current = true;
@@ -811,7 +826,7 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
 
   const rename = (task: CustomerTask) => {
     const clean = draftName.trim();
-    if (clean) onUpdate({ ...task, name: clean });
+    onUpdate({ ...task, taskLabel: clean || undefined });
     setRenaming(null);
   };
 
@@ -848,11 +863,21 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
       const conversation = typeof data.conversation === "string" ? data.conversation.trim() : "";
       if (!conversation) throw new Error("SaleSmartly 暂无可同步的聊天记录");
       const changed = conversation !== activeTask.rawConversation.trim();
+      const remoteCustomer = data.customer && typeof data.customer === "object" ? data.customer as Partial<SaleSmartlyCustomerOption> : null;
+      const customer = remoteCustomer?.name ? {
+        ...activeTask.customer,
+        name: remoteCustomer.name,
+        remark: remoteCustomer.remark || undefined,
+        country: remoteCustomer.country || activeTask.customer.country,
+        channel: remoteCustomer.channel || activeTask.customer.channel,
+        lastMessageAt: remoteCustomer.lastMessageAt || activeTask.customer.lastMessageAt,
+      } : activeTask.customer;
       onUpdate({
         ...activeTask,
+        customer,
         rawConversation: conversation,
         report: activeTask.report,
-        name: `${activeTask.customer.name} · ${Number(data.messageCount ?? 0)} 条消息`,
+        name: `${customerDisplayName(customer)} · ${Number(data.messageCount ?? 0)} 条消息`,
         status: changed ? "stale" : activeTask.status,
         updatedAt: changed ? "刚刚" : activeTask.updatedAt,
       });
@@ -877,13 +902,12 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
           {filtered.map((task) => {
             const meta = sourceMeta[task.source];
             return (
-              <button key={task.id} className={`task-item ${activeTask.id === task.id ? "active" : ""}`} onClick={() => onSelect(task.id)} onDoubleClick={() => { setRenaming(task.id); setDraftName(task.name); }}>
+              <button key={task.id} className={`task-item ${activeTask.id === task.id ? "active" : ""}`} onClick={() => onSelect(task.id)} onDoubleClick={() => { setRenaming(task.id); setDraftName(task.taskLabel || ""); }}>
                 <div className="task-row">
                   <span className={`source-icon ${meta.color}`}><meta.icon size={14} /></span>
-                  {renaming === task.id ? (
-                    <input autoFocus value={draftName} onChange={(e) => setDraftName(e.target.value)} onClick={(e) => e.stopPropagation()} onBlur={() => rename(task)} onKeyDown={(e) => e.key === "Enter" && rename(task)} />
-                  ) : <strong>{task.name}</strong>}
+                  <strong>{customerDisplayName(task.customer)} · {taskConversationCount(task)} 条消息</strong>
                 </div>
+                {renaming === task.id ? <input className="task-label-input" autoFocus value={draftName} placeholder="可选：设置任务别名" onChange={(e) => setDraftName(e.target.value)} onClick={(e) => e.stopPropagation()} onBlur={() => rename(task)} onKeyDown={(e) => e.key === "Enter" && rename(task)} /> : task.taskLabel && <div className="task-label">任务：{task.taskLabel}</div>}
                 <div className="task-meta"><span>{meta.label}</span><span>·</span><span>{task.updatedAt}</span></div>
                 <div className="task-bottom">
                   <span className={`status-dot ${task.status}`} />
@@ -899,7 +923,7 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
       <section className="report-pane">
         <div className="report-toolbar">
           <div>
-            <div className="breadcrumb">客户分析台 <ChevronRight size={13} /> {activeTask.name}</div>
+            <div className="breadcrumb">客户分析台 <ChevronRight size={13} /> {customerDisplayName(activeTask.customer)} · {taskConversationCount(activeTask)} 条消息</div>
             <h1>客户分析报告</h1>
           </div>
           <div className="toolbar-actions">
@@ -926,7 +950,7 @@ function AnalysisWorkspace({ tasks, activeTask, onSelect, onUpdate, onNew }: {
           {anyModuleVisible(["summary", "profile"]) && <>
           <div className="report-intro">
             <div className="ai-orb"><Sparkles size={22} /></div>
-            <div><span>AI ANALYSIS</span><h2>{activeTask.customer.name} 的对话洞察</h2><p>基于 {activeTask.rawConversation.split("\n").length} 条对话 · {activeTask.model} · 置信度 {Math.round(activeTask.report.confidence * 100)}%</p></div>
+            <div><span>AI ANALYSIS</span><h2>{customerDisplayName(activeTask.customer)} 的对话洞察</h2><p>基于 {taskConversationCount(activeTask)} 条对话 · {activeTask.model} · 置信度 {Math.round(activeTask.report.confidence * 100)}%</p></div>
             <div className={`confidence score-${confidenceLabel(activeTask.report.confidence)}`}><div style={{ "--score": `${activeTask.report.confidence * 100}%` } as React.CSSProperties} /><span>{confidenceLabel(activeTask.report.confidence)}</span></div>
           </div>
 
@@ -1320,7 +1344,7 @@ function RawChatPanel({ task, onClose, onUpdate, onSync, syncing = false, target
 
   return <aside className="raw-side-panel">
     <header><div><span className="eyebrow">SOURCE DATA</span><h2>原始聊天记录</h2></div><div className="drawer-actions">{lockedIndex !== null && <button className="secondary-button raw-unlock" onClick={() => setLockedIndex(null)}><Link2 size={15} />解除锁定</button>}{onSync && <button className="secondary-button" onClick={() => void onSync()} disabled={syncing}><Cloud size={15} className={syncing ? "spin" : ""} />{syncing ? "同步中" : "同步"}</button>}<button className="secondary-button" onClick={() => void translate()} disabled={translating}><Languages size={15} />{translating ? "翻译中…" : savedTranslation ? "重新翻译" : "翻译"}</button><button className="icon-button raw-close-button" onClick={onClose}><X size={18} /></button></div></header>
-    <div className="drawer-meta"><span>{sourceMeta[task.source].label}</span><span>{task.customer.name}</span><span>{messages.length} 条消息</span></div>
+    <div className="drawer-meta"><span>{sourceMeta[task.source].label}</span><span>{customerDisplayName(task.customer)}</span><span>{messages.length} 条消息</span></div>
     {translationError && <div className="raw-translation-error"><CircleAlert size={14} />{translationError}</div>}
     <div className="raw-chat-scroll">
       {messages.map((message, index) => <div ref={(element) => { messageRefs.current[index] = element; }} className={`raw-message ${message.role} ${highlightedIndex === index ? "flash-highlight" : ""} ${lockedIndex === index ? "locked-highlight" : ""}`} key={`${index}-${message.content.slice(0, 20)}`}>
@@ -1334,6 +1358,7 @@ function RawChatPanel({ task, onClose, onUpdate, onSync, syncing = false, target
 interface SaleSmartlyCustomerOption {
   id: string;
   name: string;
+  remark: string;
   email: string;
   phone: string;
   channel: string;
@@ -1426,6 +1451,7 @@ function NewTaskModal({ onClose, onCreate, onUpdate }: { onClose: () => void; on
     const previewMessages = importPreview?.messages.filter((message) => !selectedConversationKey || message.conversationKey === selectedConversationKey) ?? [];
     const previewCustomerName = previewMessages.find((message) => message.customerName)?.customerName;
     const name = source === "salesmartly" ? selectedCustomer?.name || "SaleSmartly 客户" : customerName || previewCustomerName || "新客户";
+    const displayName = source === "salesmartly" && selectedCustomer ? customerDisplayName(selectedCustomer) : name;
     const normalizedImportConversation = source === "salesmartly" ? conversation : previewMessages.filter((message) => message.role !== "system").map((message) => `${message.time ? `[${message.time}] ` : ""}${message.role === "customer" ? "Customer" : "Sales"}: ${message.content}`).join("\n");
     if (source !== "salesmartly" && batchImport && importPreview && importPreview.detectedConversations.length > 1) {
       const batchTasks = importPreview.detectedConversations.flatMap((key, index) => {
@@ -1463,13 +1489,14 @@ function NewTaskModal({ onClose, onCreate, onUpdate }: { onClose: () => void; on
     }
     const task: CustomerTask = normalizeTask({
       id: `task-${Date.now()}`,
-      name: `${name} · 正在分析`,
+      name: `${displayName} · 正在分析`,
       source,
       status: "analyzing",
       analysisStep: source === "salesmartly" ? "importing" : "analyzing",
       updatedAt: "刚刚",
       customer: {
         name,
+        remark: selectedCustomer?.remark || undefined,
         externalId: selectedCustomer?.id,
         country: selectedCustomer?.country || "待识别",
         owner: "Tina",
@@ -1505,13 +1532,13 @@ function NewTaskModal({ onClose, onCreate, onUpdate }: { onClose: () => void; on
             `SaleSmartly 返回 ${rawCount} 条记录，但均为系统通知或已撤回消息（系统 ${Number(data.systemMessageCount ?? 0)} 条，撤回 ${Number(data.withdrawnMessageCount ?? 0)} 条）。`,
           );
         }
-        workingTask = { ...workingTask, rawConversation: importedConversation, name: `${name} · ${importedMessageCount} 条消息`, analysisStep: "analyzing" };
+        workingTask = { ...workingTask, rawConversation: importedConversation, name: `${displayName} · ${importedMessageCount} 条消息`, analysisStep: "analyzing" };
         onUpdate(workingTask);
       }
       if (!importedConversation.trim()) importedConversation = "Customer: Please send me more information about your product and pricing.";
       workingTask = normalizeTask({
         ...workingTask,
-        name: source === "salesmartly" ? `${name} · ${importedMessageCount} 条消息` : `${name} · 新分析`,
+        name: source === "salesmartly" ? `${displayName} · ${importedMessageCount} 条消息` : `${name} · 新分析`,
         rawConversation: importedConversation,
       });
       await analyzeConcurrently(workingTask, importedConversation, onUpdate);
@@ -1583,7 +1610,7 @@ function NewTaskModal({ onClose, onCreate, onUpdate }: { onClose: () => void; on
       {step === "salesmartly" && <div className="modal-body">
         <label className="form-label">搜索 SaleSmartly 客户</label><div className="salesmartly-search"><label className="search-box large"><Search size={16} /><input value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void searchCustomers(); } }} placeholder="姓名、邮箱、手机号或客户 ID" /></label><button className="secondary-button" onClick={() => void searchCustomers()} disabled={searching}>{searching ? <RefreshCw className="spin" size={15} /> : <Search size={15} />}{searching ? "搜索中" : "搜索"}</button></div>
         <div className={sourceError ? "connection-error" : "connection-ok"}><CircleAlert size={15} />{sourceError || (searching ? "正在连接 SaleSmartly…" : customerTotal == null ? "正在读取客户" : `已连接 SaleSmartly · 共 ${customerTotal} 位客户`)}</div>
-        <div className="customer-options">{customers.map((customer) => <button className={selectedCustomerId === customer.id ? "selected" : ""} key={customer.id} onClick={() => setSelectedCustomerId(customer.id)}><div className="avatar small">{initials(customer.name)}</div><div><strong>{customer.name}</strong><span>{customer.channel}{customer.email ? ` · ${customer.email}` : customer.phone ? ` · ${customer.phone}` : ""}</span><small>{customer.lastMessageAt}</small></div>{selectedCustomerId === customer.id && <Check size={17} />}</button>)}{loadedCustomers && !searching && !sourceError && !customers.length && <div className="empty-customers">没有找到匹配客户，请更换关键词。</div>}</div>
+        <div className="customer-options">{customers.map((customer) => <button className={selectedCustomerId === customer.id ? "selected" : ""} key={customer.id} onClick={() => setSelectedCustomerId(customer.id)}><div className="avatar small">{initials(customer.name)}</div><div><strong>{customerDisplayName(customer)}</strong><span>{customer.channel}{customer.email ? ` · ${customer.email}` : customer.phone ? ` · ${customer.phone}` : ""}</span><small>{customer.lastMessageAt}</small></div>{selectedCustomerId === customer.id && <Check size={17} />}</button>)}{loadedCustomers && !searching && !sourceError && !customers.length && <div className="empty-customers">没有找到匹配客户，请更换关键词。</div>}</div>
       </div>}
       {step === "text" && <div className="modal-body import-smart-body"><label className="form-label">客户名称（可选提示）</label><input className="text-input" value={customerName} onChange={(e) => setCustomerName(e.target.value)} placeholder="例如 James Carter" />{!importPreview ? <><label className="form-label">粘贴聊天记录</label><textarea className="import-textarea" value={conversation} onChange={(e) => { setConversation(e.target.value); setImportPreview(null); }} placeholder="支持 WhatsApp、Messenger、SaleSmartly 或任意带姓名/时间的复制文本" /><p className="field-help">AI 只识别结构，不会翻译、改写或补写原始聊天。</p></> : <ImportPreviewPanel preview={importPreview} selectedConversationKey={selectedConversationKey} onConversationChange={setSelectedConversationKey} onRoleChange={updateSenderRole} batchMode={batchImport} onBatchModeChange={setBatchImport} />}{sourceError && <div className="import-parse-error"><CircleAlert size={14} />{sourceError}</div>}</div>}
       {step === "excel" && <div className="modal-body import-smart-body"><label className="form-label">客户名称（可选提示）</label><input className="text-input" value={customerName} onChange={(e) => setCustomerName(e.target.value)} /><input ref={fileRef} hidden type="file" accept=".xlsx,.xls,.csv" onChange={(e) => void readFile(e.target.files?.[0])} />{!importPreview ? <><button className={`dropzone ${fileName ? "has-file" : ""}`} onClick={() => fileRef.current?.click()}><span><FileSpreadsheet size={28} /></span><strong>{fileName || "点击选择 Excel 或 CSV 文件"}</strong><p>{fileName ? "文件已读取，等待智能识别" : "支持 .xlsx、.xls、.csv，最大 20MB"}</p></button><div className="mapping-preview"><strong>AI 智能映射</strong><span>工作表与会话</span><span>时间与发送人</span><span>客户与销售角色</span><span>消息内容</span></div></> : <ImportPreviewPanel preview={importPreview} selectedConversationKey={selectedConversationKey} onConversationChange={setSelectedConversationKey} onRoleChange={updateSenderRole} batchMode={batchImport} onBatchModeChange={setBatchImport} />}{sourceError && <div className="import-parse-error"><CircleAlert size={14} />{sourceError}</div>}</div>}
