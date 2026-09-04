@@ -5,7 +5,7 @@
 - 三栏客户分析台与可重命名任务
 - SaleSmartly、文本、Excel/CSV 三种来源
 - 结构化客户分析、异议证据、进度清单与 AI 建议
-- 可搜索的思维导图话术库、产品知识库和 AI 翻译
+- AI 搜索与二级菜单话术库、产品知识库和 AI 翻译
 - OpenAI GPT / DeepSeek 双模型服务端适配
 - 无密钥时的演示分析回退
 
@@ -53,14 +53,20 @@ OpenAI 和 DeepSeek 密钥由系统设置页面保存，写入数据库前使用
 
 SaleSmartly 设置支持加密保存 API Token、Project ID，并按官方规则生成 `external-sign`。新建分析任务时可以搜索真实客户、读取指定客户最近的聊天记录并交给 AI 分析；增量消息同步和 webhook 将在后续阶段接入。
 
-## 思维导图话术库
+## 二级菜单话术库
 
-- 旧分类侧栏和正文列表已替换为 React Flow + ELK 的横向节点树；已有话术数据不会删除或改写。
-- “场景路径”支持用 `/` 分层，例如 `建立信任 / 担心被骗 / 首次交易`。同一路径自动合并，空路径进入“未分类”。编辑该字段即可移动话术；现有单层场景保持原名。
-- 搜索覆盖当前状态筛选下的所有话术，包括折叠分支。标题优先于标签/产品/场景，再匹配正文；点击结果展开祖先节点并定位。
-- 点击话术节点阅读，在节点内复制原文、翻译为英语并复制译文。导图按需加载，不参与客户分析。
-- 手机端使用同一数据的折叠树形导航。
+- 顶栏 AI 搜索，左侧菜单，右侧无标题小卡片。无状态筛选、标签栏、统计或固定详情栏。
+- 菜单独立保存在 PostgreSQL 的 `script_menus` 表，最多两级。管理员可通过左侧编辑入口新增、改名、排序、删除；普通员工可浏览、搜索及维护话术，删除话术仍需管理员。
+- 一级菜单汇总其下二级菜单话术；删除菜单及其子菜单时，话术自动转入“未分类”，不删除正文。
+- 首次部署自动将已有场景迁移为菜单；超过两级的路径合并到二级名称，原正文、历史标题等旧字段保留。迁移只运行一次，后续不会重新创建已删除的菜单。
+- 新建和编辑只需正文和所属菜单，不需要话术标题。原文点击复制，长正文可展开；右下角翻译成英语，显示计时，结果附独立复制按钮。
+- AI 搜索使用系统配置的 DeepSeek，覆盖全部菜单，分批读取原文后选择已有话术 ID。服务端核验 ID，结果直接使用数据库原文；模型失败明确报错，不用普通搜索或编写内容冒充。它不参与客户分析。
 
-逻辑测试（Node 22.18+）：`node --experimental-strip-types --test tests/script-map.test.mjs`。
+逻辑测试（Node 22.18+）：`node --experimental-strip-types --test tests/script-library.test.mjs`。
 
-浏览器回归测试：先构建，再用 `AUTH_SECRET='' pnpm exec next start -p 3105 -H 127.0.0.1` 启动隔离的本机测试服务，然后执行 `node tests/script-map-browser.mjs`。测试需要 Playwright 和 Chrome，可通过 `PLAYWRIGHT_MODULE` 指定已有 Playwright 包路径。所有 API 在测试浏览器内拦截为模拟数据，不访问真实话术库。不要对生产服务禁用认证。
+集成测试仅使用专用临时 PostgreSQL：`postgresql://library_test@127.0.0.1:55439/postgres`，绝不能指向生产数据库。
+
+1. 设置测试 `DATABASE_URL` 和 `SETTINGS_ENCRYPTION_KEY=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=`，运行 `node --experimental-strip-types tests/script-library-db.mjs`。
+2. 构建后，以相同环境变量和 `AUTH_SECRET=clientlens-isolated-library-test-secret-2026` 启动 `pnpm exec next start -p 3105 -H 127.0.0.1`。
+3. 运行 `node tests/script-library-browser.mjs`，需要 Playwright 和 Chrome，可通过 `PLAYWRIGHT_MODULE` 指定已有 Playwright 包路径。测试在 3106 端口启动模拟模型，验证真实后端接口和浏览器交互，不调用付费模型。
+4. 测试后关闭临时服务与临时数据库。以上测试密钥禁止用于生产。

@@ -3,6 +3,7 @@ import type { KnowledgeScript, KnowledgeScriptReference } from "./types";
 
 interface ScriptRow {
   id: string;
+  menu_id?: string | null;
   title: string;
   scenario: string;
   products: unknown;
@@ -26,6 +27,7 @@ function stringArray(value: unknown) {
 export function mapScriptRow(row: ScriptRow): KnowledgeScript {
   return {
     id: row.id,
+    menuId: row.menu_id ?? null,
     title: row.title,
     scenario: row.scenario,
     products: stringArray(row.products),

@@ -29,6 +29,7 @@ export interface KnowledgeScriptReference {
 
 export interface KnowledgeScript {
   id: string;
+  menuId?: string | null;
   title: string;
   scenario: string;
   products: string[];
@@ -43,6 +44,13 @@ export interface KnowledgeScript {
   usageCount: number;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface ScriptMenu {
+  id: string;
+  name: string;
+  parentId: string | null;
+  position: number;
 }
 
 export interface ImportPreviewMessage {

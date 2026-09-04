@@ -19,7 +19,8 @@ export async function query<T extends QueryResultRow>(text: string, values: unkn
 export async function ensureSchema() {
   if (!globalForDb.clientLensSchema) {
     globalForDb.clientLensSchema = (async () => {
-      const pool = getPool();
+      const pool = await getPool().connect();
+      try {
       await pool.query(`
         CREATE TABLE IF NOT EXISTS app_users (
           id TEXT PRIMARY KEY,
@@ -88,7 +89,35 @@ export async function ensureSchema() {
         CREATE INDEX IF NOT EXISTS audit_logs_created_at_idx ON audit_logs(created_at DESC);
         CREATE INDEX IF NOT EXISTS auth_attempts_lookup_idx ON auth_attempts(email, ip_address, created_at DESC);
         CREATE INDEX IF NOT EXISTS sales_scripts_status_updated_idx ON sales_scripts(status, updated_at DESC);
+        BEGIN;
+        SELECT pg_advisory_xact_lock(hashtext('clientlens-script-menus-v1'));
+        CREATE TABLE IF NOT EXISTS script_menus (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          parent_id TEXT REFERENCES script_menus(id) ON DELETE CASCADE,
+          position INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS script_menus_sibling_name ON script_menus(COALESCE(parent_id, ''), LOWER(name));
+        ALTER TABLE sales_scripts ADD COLUMN IF NOT EXISTS menu_id TEXT REFERENCES script_menus(id) ON DELETE SET NULL;
+        CREATE INDEX IF NOT EXISTS sales_scripts_menu_idx ON sales_scripts(menu_id);
+        CREATE TEMP TABLE script_menu_import ON COMMIT DROP AS
+          SELECT id, TRIM(parts[1]) AS first_name,
+            TRIM(COALESCE(array_to_string(parts[2:cardinality(parts)], ' / '), '')) AS second_name
+          FROM (SELECT id, regexp_split_to_array(TRIM(scenario), '[[:space:]]*[/＞>→][[:space:]]*') AS parts FROM sales_scripts WHERE TRIM(scenario) <> '') s
+          WHERE NOT EXISTS (SELECT 1 FROM app_settings WHERE key='script_menus_v1');
+        INSERT INTO script_menus(id, name, position)
+          SELECT 'menu-' || md5(LOWER(first_name)), MIN(first_name), 0 FROM script_menu_import WHERE first_name <> '' GROUP BY LOWER(first_name) ON CONFLICT DO NOTHING;
+        INSERT INTO script_menus(id, name, parent_id, position)
+          SELECT 'menu-' || md5(LOWER(first_name) || chr(31) || LOWER(second_name)), MIN(second_name), 'menu-' || md5(LOWER(first_name)), 0
+          FROM script_menu_import WHERE first_name <> '' AND second_name <> '' GROUP BY LOWER(first_name), LOWER(second_name) ON CONFLICT DO NOTHING;
+        UPDATE sales_scripts s SET menu_id = CASE WHEN i.second_name = '' THEN 'menu-' || md5(LOWER(i.first_name))
+          ELSE 'menu-' || md5(LOWER(i.first_name) || chr(31) || LOWER(i.second_name)) END
+          FROM script_menu_import i WHERE s.id=i.id AND i.first_name <> '';
+        INSERT INTO app_settings(key, value) VALUES ('script_menus_v1', 'true'::jsonb) ON CONFLICT DO NOTHING;
+        COMMIT;
       `);
+      } catch (error) { await pool.query("ROLLBACK"); throw error; }
+      finally { pool.release(); }
     })().catch((error) => {
       globalForDb.clientLensSchema = undefined;
       throw error;

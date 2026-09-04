@@ -1,0 +1,106 @@
+// Requires the isolated test DB/server; the model server is a local stub, never a paid API.
+import { createServer } from "node:http";
+import { createRequire } from "node:module";
+import { SignJWT } from "jose";
+import assert from "node:assert/strict";
+const require = createRequire(import.meta.url);
+const { chromium } = require(process.env.PLAYWRIGHT_MODULE || "playwright");
+const secret = new TextEncoder().encode("clientlens-isolated-library-test-secret-2026");
+const token = await new SignJWT({ role: "admin", username: "library-test" }).setProtectedHeader({ alg: "HS256" }).setSubject("library-test-user").setExpirationTime("1h").sign(secret);
+const userToken = await new SignJWT({ role: "user", username: "library-test" }).setProtectedHeader({ alg: "HS256" }).setSubject("library-test-user").setExpirationTime("1h").sign(secret);
+const base = "http://127.0.0.1:3105";
+let malformed = true, searchCalls = 0;
+const model = createServer(async (req, res) => {
+  let raw = ""; for await (const chunk of req) raw += chunk;
+  const body = JSON.parse(raw);
+  let content;
+  if (body.response_format) {
+    searchCalls++;
+    assert.equal(body.response_format.type, "json_object");
+    const data = JSON.parse(body.messages.at(-1).content);
+    if (data.query === "servicefail") { res.writeHead(503); res.end("unavailable"); return; }
+    const match = data.candidates.find((item) => item.content.includes("验证专用话术"));
+    content = malformed ? "not-json" : JSON.stringify({ ids: match ? [match.id, "invented-id", match.id] : [] });
+    malformed = false;
+  } else { await new Promise((resolve) => setTimeout(resolve, 650)); content = "This is the verified test translation."; }
+  res.setHeader("Content-Type", "application/json");
+  res.end(JSON.stringify({ choices: [{ finish_reason: "stop", message: { content } }] }));
+});
+await new Promise((resolve) => model.listen(3106, "127.0.0.1", resolve));
+const call = async (path, method = "GET", body, auth = token) => {
+  const response = await fetch(base + path, { method, headers: { Cookie: `clientlens_session=${auth}`, "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
+  return { status: response.status, data: await response.json() };
+};
+const browser = await chromium.launch({ channel: "chrome", headless: true });
+const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, permissions: ["clipboard-read", "clipboard-write"] });
+await context.addCookies([{ name: "clientlens_session", value: token, url: base }]);
+const page = await context.newPage();
+const errors = []; page.on("pageerror", (error) => errors.push(error.message));
+try {
+  const prior = (await call("/api/knowledge/library")).data;
+  for (const script of prior.scripts.filter((item) => item.content.startsWith("验证专用话术"))) await call("/api/knowledge/library?id=" + script.id, "DELETE");
+  for (const menu of prior.menus.filter((item) => !item.parentId && ["测试信任", "信任建立"].includes(item.name))) await call("/api/knowledge/menus?id=" + menu.id, "DELETE");
+  assert.equal((await call("/api/knowledge/menus", "POST", { name: "forbidden" }, userToken)).status, 403);
+  assert.equal((await call("/api/knowledge/library", "GET", undefined, "")).status, 401);
+  assert.equal((await call("/api/knowledge/menus", "POST", { name: "测试信任", position: -1 })).status, 200);
+  let data = (await call("/api/knowledge/library")).data;
+  const parent = data.menus.find((menu) => menu.name === "测试信任");
+  assert.equal((await call("/api/knowledge/menus", "POST", { name: "担心被骗", parentId: parent.id })).status, 200);
+  data = (await call("/api/knowledge/library")).data;
+  const child = data.menus.find((menu) => menu.parentId === parent.id);
+  assert.equal((await call("/api/knowledge/menus", "POST", { name: "三级不可建", parentId: child.id })).status, 400);
+  assert.equal((await call("/api/knowledge/menus", "POST", { name: "担心被骗", parentId: parent.id })).status, 400);
+  const original = "验证专用话术：可以提供物流参考，帮助客户了解交易流程。";
+  const created = await call("/api/knowledge/library", "POST", { content: original, menuId: child.id });
+  assert.equal(created.status, 200, "no title required");
+  await page.goto(base);
+  await page.getByRole("button", { name: "话术库", exact: true }).click();
+  await page.getByRole("button", { name: "测试信任", exact: true }).click();
+  await page.locator(".library-card").waitFor();
+  assert.equal(await page.locator(".library-card").count(), 1, "root includes child scripts");
+  assert.equal(await page.locator(".library-card h1,.library-card h2,.library-card h3,.library-card header").count(), 0);
+  await page.getByRole("button", { name: "复制话术原文" }).click();
+  assert.equal(await page.evaluate(() => navigator.clipboard.readText()), original);
+  await page.getByRole("button", { name: "翻译", exact: true }).click();
+  await page.locator(".library-loading").waitFor();
+  assert.match(await page.locator(".library-loading").innerText(), /\d+\.\ds/);
+  await page.locator(".library-translation button").waitFor();
+  await page.locator(".library-translation button").click();
+  assert.equal(await page.evaluate(() => navigator.clipboard.readText()), "This is the verified test translation.");
+  await page.getByRole("button", { name: "编辑话术", exact: true }).click();
+  assert.equal(await page.getByRole("dialog").locator("input").count(), 0, "editor has no title input");
+  await page.getByLabel("话术正文", { exact: true }).fill(original + "（已更新）");
+  await page.getByRole("button", { name: "保存话术", exact: true }).click();
+  await page.getByRole("dialog").waitFor({ state: "hidden" });
+  await page.getByRole("button", { name: "未分类", exact: true }).click();
+  await page.getByRole("textbox", { name: "AI 搜索话术" }).fill("客户担心付款后收不到货");
+  await page.getByRole("button", { name: "AI 搜索", exact: true }).click();
+  await page.getByRole("button", { name: "AI 搜索", exact: true }).waitFor();
+  assert.equal(await page.locator(".library-card").count(), 1);
+  assert.match(await page.locator(".library-card").innerText(), /验证专用话术/);
+  assert.equal(searchCalls, 2, "malformed model JSON was retried; unknown IDs filtered");
+  await page.screenshot({ path: "/tmp/clientlens-library-desktop.png" });
+  await page.getByRole("textbox", { name: "AI 搜索话术" }).fill("servicefail");
+  await page.getByRole("button", { name: "AI 搜索", exact: true }).click();
+  await page.locator(".simple-library > .library-error").waitFor();
+  assert.match(await page.locator(".simple-library > .library-error").innerText(), /AI 搜索暂未完成/);
+  await page.getByRole("button", { name: "清空搜索", exact: true }).click();
+  await page.getByRole("button", { name: "管理菜单" }).click();
+  await page.getByRole("button", { name: "编辑菜单 测试信任", exact: true }).click();
+  await page.getByLabel("菜单名称", { exact: true }).fill("信任建立");
+  await page.getByRole("button", { name: "保存菜单", exact: true }).click();
+  await page.getByRole("dialog").waitFor({ state: "hidden" });
+  await page.getByRole("button", { name: "信任建立", exact: true }).waitFor();
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "删除菜单 信任建立", exact: true }).click();
+  await page.getByRole("button", { name: "信任建立", exact: true }).waitFor({ state: "hidden" });
+  await page.locator(".library-original", { hasText: "验证专用话术" }).waitFor();
+  const persisted = (await call("/api/knowledge/library")).data.scripts.find((script) => script.id === created.data.id);
+  assert.equal(persisted.menuId, null); assert.equal(persisted.content, original + "（已更新）");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.screenshot({ path: "/tmp/clientlens-library-mobile.png", fullPage: true });
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+  assert.deepEqual(errors, []);
+  console.log("PASS: real API auth, two-level enforcement, duplicate rejection, no-title save/edit, root filter, original copy, translation timer/copy, model JSON retry/ID validation, AI failure, menu rename/delete preserving scripts, mobile overflow.");
+} catch (error) { await page.screenshot({ path: "/tmp/clientlens-library-failure.png" }); throw error; }
+finally { await browser.close(); await new Promise((resolve) => model.close(resolve)); }

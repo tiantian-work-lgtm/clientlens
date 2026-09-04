@@ -44,7 +44,7 @@ import type { AnalysisModule, AnalysisModuleStatus, BuyingDriver, CommunicationI
 import SettingsManager from "@/app/components/settings-manager";
 import dynamic from "next/dynamic";
 
-const ScriptMindMap = dynamic(() => import("@/app/components/script-mind-map"), { ssr: false, loading: () => <div className="knowledge-empty">正在加载思维导图…</div> });
+const ScriptLibrary = dynamic(() => import("@/app/components/script-library"), { ssr: false, loading: () => <div className="knowledge-empty">正在加载话术库…</div> });
 
 type View = "analysis" | "scripts" | "products" | "translate" | "settings";
 type ImportStep = "source" | SourceType;
@@ -1637,129 +1637,8 @@ function KnowledgeView({ kind, isAdmin }: { kind: "scripts" | "products"; isAdmi
   </section>;
 }
 
-type ScriptDraft = Omit<KnowledgeScript, "id" | "usageCount" | "createdAt" | "updatedAt">;
-const emptyScriptDraft: ScriptDraft = { title: "", scenario: "", products: [], customerRoles: [], triggerText: "", content: "", translation: "", language: "EN", tags: [], status: "draft", priority: 50 };
-
 function ScriptKnowledgeView({ isAdmin }: { isAdmin: boolean }) {
-  const [items, setItems] = useState<KnowledgeScript[]>([]);
-  const [status, setStatus] = useState<"" | "draft" | "published">("");
-  const [copiedKey, setCopiedKey] = useState("");
-  const [translations, setTranslations] = useState<Record<string, string>>({});
-  const [translatingId, setTranslatingId] = useState("");
-  const [translationStartedAt, setTranslationStartedAt] = useState(0);
-  const [translationElapsed, setTranslationElapsed] = useState(0);
-  const [editing, setEditing] = useState<KnowledgeScript | null | "new">(null);
-  const [draft, setDraft] = useState<ScriptDraft>(emptyScriptDraft);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
-
-  const loadScripts = async () => {
-    setLoading(true); setError("");
-    try {
-      const params = new URLSearchParams();
-      if (status) params.set("status", status);
-      const response = await fetch(`/api/knowledge/scripts?${params}`, { cache: "no-store" });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "读取话术失败");
-      setItems(data.scripts ?? []);
-    } catch (loadError) { setError(loadError instanceof Error ? loadError.message : "读取话术失败"); }
-    finally { setLoading(false); }
-  };
-  useEffect(() => { void loadScripts(); }, [status]);
-  useEffect(() => {
-    if (!translatingId || !translationStartedAt) return;
-    const timer = window.setInterval(() => setTranslationElapsed((Date.now() - translationStartedAt) / 1000), 100);
-    return () => window.clearInterval(timer);
-  }, [translatingId, translationStartedAt]);
-
-  const copyText = async (key: string, value: string) => {
-    if (!value.trim()) return;
-    try {
-      await navigator.clipboard.writeText(value);
-      setCopiedKey(key);
-      window.setTimeout(() => setCopiedKey((current) => current === key ? "" : current), 1600);
-    } catch { setError("复制失败，请检查浏览器剪贴板权限。"); }
-  };
-
-  const translateScript = async (script: KnowledgeScript) => {
-    if (translations[script.id] || translatingId) return;
-    setTranslatingId(script.id); setTranslationStartedAt(Date.now()); setTranslationElapsed(0); setError("");
-    try {
-      const response = await fetch("/api/translate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: script.content, sourceLanguage: "Auto detect", targetLanguage: "English", tone: "professional" }) });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "翻译失败");
-      setTranslations((current) => ({ ...current, [script.id]: data.translation || script.translation }));
-    } catch (translationError) {
-      if (script.translation.trim()) setTranslations((current) => ({ ...current, [script.id]: script.translation }));
-      else setError(translationError instanceof Error ? translationError.message : "翻译失败");
-    } finally { setTranslatingId(""); setTranslationStartedAt(0); }
-  };
-
-  const openEditor = (script?: KnowledgeScript) => {
-    setError("");
-    if (!script) { setEditing("new"); setDraft({ ...emptyScriptDraft, products: [], customerRoles: [], tags: [] }); return; }
-    setEditing(script); setDraft({ title: script.title, scenario: script.scenario, products: [...script.products], customerRoles: [...script.customerRoles], triggerText: script.triggerText, content: script.content, translation: script.translation, language: script.language, tags: [...script.tags], status: script.status, priority: script.priority });
-  };
-  const listChange = (key: "products" | "customerRoles" | "tags", value: string) => setDraft((current) => ({ ...current, [key]: value.split(/[,，;；]/).map((item) => item.trim()).filter(Boolean) }));
-  const save = async () => {
-    if (!draft.title.trim() || !draft.content.trim()) { setError("请填写话术标题和正文"); return; }
-    setSaving(true); setError("");
-    try {
-      const isNew = editing === "new";
-      const response = await fetch(isNew ? "/api/knowledge/scripts" : `/api/knowledge/scripts/${(editing as KnowledgeScript).id}`, { method: isNew ? "POST" : "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(draft) });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "保存话术失败");
-      if (editing !== "new" && editing) setTranslations((current) => { const next = { ...current }; delete next[editing.id]; return next; });
-      setEditing(null); await loadScripts();
-    } catch (saveError) { setError(saveError instanceof Error ? saveError.message : "保存话术失败"); }
-    finally { setSaving(false); }
-  };
-  const remove = async () => {
-    if (!isAdmin || !editing || editing === "new" || !window.confirm(`确定删除“${editing.title}”吗？`)) return;
-    setSaving(true); setError("");
-    try {
-      const response = await fetch(`/api/knowledge/scripts/${editing.id}`, { method: "DELETE" });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "删除话术失败");
-      setEditing(null); await loadScripts();
-    } catch (removeError) { setError(removeError instanceof Error ? removeError.message : "删除话术失败"); }
-    finally { setSaving(false); }
-  };
-
-  const renderScriptCard = (row: KnowledgeScript) => {
-          const translated = translations[row.id];
-          const isTranslating = translatingId === row.id;
-          return <article className="script-copy-item" key={row.id}>
-            <header><div><div className="script-card-meta"><span>{row.scenario || "未分类"}</span>{row.tags.slice(0, 3).map((tag) => <span key={tag}>{tag}</span>)}</div></div><div className="script-card-actions"><button onClick={() => void translateScript(row)} disabled={Boolean(translatingId) || Boolean(translated)}>{isTranslating ? <RefreshCw className="spin" size={14} /> : <Languages size={14} />}{isTranslating ? `${translationElapsed.toFixed(1)}s` : translated ? "已翻译" : "翻译成英语"}</button><button aria-label={`编辑 ${row.title}`} onClick={() => openEditor(row)}><Pencil size={14} /></button></div></header>
-            <button className="script-copy-panel original" onClick={() => void copyText(`original-${row.id}`, row.content)}><span><strong>话术内容</strong><small>{copiedKey === `original-${row.id}` ? "已复制" : "点击卡片复制"}</small></span><p>{row.content}</p><Copy size={15} /></button>
-            {(translated || isTranslating) && <button className={`script-copy-panel translation ${isTranslating ? "loading" : ""}`} disabled={isTranslating} onClick={() => void copyText(`translation-${row.id}`, translated || "")}><span><strong>英文翻译</strong><small>{isTranslating ? `${translationElapsed.toFixed(1)}s · 正在翻译` : copiedKey === `translation-${row.id}` ? "已复制" : "点击卡片复制翻译"}</small></span>{isTranslating ? <div className="script-translation-loading"><i /><i /><i /></div> : <p>{translated}</p>}{!isTranslating && <Copy size={15} />}</button>}
-          </article>;
-  };
-
-  return <section className="page-view script-library-view">
-    <div className="page-header"><div><span className="eyebrow">SCRIPT MIND MAP</span><h1>话术库</h1><p>沿场景分支寻找话术，或搜索后直接定位。点击原文与译文即可复制。</p></div><div className="mind-header-actions"><select aria-label="话术状态" className="filter-select" value={status} onChange={(event) => setStatus(event.target.value as typeof status)}><option value="">全部状态</option><option value="published">已发布</option><option value="draft">草稿</option></select><button className="primary-button" onClick={() => openEditor()}><Plus size={17} />新建话术</button></div></div>
-    {error && !editing && <div className="knowledge-error"><CircleAlert size={15} />{error}<button className="secondary-button" onClick={() => void loadScripts()}>重新加载</button></div>}
-    {loading ? <div className="knowledge-empty"><RefreshCw className="spin" size={18} />正在读取话术库…</div> : <ScriptMindMap items={items} renderCard={renderScriptCard} />}
-    {editing && <div className="script-editor-wrap"><div className="overlay" onClick={() => !saving && setEditing(null)} /><section className="script-editor">
-      <header><div><span className="eyebrow">{editing === "new" ? "NEW SCRIPT" : "SCRIPT DETAIL"}</span><h2>{editing === "new" ? "新建话术" : "查看与编辑话术"}</h2><p>话术仅供员工手动查找和复制，不参与客户分析。</p></div><button className="icon-button" onClick={() => setEditing(null)} disabled={saving}><X size={19} /></button></header>
-      <div className="script-editor-body">
-        <label className="script-field wide-field"><span>话术名称 *</span><input value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} placeholder="例如：客户认为价格太高" /></label>
-        <label className="script-field"><span>场景路径（用 / 分层，留空放入未分类）</span><input value={draft.scenario} onChange={(event) => setDraft({ ...draft, scenario: event.target.value })} placeholder="建立信任 / 担心被骗 / 首次交易" /></label>
-        <label className="script-field"><span>关联产品（逗号分隔）</span><input value={draft.products.join("，")} onChange={(event) => listChange("products", event.target.value)} placeholder="通用，Reta" /></label>
-        <label className="script-field"><span>客户角色（逗号分隔）</span><input value={draft.customerRoles.join("，")} onChange={(event) => listChange("customerRoles", event.target.value)} placeholder="新手个人，经销商" /></label>
-        <label className="script-field wide-field"><span>触发条件 / 客户常见说法</span><textarea value={draft.triggerText} onChange={(event) => setDraft({ ...draft, triggerText: event.target.value })} placeholder="客户说价格太高、需要考虑、担心首次付款安全……" /></label>
-        <label className="script-field wide-field"><span>推荐话术原文 *</span><textarea className="script-content-input" value={draft.content} onChange={(event) => setDraft({ ...draft, content: event.target.value })} placeholder="填写销售可以直接参考或改写的话术" /></label>
-        <label className="script-field wide-field"><span>中文核对翻译</span><textarea value={draft.translation} onChange={(event) => setDraft({ ...draft, translation: event.target.value })} placeholder="用于人工检查英文话术含义" /></label>
-        <label className="script-field"><span>标签（逗号分隔）</span><input value={draft.tags.join("，")} onChange={(event) => listChange("tags", event.target.value)} placeholder="价格，信任，首单" /></label>
-        <label className="script-field"><span>语言</span><input value={draft.language} onChange={(event) => setDraft({ ...draft, language: event.target.value })} placeholder="EN" /></label>
-        <label className="script-field"><span>优先级 0–100</span><input type="number" min={0} max={100} value={draft.priority} onChange={(event) => setDraft({ ...draft, priority: Number(event.target.value) })} /></label>
-        <label className="script-field"><span>状态</span><select value={draft.status} onChange={(event) => setDraft({ ...draft, status: event.target.value as ScriptDraft["status"] })}><option value="draft">草稿</option><option value="published">已发布</option></select></label>
-      </div>
-      {error && <div className="script-editor-error"><CircleAlert size={14} />{error}</div>}
-      <footer>{isAdmin && editing !== "new" && <button className="danger-button" onClick={() => void remove()} disabled={saving}><Trash2 size={15} />删除</button>}<span /><button className="secondary-button" onClick={() => setEditing(null)} disabled={saving}>取消</button><button className="primary-button" onClick={() => void save()} disabled={saving}>{saving ? <RefreshCw className="spin" size={15} /> : <Pencil size={15} />}{saving ? "保存中…" : "保存话术"}</button></footer>
-    </section></div>}
-  </section>;
+  return <ScriptLibrary isAdmin={isAdmin} />;
 }
 
 const translationLanguages = [
